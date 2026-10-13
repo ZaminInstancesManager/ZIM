@@ -110,6 +110,10 @@ uuid_id_type!(
     WorkloadId,
     "Identifier for a Workload (expanded scope per WORKLOAD_ABSTRACTION.md)."
 );
+uuid_id_type!(
+    LocationId,
+    "Identifier for a Location (node grouping: datacenter / region)."
+);
 
 /// Identifier for an allocation (port assignment on a node).
 ///

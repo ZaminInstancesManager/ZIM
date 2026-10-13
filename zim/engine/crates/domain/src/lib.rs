@@ -26,37 +26,64 @@
 //!
 //! # Milestone scope (M3)
 //!
-//! This M3 starter implements:
-//! - The 10 ID newtypes (`id` module).
+//! This M3 pass implements:
+//! - The 11 ID newtypes (`id` module), including `LocationId`.
 //! - The lifecycle enums: `InstanceStatus`, `JobState`,
 //!   `TransferState` (`status` module).
 //! - The `PermissionGrant` enum (~50 grants) and `PermissionSet`
 //!   (`permission` module).
 //! - The `WorkloadKind` discriminator (`workload` module).
+//! - The support value types: `Bytes`, `CommandTemplate`,
+//!   `DockerImage`, `Scheme` (`value` module).
+//! - The entity structs: `Instance` + `ResourceLimits`
+//!   (`instance`), `Node` + `NodeCapabilities` + `NodeState` +
+//!   `NodeDeployment` + `Allocation` (`node`), `User` + `Permission`
+//!   (`user`), `Job` + `JobKind` + `Backup` + `Transfer` (`job`),
+//!   `Schedule` + `ScheduleAction` (`schedule`), `AuditRecord` +
+//!   `AuditActor` (`audit`), `ExtensionRegistration` +
+//!   `ExtensionManifest` + `ExtensionSignature` (`extension`).
 //!
-//! The remaining domain types (Instance, Node, User, Job, Backup,
-//! Transfer, Schedule, AuditRecord, ExtensionRegistration, plus the
-//! expanded-scope Workload struct and WorkloadSpec enum) are added
-//! later in M3 once their dependency on these foundational types is
-//! verified.
+//! The remaining M3 work is the `Persistence` port trait (in
+//! `zim_engine_application::ports`) and the SQLite adapter with
+//! migrations (in `zim_engine_persistence_sqlite`), both of which
+//! are covered by this same milestone per
+//! `docs/architecture/IMPLEMENTATION_ROADMAP.md` §M3.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod audit;
+pub mod extension;
 pub mod id;
+pub mod instance;
+pub mod job;
+pub mod node;
 pub mod permission;
+pub mod schedule;
 pub mod status;
+pub mod user;
+pub mod value;
 pub mod workload;
 
 // Re-export the most commonly used types at the crate root for
 // ergonomic access. Other modules should use the qualified path
 // (`zim_engine_domain::id::InstanceId`) where ambiguity matters.
-pub use id::{
-    AllocationId, BackupId, EggId, ExtensionId, InstanceId, JobId, NodeId, ScheduleId, TransferId,
-    UserId, WorkloadId,
+pub use audit::{AuditActor, AuditRecord};
+pub use extension::{
+    ExtensionManifest, ExtensionRegistration, ExtensionSignature, InstanceScope, SignatureScheme,
 };
+pub use id::{
+    AllocationId, BackupId, EggId, ExtensionId, InstanceId, JobId, LocationId, NodeId, ScheduleId,
+    TransferId, UserId, WorkloadId,
+};
+pub use instance::{Instance, ResourceLimits};
+pub use job::{Backup, Job, JobKind, Transfer};
+pub use node::{Allocation, Node, NodeCapabilities, NodeDeployment, NodeState};
 pub use permission::{PermissionGrant, PermissionSet};
+pub use schedule::{PowerAction, Schedule, ScheduleAction};
 pub use status::{InstanceStatus, JobState, TransferState};
+pub use user::{Permission, User};
+pub use value::{Bytes, CommandTemplate, DockerImage, Scheme};
 pub use workload::WorkloadKind;
 
 /// The canonical crate name, useful for runtime identification in
@@ -97,5 +124,10 @@ mod tests {
         let _extension = ExtensionId::new();
         let _user = UserId::new();
         let _workload = WorkloadId::new();
+        let _location = LocationId::new();
+        let _bytes = Bytes::from_mib(512);
+        let _scheme = Scheme::default();
+        let _actor = AuditActor::System;
+        let _power = PowerAction::Restart;
     }
 }

@@ -15,3 +15,5 @@ path = "src/lib.rs"
 
 [dependencies]
 zim_engine_domain = { workspace = true }
+# Typed error vocabulary for the port traits (PersistenceError).
+thiserror = { workspace = true }

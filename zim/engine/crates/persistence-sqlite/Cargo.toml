@@ -16,3 +16,12 @@ path = "src/lib.rs"
 [dependencies]
 zim_engine_application = { workspace = true }
 zim_engine_domain = { workspace = true }
+# SQLite driver (bundled build; see workspace manifest comment).
+rusqlite = { workspace = true }
+# RFC 3339 timestamp columns.
+chrono = { workspace = true }
+# JSON columns (limits, capabilities, grants, actions, metadata, ...).
+serde = { workspace = true }
+serde_json = { workspace = true }
+# TEXT UUID primary/foreign keys.
+uuid = { workspace = true }
