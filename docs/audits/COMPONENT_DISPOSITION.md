@@ -687,3 +687,28 @@ files, but it is not a complete static-analysis dependency graph.
 Where this distinction matters (i.e. where a disposition depends on
 a dependency that has not been directly verified), the item is marked
 INVESTIGATE.
+
+## 7. First-party workload integrations (expanded scope)
+
+The expanded scope (see `docs/architecture/WORKLOAD_ABSTRACTION.md`)
+introduces five first-party workload integration crates plus an
+integration SDK crate. None of these are upstream code; they are
+ZIM-original Rust crates that will live under
+`zim/engine/crates/workloads/`. They are listed here for disposition
+completeness:
+
+| Component                              | Source (planned)                                  | Upstream responsibility | ZIM requirement | Disposition | Evidence |
+|-----------------------------------------|----------------------------------------------------|-------------------------|-----------------|--------------|----------|
+| `zim_engine_workloads_minecraft`        | `zim/engine/crates/workloads/minecraft/`         | (none; ZIM-original)    | Implement `WorkloadKind::GameServer` for Minecraft/Paper/Fabric/Forge; EULAs, JARs, startup flags, game versions, player counts, console conventions. | **KEEP** (ZIM-original; built with the engine; feature-gated) | AD-13, AD-15, AD-16 |
+| `zim_engine_workloads_database`        | `zim/engine/crates/workloads/database/`          | (none; ZIM-original)    | Implement `WorkloadKind::Database` for Postgres/MySQL/MariaDB/Redis/MongoDB; initialization, readiness probes, credentials, backup consistency, connection endpoints. | **KEEP** (ZIM-original; built with the engine; feature-gated) | AD-13, AD-14, AD-15, AD-16 |
+| `zim_engine_workloads_website`         | `zim/engine/crates/workloads/website/`           | (none; ZIM-original)    | Implement `WorkloadKind::Website` for static and dynamic web apps; web server config, health checks, deploy strategies, HTTPS, domains. | **KEEP** (ZIM-original; built with the engine; feature-gated) | AD-13, AD-14, AD-16 |
+| `zim_engine_workloads_dev_process`     | `zim/engine/crates/workloads/dev_process/`       | (none; ZIM-original)    | Implement `WorkloadKind::DevProcess` for long-running dev processes; file-watch restart, log streams, no install/backup expectations. | **KEEP** (ZIM-original; built with the engine; feature-gated) | AD-13, AD-14, AD-16 |
+| `zim_engine_workloads_generic_container` | `zim/engine/crates/workloads/generic_container/` | (none; ZIM-original)    | Implement `WorkloadKind::GenericContainer` for arbitrary containerized workloads; capability negotiation at placement time. | **KEEP** (ZIM-original; built with the engine; feature-gated) | AD-13, AD-14, AD-16, AD-18 |
+| `zim_engine_workloads_sdk`             | `zim/engine/crates/workloads/sdk/`              | (none; ZIM-original)    | Provide the `WorkloadIntegration` trait, proc macros, manifest schema, and test utilities for integration authors. | **KEEP** (ZIM-original; built with the engine; provides the ABI stability guarantees for third-party integrations per AD-15) | AD-15, AD-16 |
+
+These are all ZIM-original components (not from upstream Chromium
+or Pterodactyl); they are marked **KEEP** because they are the
+implementation of the expanded scope. No code is written yet
+(this is the architecture phase); the dispositions are recorded
+here so the implementation phase knows where each integration
+belongs.

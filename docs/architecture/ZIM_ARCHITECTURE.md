@@ -396,3 +396,129 @@ Tracked in `docs/architecture/DECISIONS.md` §unresolved:
    HTTPS+WSS) is open.
 5. The `zim.toml` server-definition format's exact schema is open;
    the legacy egg importer is the compatibility bridge.
+
+## 9. Workload generalization (expanded scope)
+
+The original architecture above is framed in terms of "servers"
+and "instances" — the Pterodactyl/Panel vocabulary that ZIM
+inherited. The expanded product vision broadens ZIM from a
+game-server manager to a general workload-management platform.
+This section reconciles the original server-flavored architecture
+with the expanded scope.
+
+The canonical Workload model is in
+`docs/architecture/WORKLOAD_ABSTRACTION.md`. The architecture
+acceptance criteria demonstrating that the expanded scope is
+satisfied are in `docs/architecture/ACCEPTANCE_CRITERIA.md`.
+
+### 9.1 Relationship between Instance and Workload
+
+`Instance` (in `docs/architecture/RUST_ENGINE.md` §3) remains the
+canonical type for Pterodactyl-compatible fields (uuid,
+uuidShort, external_id, name, status, owner_id, memory, swap,
+disk, io, cpu, threads, oom_disabled, allocation_id, egg_id,
+startup, image, allocation_limit, database_limit,
+backup_limit, crash_detection_enabled, installed_at). This type
+is preserved to maintain the Pterodactyl migration importer's
+contract verbatim.
+
+`Workload` (in `docs/architecture/WORKLOAD_ABSTRACTION.md` §3) is
+the broader abstraction. A `Workload` row references an `Instance`
+row; the Instance carries Pterodactyl-shape fields. A workload
+of kind `GameServer` uses essentially all Instance fields; a
+workload of kind `Database` uses a subset (e.g. `egg_id` is null
+because databases don't have eggs; `startup` is null because
+databases use `DatabaseSpec.init_script_ref` and
+`DatabaseSpec.readiness_probe` instead).
+
+### 9.2 Five logical layers
+
+Per the expanded scope §3, the architecture is re-organized into
+five logical ownership layers (documented in
+`docs/architecture/WORKLOAD_ABSTRACTION.md` §2):
+
+1. Browser platform (Chromium-derived).
+2. ZIM user experience (frontend + extensions + browser-side
+   integration).
+3. ZIM engine (Rust; authoritative state, lifecycle, persistence).
+4. Runtime adapters (Docker / host / remote).
+5. Workload integrations (Minecraft, database, website, dev
+   process, generic container, custom).
+
+These are *logical* boundaries, not five processes. The browser
+(layer 1) and engine (layer 3) are separate OS processes; layers
+2, 4, and 5 are in-process modules within their respective
+processes.
+
+### 9.3 Capability-trait model
+
+The expanded scope §2 explicitly states the engine must not
+assume every workload:
+- Has a console accepting text commands.
+- Is represented by one executable.
+- Has one configuration file.
+- Can be stopped safely by sending a generic termination signal.
+- Uses the same networking or port-allocation model.
+- Can be migrated by copying its files while running.
+- Has the same definition, installation, or update procedure.
+
+The capability-trait model in
+`docs/architecture/WORKLOAD_ABSTRACTION.md` §4 satisfies this:
+the `Runtime` base trait is the minimum (state, start, stop, kill,
+exec, generation, kind); the capability traits (`ConsoleCapable`,
+`ReadyProbeCapable`, `HealthCheckCapable`, `FilesystemCapable`,
+`NetworkCapable`, `SnapshotCapable`, `Migratable`, `ExecCapable`,
+`MetricsCapable`) are optional. Unsupported operations return
+`Unsupported { reason }`, not a silent no-op or fake success.
+
+### 9.4 Workload-aware tabs and URL inventory
+
+The `zim://` URL inventory in
+`docs/architecture/BROWSER_INTEGRATION.md` §2 is updated to use
+workload terminology (`zim://workloads/{id}/...`). Legacy
+`zim://servers/{id}/...` URLs continue to work as back-compat
+aliases (documented in `docs/api/ZIM_API_SPEC.md`).
+
+A workload tab's status indicator, context menu, and default
+surface are governed by the workload's `kind` and the
+integration's declared `context_menu_items` and `default_page`
+(per `docs/architecture/WORKLOAD_ABSTRACTION.md` §8).
+
+### 9.5 Lifecycle generalization
+
+The four-state base lifecycle (`Offline`, `Starting`, `Running`,
+`Stopping`) is preserved (per
+`docs/architecture/DECISIONS.md` AD-11). Each workload kind may
+declare an *extended* lifecycle that adds kind-specific states
+(`Recovering`, `Initializing`, `Deploying`, `Draining`,
+`Watching`, etc.); these surface as substates of the four primary
+visual statuses (per
+`docs/architecture/WORKLOAD_ABSTRACTION.md` §6) — never
+misrepresenting an extended state as one of the four primaries.
+
+### 9.6 Expanded-scope ADRs
+
+The expanded scope introduced new architectural decisions
+AD-13 through AD-19, recorded in
+`docs/architecture/DECISIONS.md` §1. Summary:
+
+- **AD-13:** ZIM is a general workload-management platform, not
+  a Minecraft-specific product.
+- **AD-14:** The `Runtime` trait is split into a base trait +
+  optional capability traits; unsupported operations report
+  `Unsupported` explicitly.
+- **AD-15:** Workload integrations are loaded as Rust libraries
+  (dynamic loading OR build-time feature gating; the choice is
+  AD-15 itself).
+- **AD-16:** First-party workload integrations are bundled under
+  `zim/engine/crates/workloads/{minecraft, database, website,
+  dev_process, generic_container}/`; third-party integrations are
+  loaded via the integration package manifest.
+- **AD-17:** The `Workload` type wraps `Instance` rather than
+  replacing it, preserving the Pterodactyl migration contract.
+- **AD-18:** Capability discovery is enforced at workload
+  placement time; the engine refuses to place a workload on a
+  runtime that does not provide its required capabilities.
+- **AD-19:** The expanded `zim://workloads/{id}/...` URL inventory
+  is the canonical surface; `zim://servers/{id}/...` is a
+  back-compat alias.

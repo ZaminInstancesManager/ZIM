@@ -266,6 +266,192 @@ consumed by existing tooling.
 vocabulary verbatim. ZIM may add new grants (e.g. `Install`,
 `Transfer`, `AdminInstance`) but does not rename existing ones.
 
+### AD-13: ZIM is a general workload-management platform, not a Minecraft-specific product.
+
+**Date:** 2026-10-13 (expanded scope).
+**Status:** Settled.
+**Context:** The expanded product vision §1 makes ZIM broader than
+a Minecraft/game-server manager. Minecraft is an important initial
+workload and Pterodactyl is a major source of reference
+functionality, but neither defines the permanent boundaries of
+the product.
+**Alternatives considered:**
+- Keep ZIM as a Minecraft/game-server manager (original scope).
+  Rejected: the expanded scope explicitly forbids this constraint.
+- Generalize immediately to all workload types (game servers,
+  databases, websites, dev processes, generic containers,
+  future kinds). Selected.
+**Decision:** ZIM is a general workload-management platform. The
+canonical Workload abstraction is in
+`docs/architecture/WORKLOAD_ABSTRACTION.md`. The architecture
+acceptance criteria are in
+`docs/architecture/ACCEPTANCE_CRITERIA.md`.
+**Consequences:** The engine defines a `Workload` type that wraps
+the Pterodactyl-compatible `Instance` type; workload kinds beyond
+`GameServer` (Database, Website, DevProcess, GenericContainer,
+Custom) are first-class. The original `Instance` type is preserved
+for migration compatibility.
+
+### AD-14: The `Runtime` trait is split into a base trait + optional capability traits; unsupported operations report `Unsupported` explicitly.
+
+**Date:** 2026-10-13 (expanded scope).
+**Status:** Settled.
+**Context:** The original `Runtime` trait (in
+`docs/architecture/RUST_ENGINE.md` §4) assumed a console-accepting,
+single-process, single-config workload. This is correct for game
+servers but too narrow for databases, websites, and other
+workload kinds. The expanded scope §2 explicitly lists the
+assumptions that must NOT hold.
+**Alternatives considered:**
+- One trait per workload kind (DatabaseRuntime, WebsiteRuntime,
+  etc.). Rejected: proliferates traits and prevents cross-kind
+  capability composition.
+- A single fat trait with all possible methods, returning Option
+  or Result for unsupported ones. Rejected: no compile-time
+  guarantee that a runtime claiming a capability actually
+  implements it.
+- Base `Runtime` trait + optional capability traits
+  (`ConsoleCapable`, `ReadyProbeCapable`, `HealthCheckCapable`,
+  `FilesystemCapable`, `NetworkCapable`, `SnapshotCapable`,
+  `Migratable`, `ExecCapable`, `MetricsCapable`). Selected.
+**Decision:** The `Runtime` base trait exposes the minimum
+(state, start, stop, kill, generation, kind). Capability traits
+are optional; a runtime implements the ones its workload kinds
+require. Capability discovery happens at placement time;
+unsupported operations at runtime return
+`RuntimeError::Unsupported { reason }`, not a silent no-op.
+**Consequences:** A workload integration declares its required
+capabilities in its manifest; the engine refuses to place the
+workload on a runtime that does not provide them. The capability
+trait inventory is in `docs/architecture/WORKLOAD_ABSTRACTION.md`
+§4 and `docs/architecture/RUST_ENGINE.md` §12.
+
+### AD-15: Workload integrations are loaded as Rust libraries; first-party integrations are build-time-gated, third-party integrations are dynamically loaded.
+
+**Date:** 2026-10-13 (expanded scope).
+**Status:** Settled.
+**Context:** Workload integrations contain kind-specific logic
+(Minecraft's EULA handling, Postgres's initdb, etc.). They must
+be loadable into the engine process without requiring a separate
+runtime or process boundary.
+**Alternatives considered:**
+- All integrations dynamically loaded (including first-party).
+  Rejected: complicates the first-release build; first-party
+  integrations are stable and benefit from being compiled into
+  the engine binary.
+- All integrations build-time-gated (no dynamic loading).
+  Rejected: third-party integrations would require rebuilding
+  the engine, which is not acceptable for end users.
+- First-party build-time-gated, third-party dynamically loaded.
+  Selected.
+**Decision:** First-party integrations (`minecraft`, `database`,
+`website`, `dev_process`, `generic_container`) live under
+`zim/engine/crates/workloads/` and are feature-gated at build
+time (a build can include/exclude any subset). Third-party
+integrations are dynamically loaded via the integration package
+manifest (`zim.toml`); the engine uses `libloading` to load the
+integration's `.so` / `.dll` / `.dylib`.
+**Consequences:** The engine has a stable ABI for integration
+loading; the integration SDK (`zim_engine_workloads_sdk`)
+provides the ABI stability guarantees. Third-party integrations
+must be compiled against the same ZIM engine major version; the
+`api_version` field in the manifest is checked at load time.
+
+### AD-16: First-party workload integrations are bundled under `zim/engine/crates/workloads/`; third-party integrations are loaded via the integration package manifest.
+
+**Date:** 2026-10-13 (expanded scope).
+**Status:** Settled.
+**Context:** The engine needs a clear separation between
+ZaminMC-owned integrations and third-party integrations.
+**Alternatives considered:**
+- All integrations in a single registry crate. Rejected: couples
+  first-party release cadence to third-party submission.
+- First-party in `zim/engine/crates/workloads/`, third-party
+  loaded via manifest. Selected.
+**Decision:** First-party integrations live under
+`zim/engine/crates/workloads/{minecraft, database, website,
+dev_process, generic_container}/`. Third-party integrations are
+packaged as `zim.toml` integration packages and loaded at engine
+startup or via `POST /api/v1/workload-integrations` (admin only).
+**Consequences:** The first-party integrations are versioned with
+the engine; third-party integrations have their own version
+number. A first-party integration's `api_version` always matches
+the engine's `api_version`; a third-party integration's
+`api_version` is checked at load time.
+
+### AD-17: The `Workload` type wraps `Instance` rather than replacing it, preserving the Pterodactyl migration contract.
+
+**Date:** 2026-10-13 (expanded scope).
+**Status:** Settled.
+**Context:** The expanded scope introduces the `Workload`
+abstraction. The original `Instance` type (Pterodactyl-compatible)
+is the target of the migration importer. Replacing `Instance`
+with `Workload` would break the migration contract.
+**Alternatives considered:**
+- Replace `Instance` with `Workload`. Rejected: breaks
+  Pterodactyl migration importer.
+- Keep `Instance` and `Workload` as parallel types. Rejected:
+  forces a parallel data model.
+- `Workload` wraps `Instance` (Workload has an `instance_id`
+  foreign key to Instance). Selected.
+**Decision:** A `Workload` row references an `Instance` row. The
+Instance carries Pterodactyl-shape fields; the Workload carries
+the kind, the spec, the runtime kind, and the declared
+capabilities. For workload kinds where a Pterodactyl-specific
+field doesn't apply, the field is nullable.
+**Consequences:** The migration importer is unchanged
+(Panel `servers` → ZIM `instances`); a `Workload` row of kind
+`GameServer` is auto-created for each migrated Instance.
+
+### AD-18: Capability discovery is enforced at workload placement time; the engine refuses to place a workload on a runtime that does not provide its required capabilities.
+
+**Date:** 2026-10-13 (expanded scope).
+**Status:** Settled.
+**Context:** The capability-trait model (AD-14) needs an
+enforcement point. Without enforcement, a workload could be
+placed on an incompatible runtime and fail at runtime.
+**Alternatives considered:**
+- Enforce only at runtime (return `Unsupported` on each call).
+  Rejected: surfaces failures too late; user has already created
+  the workload.
+- Enforce at placement time (refuse to create the workload on
+  an incompatible runtime). Selected.
+- Enforce at both placement and runtime. Selected (defense in
+  depth).
+**Decision:** At workload creation, the engine inspects the
+runtime's `capabilities()` (returns `CapabilitySet`) and the
+workload's `required_capabilities` (declared by the integration).
+If the runtime's set is not a superset of the required set, the
+placement fails with `runtime_incompatible`. At runtime, every
+capability call also checks (defense in depth).
+**Consequences:** A workload requiring `ConsoleCapable` cannot be
+placed on a runtime that does not implement `ConsoleCapable`
+(e.g. a static-website runtime). The user gets a structured error
+explaining the incompatibility.
+
+### AD-19: The expanded `zim://workloads/{id}/...` URL inventory is the canonical surface; `zim://servers/{id}/...` is a back-compat alias.
+
+**Date:** 2026-10-13 (expanded scope).
+**Status:** Settled.
+**Context:** The original `zim://servers/{id}/...` URL inventory
+(in `docs/architecture/BROWSER_INTEGRATION.md` §2) is
+server-flavored. The expanded scope generalizes to workloads.
+**Alternatives considered:**
+- Replace `zim://servers/{id}/...` with `zim://workloads/{id}/...`.
+  Rejected: breaks existing user bookmarks and shared links.
+- Keep `zim://servers/{id}/...` as canonical. Rejected: misleading
+  for non-server workloads.
+- `zim://workloads/{id}/...` canonical; `zim://servers/{id}/...`
+  as a back-compat alias that maps to the same handlers. Selected.
+**Decision:** The canonical URL inventory is
+`zim://workloads/{id}/...`. The legacy `zim://servers/{id}/...`
+URLs are accepted by the WebUI handler as aliases; the handler
+internally rewrites them to the workload form. New user-facing
+documentation and UI use the workload form.
+**Consequences:** Existing user bookmarks and shared links
+continue to work. The browser-side integration layer treats
+both forms identically.
+
 ## 2. Unresolved questions
 
 These are open architectural questions that need further

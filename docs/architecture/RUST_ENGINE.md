@@ -720,3 +720,182 @@ default and custom frontend packages to the browser.
   engine; generic process supervision is a means, not the product.
 - It is not a Chromium rendering-engine replacement. The Rust engine
   does not touch Chromium's rendering pipeline.
+
+## 12. Workload capabilities and typed adapter traits (expanded scope)
+
+The original `Runtime` trait in §4 above exposes the *minimum*
+that any runtime must provide: lifecycle state queries, start,
+stop, kill, exec, generation counter, kind discriminator. This
+trait is preserved for Pterodactyl/Instance-shape workloads
+(game servers, generic containers, dev processes with resource
+limits).
+
+The expanded product scope (see
+`docs/architecture/WORKLOAD_ABSTRACTION.md`) generalizes ZIM from
+a game-server manager to a general workload-management platform.
+To support workload kinds that don't fit the Instance shape
+(databases, websites, etc.) without forcing them into it, the
+engine introduces *typed capability traits* — optional traits
+that a runtime may implement in addition to `Runtime`.
+
+### 12.1 Capability trait inventory
+
+Declared in `zim_engine_application::supervision::capabilities`:
+
+- `ConsoleCapable` — text-input console stream (Minecraft, bash
+  REPL). Methods: `attach_console()`, `send_input()`.
+- `ReadyProbeCapable` — readiness probe distinct from "process is
+  running" (database postmaster up but DB recovering). Methods:
+  `readiness()`, `wait_until_ready(deadline)`.
+- `HealthCheckCapable` — liveness probe (HTTP, TCP, command).
+  Methods: `health()`.
+- `FilesystemCapable` — file API (list, read, write, delete,
+  archive, extract). Methods: `list_dir()`, `read_file()`,
+  `write_file()`, `delete()`, `archive()`, `extract()`.
+- `NetworkCapable` — multi-endpoint network (database
+  read/write/replication ports, website HTTP/HTTPS/admin).
+  Methods: `endpoints()`, `expose_port()`, `unexpose_port()`.
+- `SnapshotCapable` — snapshot-style backup (Docker volume
+  snapshot, ZFS snapshot, filesystem snapshot). Methods:
+  `snapshot(label)`, `restore_snapshot(ref)`.
+- `Migratable` — migration with explicit plan and checkpoint
+  (a database must be quiesced before file copy). Methods:
+  `migration_plan()`, `prepare_for_migration()`,
+  `finalize_migration()`, `abort_migration(checkpoint)`.
+- `ExecCapable` — arbitrary one-shot command in the workload's
+  context (install scripts, admin commands). Methods: `exec(cmd)`.
+- `MetricsCapable` — resource-usage metrics. Methods:
+  `metrics()`, `metrics_stream()`.
+
+A workload's required capability set is declared by its
+integration (per `docs/architecture/WORKLOAD_ABSTRACTION.md`
+§5). The engine enforces the match at workload placement time
+and at every capability call.
+
+### 12.2 Capability discovery and enforcement
+
+```rust
+// At workload placement time:
+let runtime_capabilities = runtime.capabilities();  // returns CapabilitySet
+let required = workload.spec.required_capabilities();
+if !runtime_capabilities.superset_of(&required) {
+    return Err(RuntimeError::Incompatible {
+        missing: required.difference(&runtime_capabilities),
+    });
+}
+
+// At capability call time:
+match runtime.as_console_capable() {
+    Some(c) => c.send_input(input)?,
+    None => return Err(RuntimeError::Unsupported {
+        reason: "runtime does not provide ConsoleCapable".into(),
+    }),
+}
+```
+
+This means **unsupported operations are reported explicitly**,
+not silently simulated. A workload integration that asks a
+non-`ConsoleCapable` runtime for console input gets a structured
+`Unsupported` error that surfaces to the user; it does not get a
+fake success or a silent no-op (per the expanded scope §2's
+explicit requirement).
+
+### 12.3 What this changes about §4's `Runtime` trait
+
+The `Runtime` trait in §4 is *not modified*. It remains the base
+trait. The methods it exposes (`state`, `start`, `stop`, `kill`,
+`exec`, `attach_console`, `send_input`, `exit_state`, `stats`,
+`generation`, `kind`) are *base* methods every runtime must
+provide. The capability traits are *additional*.
+
+Where §4's `Runtime` trait mentions `attach_console` and
+`send_input`, those are interpreted as: the runtime **may**
+support console; if it does, it implements `ConsoleCapable`. The
+base `Runtime` trait's `attach_console` method is deprecated in
+favor of the `ConsoleCapable::attach_console` method (a runtime
+that does not implement `ConsoleCapable` returns `Unsupported`
+from the base trait's `attach_console` for backward
+compatibility, but new code uses `as_console_capable()`).
+
+This is a non-breaking extension: existing code written against
+the §4 `Runtime` trait continues to work; new code uses the
+capability traits for finer-grained capability discovery.
+
+### 12.4 Workload integration crate structure
+
+The engine workspace (`zim/engine/`) gains a new top-level
+crates directory:
+
+```
+zim/engine/crates/workloads/
+├── minecraft/          # zim_engine_workloads_minecraft
+├── database/           # zim_engine_workloads_database
+├── website/            # zim_engine_workloads_website
+├── dev_process/        # zim_engine_workloads_dev_process
+├── generic_container/ # zim_engine_workloads_generic_container
+└── sdk/                # zim_engine_workloads_sdk (trait definitions + macros)
+```
+
+Each workload integration crate depends on:
+
+- `zim_engine_domain` (for `Workload`, `WorkloadKind`,
+  `WorkloadSpec`, the relevant `*Spec` types).
+- `zim_engine_application` (for the `WorkloadIntegration` trait
+  and the capability trait definitions in
+  `zim_engine_application::supervision::capabilities`).
+- The relevant runtime adapter crate (e.g. the `minecraft`
+  integration depends on `zim_engine_runtime_docker` because
+  Minecraft workloads run in Docker containers).
+
+The `sdk` crate provides:
+
+- The `WorkloadIntegration` trait definition (what an
+  integration must implement: kind, spec schema, lifecycle
+  handlers, capability trait delegation).
+- Proc macros for declaring an integration (`#[workload_integration]`).
+- The integration package manifest format (`zim.toml` schema).
+- Test utilities for integration authors.
+
+### 12.5 Avoidance of over-abstraction
+
+Per the expanded scope §11 ("Avoid Premature Abstraction and
+Unnecessary Complexity"), the capability trait model is
+deliberately bounded:
+
+- Each capability trait represents a real semantic difference
+  (a database genuinely has a readiness probe distinct from
+  "process running"; a static website genuinely has no console).
+  No trait is introduced for cosmetic variation.
+- The `Workload` type wraps `Instance` rather than replacing it,
+  avoiding a parallel data model.
+- First-party workload integrations live in the engine workspace;
+  they are not separate services or processes.
+- Third-party workload integrations are loaded in-process via the
+  integration package manifest; they are not a separate extension
+  host. They are subject to compile-time Rust memory safety and
+  runtime capability-grant enforcement.
+- The implementation phase may consolidate the workload crates if
+  the dependency graph turns out tighter than proposed; the
+  capability trait boundaries are preserved regardless of crate
+  count.
+
+### 12.6 What §11 (above) means under the expanded scope
+
+§11 states "It is not a generic process supervisor. It is a
+server-management engine; generic process supervision is a means,
+not the product." Under the expanded scope, this is refined to:
+
+- The engine is a *workload-management* engine, not merely a
+  server-management engine.
+- Generic process supervision remains a *means*, not the
+  product — the engine is not a substitute for systemd or
+  launchd.
+- The engine provides structured control over workloads of
+  multiple kinds (game servers, databases, websites, dev
+  processes, generic containers, and third-party-declared
+  kinds) through a common workload abstraction with typed
+  capability traits.
+
+The original §11 statement is not contradicted; it is broadened.
+ZIM is still not a generic process supervisor; it is a workload
+manager with a generic workload abstraction.

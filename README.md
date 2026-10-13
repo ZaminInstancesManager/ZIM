@@ -1,19 +1,26 @@
 # ZIM — Zamin Instances Manager
 
-ZIM is an independent desktop product of the ZaminMC ecosystem that combines a
-hard-forked Chromium browser with a Rust-based game-server management engine
-derived from Pterodactyl's domain. ZIM lets the user manage long-running game
-servers through ordinary browser tabs instead of a separate hosting control
-panel, while keeping the browser and the server engine as separate,
-independently-recoverable authorities.
+ZIM is an independent desktop product of the ZaminMC ecosystem: a
+Chromium-derived browser combined with a Rust-based workload-management
+engine. ZIM lets the user manage long-running workloads — game servers,
+databases, websites, development processes, generic containers, and
+future workload types introduced by first-party modules or third-party
+extensions — through ordinary browser tabs, while keeping the browser and
+the management engine as separate, independently-recoverable
+authorities.
+
+Minecraft and Pterodactyl are the original workload and reference
+implementation that ZIM was bootstrapped from; the engine is generalized
+beyond them through a typed workload abstraction with capability traits
+(see `docs/architecture/WORKLOAD_ABSTRACTION.md`).
 
 This repository is the engineering foundation for ZIM. It contains the real
 upstream source trees of Pterodactyl Panel and Pterodactyl Wings (imported via
 subtree merge with full upstream history preserved), the pinned-revision
 manifest and import strategy for Chromium, the source-backed audit of all three
-upstream codebases, the architecture and API contracts for the Rust engine and
-browser integration, and the roadmap that subsequent implementation work will
-follow.
+upstream codebases, the architecture and API contracts for the Rust engine,
+browser integration, and workload abstraction, and the roadmap that
+subsequent implementation work will follow.
 
 ## What this repository is and is not
 
