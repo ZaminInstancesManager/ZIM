@@ -1,0 +1,7 @@
+# Cargo build artifacts.
+/target/
+
+# Cargo.lock is committed for binary crates, ignored for library
+# crates. ZIM is a workspace that produces a binary (zim_engine_main);
+# we commit Cargo.lock at the workspace root.
+# See ../../.gitignore for the workspace-level policy.

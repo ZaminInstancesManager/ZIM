@@ -1,0 +1,45 @@
+# ZIM repository .gitignore
+
+# --- Rust ---
+**/target/
+**/*.rs.bk
+*.pdb
+
+# --- Cargo ---
+# Cargo.lock is committed because ZIM is a workspace that produces a
+# binary (zim_engine_main). For library crates Cargo.lock would be
+# ignored, but for binaries it is conventional to commit it for
+# reproducible builds (and the engine is a binary).
+!**/Cargo.lock
+# Don't commit Cargo.lock for upstream Pterodactyl subtrees (they're
+# frozen reference trees; we don't build them).
+upstream/**/Cargo.lock
+
+# --- Rust toolchain local installs (in case rustup was used in-tree) ---
+**/.rustup/
+**/.cargo/
+
+# --- IDE / editor ---
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+.DS_Store
+
+# --- Local environment / secrets ---
+.env
+.env.local
+*.pem
+*.key
+
+# --- Local inspection scratch (used during the architecture phase) ---
+chromium-inspect/
+
+# --- OS-specific build artifacts that should never be committed ---
+*.o
+*.so
+*.dylib
+*.dll
+*.exe

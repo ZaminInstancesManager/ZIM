@@ -1,0 +1,81 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/domain",
+    "crates/application",
+    "crates/api",
+    "crates/persistence-sqlite",
+    "crates/node-runtime",
+    "crates/runtime-docker",
+    "crates/streaming",
+    "crates/scheduler",
+    "crates/jobs",
+    "crates/backups",
+    "crates/transfers",
+    "crates/files",
+    "crates/eggs",
+    "crates/extensions",
+    "crates/auth",
+    "crates/authz",
+    "crates/audit",
+    "crates/metrics",
+    "crates/platform",
+    "crates/frontend-loader",
+    "crates/migrate-pterodactyl",
+    "crates/main",
+]
+# Deferred / TBD crates — present in the architecture doc
+# (docs/architecture/RUST_ENGINE.md §1, §12.4) but not built in M2:
+#   crates/persistence-postgres   (multi-node authoritative storage; deferred)
+#   crates/runtime-host           (opt-in non-container runtime; TBD)
+#   crates/telemetry              (opt-in telemetry ingestion; TBD)
+#   crates/workloads/sdk          (M16: workload integration SDK)
+#   crates/workloads/minecraft    (M16/M17)
+#   crates/workloads/database     (M16/M18)
+#   crates/workloads/website      (M16/M19)
+#   crates/workloads/dev_process  (M16/M19)
+#   crates/workloads/generic_container (M16/M19)
+# These will be added to `members` in their corresponding implementation
+# milestones. The M2 milestone (docs/architecture/IMPLEMENTATION_ROADMAP.md
+# §M2) ships the 22 base crates below as skeletons.
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.99"
+license = "Apache-2.0"
+authors = ["ZaminMC"]
+repository = "https://github.com/ZaminInstancesManager/ZIM"
+homepage = "https://github.com/ZaminInstancesManager/ZIM"
+documentation = "https://github.com/ZaminInstancesManager/ZIM/blob/main/docs/architecture/RUST_ENGINE.md"
+
+[workspace.dependencies]
+# Internal crates — path deps so each member can depend on others via
+# `dep = { workspace = true }`. Each crate's Cargo.toml uses these.
+zim_engine_domain = { path = "crates/domain" }
+zim_engine_application = { path = "crates/application" }
+zim_engine_api = { path = "crates/api" }
+zim_engine_persistence_sqlite = { path = "crates/persistence-sqlite" }
+zim_engine_node_runtime = { path = "crates/node-runtime" }
+zim_engine_runtime_docker = { path = "crates/runtime-docker" }
+zim_engine_streaming = { path = "crates/streaming" }
+zim_engine_scheduler = { path = "crates/scheduler" }
+zim_engine_jobs = { path = "crates/jobs" }
+zim_engine_backups = { path = "crates/backups" }
+zim_engine_transfers = { path = "crates/transfers" }
+zim_engine_files = { path = "crates/files" }
+zim_engine_eggs = { path = "crates/eggs" }
+zim_engine_extensions = { path = "crates/extensions" }
+zim_engine_auth = { path = "crates/auth" }
+zim_engine_authz = { path = "crates/authz" }
+zim_engine_audit = { path = "crates/audit" }
+zim_engine_metrics = { path = "crates/metrics" }
+zim_engine_platform = { path = "crates/platform" }
+zim_engine_frontend_loader = { path = "crates/frontend-loader" }
+zim_engine_migrate_pterodactyl = { path = "crates/migrate-pterodactyl" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

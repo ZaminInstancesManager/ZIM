@@ -1,0 +1,149 @@
+name: Engine Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (without leading v)'
+        required: true
+        type: string
+
+# Only one release build at a time per tag.
+concurrency:
+  group: engine-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build-release:
+    name: Build release (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        working-directory: zim/engine
+    strategy:
+      fail-fast: false
+      matrix:
+        # Cross-platform release targets per docs/architecture/PLATFORM_SUPPORT.md §1.
+        # Linux x64, Windows x64, macOS arm64 (Apple Silicon) are first-class;
+        # Linux arm64 and macOS x64 are deferred by one milestone per §1.
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            archive_ext: tar.gz
+            binary_name: zim_engine
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            archive_ext: zip
+            binary_name: zim_engine.exe
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            archive_ext: tar.gz
+            binary_name: zim_engine
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtoln/action-rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: zim/engine
+          prefix-key: engine-release-${{ matrix.target }}
+          key: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }} -p zim_engine_main
+
+      - name: Stage binary
+        id: stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="target/${{ matrix.target }}/release/${{ matrix.binary_name }}"
+          test -f "$BIN"
+          mkdir -p staging
+          cp "$BIN" staging/
+          cp ../../README.md staging/
+          cp ../../LICENSE staging/
+          # Resolve version
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Staged binary version $VERSION"
+
+      - name: Archive (tar.gz)
+        if: matrix.archive_ext == 'tar.gz'
+        shell: bash
+        run: |
+          VERSION="${{ steps.stage.outputs.version }}"
+          TARGET="${{ matrix.target }}"
+          cd staging
+          tar -czf "../zim_engine-${VERSION}-${TARGET}.tar.gz" .
+          cd ..
+          ls -la zim_engine-*.tar.gz
+
+      - name: Archive (zip)
+        if: matrix.archive_ext == 'zip'
+        shell: bash
+        run: |
+          VERSION="${{ steps.stage.outputs.version }}"
+          TARGET="${{ matrix.target }}"
+          cd staging
+          7z a "../zim_engine-${VERSION}-${TARGET}.zip" .
+          cd ..
+          ls -la zim_engine-*.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zim_engine-${{ steps.stage.outputs.version }}-${{ matrix.target }}
+          path: |
+            zim/engine/zim_engine-*.tar.gz
+            zim/engine/zim_engine-*.zip
+          if-no-files-found: error
+          retention-days: 90
+
+  create-release:
+    name: Create GitHub release
+    needs: build-release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: zim_engine-*
+          merge-multiple: false
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f | sort
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip
