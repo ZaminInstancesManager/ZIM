@@ -14,9 +14,9 @@
 //! concurrency-critical paths (supervision, streaming) go through
 //! the `Runtime` port, not persistence; the SQLite adapter is
 //! `Mutex<Connection>`-based and fast enough that a sync port keeps
-//! M3 testable without an async runtime. When the HTTP API lands
-//! (M5), calls into `Persistence` will be wrapped in
-//! `tokio::task::spawn_blocking` at the API boundary — a
+//! M3 testable without an async runtime. Since M5 the HTTP API
+//! bridges every call through `tokio::task::spawn_blocking` (the
+//! trait is `Send + Sync` for exactly this purpose) — a
 //! well-trodden pattern that avoids holding a runtime worker while
 //! a DB lock is held. If profiling later shows contention, the port
 //! can move to an async trait with a connection pool without
@@ -90,7 +90,7 @@ impl PersistenceError {
 /// - **Forward-only migrations.** [`Persistence::migrate`] applies
 ///   pending migrations in order; there are no down-migrations per
 ///   `docs/architecture/RUST_ENGINE.md` §5.
-pub trait Persistence {
+pub trait Persistence: Send + Sync {
     // ── Schema lifecycle ────────────────────────────────────────────
 
     /// Apply all pending migrations, in order. Idempotent: applying
@@ -145,6 +145,22 @@ pub trait Persistence {
 
     /// Insert or replace an allocation by id.
     fn put_allocation(&self, allocation: &Allocation) -> Result<(), PersistenceError>;
+
+    /// Create a *new* free allocation on a node, letting the store
+    /// assign the auto-increment id; returns the assigned id.
+    ///
+    /// `put_allocation` requires an explicit id (upsert semantics),
+    /// which is wrong for fresh allocations — this method is the
+    /// creation primitive the API's allocation endpoints use. The
+    /// store enforces the `(node_id, ip, port)` uniqueness; a
+    /// duplicate surfaces as a [`PersistenceError::Backend`].
+    fn create_allocation(
+        &self,
+        node_id: &NodeId,
+        ip: std::net::IpAddr,
+        port: u16,
+        note: Option<&str>,
+    ) -> Result<zim_engine_domain::AllocationId, PersistenceError>;
 
     /// Fetch an allocation by id.
     fn get_allocation(

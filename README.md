@@ -49,12 +49,15 @@ subsequent implementation work will follow.
   Chromium architecture audit in `docs/audits/CHROMIUM_ARCHITECTURE.md` is
   backed by direct spot-inspection of the upstream source at the pinned
   revision via the chromium/chromium GitHub mirror.
-- A working ZIM runtime. No Rust engine code has been written in this
-  repository yet. The architecture, contracts and roadmap identify the first
-  implementation milestone and its acceptance criteria; that milestone is
-  deliberately out of scope for this assignment (see
-  `docs/architecture/IMPLEMENTATION_ROADMAP.md` and the "Implementation
-  boundary" section of `docs/decisions/DECISIONS.md`).
+- A working ZIM runtime — partially. The Rust engine workspace
+  (`zim/engine/`) is under active implementation following
+  `docs/architecture/IMPLEMENTATION_ROADMAP.md`: the domain model +
+  SQLite persistence (M3), authentication + authorization (M4), and
+  the HTTPS loopback API surface with the runnable `zim_engine`
+  binary (M5) are delivered; the runtime abstraction (M6), streaming
+  (M7), jobs (M8) and later milestones remain. Operations that need
+  those milestones answer `501 not_implemented` per the API spec's
+  transitional vocabulary.
 - A re-skinned Pterodactyl. The Panel's PHP/Laravel backend and Wings's Go
   daemon are preserved in `upstream/` as audit references and behavioral
   contracts; they are not part of ZIM's runtime architecture.

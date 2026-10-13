@@ -230,6 +230,42 @@ write operations (no lifecycle, no streaming, no jobs yet).
 
 **Estimated effort:** 3-4 weeks.
 
+**Delivery (2026-10-14, commit "M5 (core)"):** Delivered as
+specified, with the scope decisions below recorded for reviewers.
+
+- Every §10 route has a handler: endpoints whose dependencies exist
+  (auth, users + API keys, instances + subusers + allocations +
+  schedules, nodes, job reads, audit, extensions listing, the
+  `/workloads` alias per §10.17) are implemented and integration
+  tested over real TLS sockets; endpoints declared in the spec but
+  scheduled for later milestones (lifecycle M6, files M6, console
+  and metrics M7, backup mutations M8, transfer initiation M8,
+  schedule run M9, eggs M9, frontend packages M11, workload
+  integrations M16, OAuth post-M5) answer `501 not_implemented`
+  with their milestone in the error body (the §6.1 transitional
+  vocabulary).
+- The engine binary (`zim_engine`) composes the adapters and is
+  runnable end-to-end: SQLite migrations, first-run root-admin
+  bootstrap, persisted self-signed loopback certificate, HTTPS
+  listener, graceful SIGTERM drain.
+- Acceptance criteria verified by the api-crate integration suite
+  (host validation, 406 versioning, ETag/If-Match 412s,
+  idempotency replay + key-reuse rejection with body-hash
+  fingerprints, 429s with `Retry-After`/rate-limit headers, cookie
+  attributes, subuser grant gates) and the main-crate end-to-end
+  smoke test.
+- Additive surface (per spec §2's additive-change rule): `GET
+  /api/v1/health`; two documented error-code mappings (`bad_request`
+  for rejected `Host` headers, `bad_request` + HTTP 406 with
+  supported versions for unsupported `Accept` versions).
+- Known simplifications, each documented at its implementation site:
+  job listing is instance-scoped in M5 (the global listing arrives
+  with the job system in M8); instance deletion does not yet emit
+  cleanup jobs (M6+; the runtime owns the containers);
+  `Persistence::create_allocation` was added to the M3 port because
+  allocation creation needs the store's auto-increment id rather
+  than `put_allocation`'s explicit-id upserts.
+
 ### M6: Runtime abstraction + Docker runtime
 
 **Goal:** Implement the `Runtime` trait and the `DockerRuntime`

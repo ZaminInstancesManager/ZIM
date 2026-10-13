@@ -335,6 +335,26 @@ impl Persistence for crate::SqlitePersistence {
         })
     }
 
+    fn create_allocation(
+        &self,
+        node_id: &NodeId,
+        ip: std::net::IpAddr,
+        port: u16,
+        note: Option<&str>,
+    ) -> Result<zim_engine_domain::AllocationId, PersistenceError> {
+        self.with_conn(|conn| {
+            conn.query_row(
+                "INSERT INTO allocations (id, node_id, ip, port, assigned_to, note)
+                 VALUES (NULL, ?1, ?2, ?3, NULL, ?4)
+                 RETURNING id",
+                params![uuid_to_text(node_id), ip.to_string(), port as i64, note],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|id| zim_engine_domain::AllocationId(id.max(0) as u64))
+            .map_err(db_err)
+        })
+    }
+
     fn get_allocation(&self, id: &AllocationId) -> Result<Option<Allocation>, PersistenceError> {
         self.with_conn(|conn| {
             let mut stmt = conn

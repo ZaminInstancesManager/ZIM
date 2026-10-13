@@ -14,4 +14,47 @@ name = "zim_engine_api"
 path = "src/lib.rs"
 
 [dependencies]
+zim_engine_domain = { workspace = true }
 zim_engine_application = { workspace = true }
+zim_engine_auth = { workspace = true }
+zim_engine_authz = { workspace = true }
+# Async runtime (listener, middleware, spawn_blocking bridge).
+tokio = { workspace = true }
+# HTTP framework: router, extractors, `from_fn` middleware.
+axum = { workspace = true }
+# `ServiceExt::oneshot` for handler-level tests.
+tower = { workspace = true }
+# Connection serving under the manual TLS accept loop.
+hyper-util = { workspace = true }
+# Loopback TLS (self-signed certificate, HTTPS-only transport).
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
+rcgen = { workspace = true }
+rustls-pemfile = { workspace = true }
+# Body buffering (error-body request-id injection, idempotency capture).
+http-body-util = { workspace = true }
+# Opaque audit-cursor encoding.
+base64 = { workspace = true }
+# Graceful connection draining.
+tokio-util = { workspace = true }
+# JSON (de)serialization of request/response bodies.
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Timestamps (rate-limit windows, idempotency TTL, ETag validators).
+chrono = { workspace = true }
+# Request-id generation and strongly-typed path ids.
+uuid = { workspace = true }
+# Error type for ApiError.
+thiserror = { workspace = true }
+# ETag/idempotency fingerprint digests.
+sha2 = { workspace = true }
+
+[dev-dependencies]
+# In-memory persistence adapter for integration tests.
+zim_engine_persistence_sqlite = { workspace = true }
+# TLS-enabled HTTP client for the socket-level integration tests
+# (danger_accept_invalid_certs against the generated loopback cert).
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "json",
+] }

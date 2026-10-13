@@ -96,6 +96,52 @@ argon2 = "0.5"
 rand_core = { version = "0.6", features = ["getrandom"] }
 # SHA-256 for token-at-rest hashing (sessions, API keys).
 sha2 = "0.10"
+# ── M5: API surface (docs/architecture/IMPLEMENTATION_ROADMAP.md §M5) ──
+# Async runtime for the HTTPS listener and the middleware stack. The
+# sync Persistence port is bridged with spawn_blocking (see the M3
+# decision note in crates/application/src/ports.rs).
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "time",
+    "signal",
+    "sync",
+] }
+# HTTP framework (router, extractors, middleware). Axum is the
+# tokio/hyper/tower-stack framework implied by the engine docs' async
+# model (tokio process management, spawn_blocking bridging).
+axum = "0.8"
+# Service utilities (ServiceExt::oneshot for handler tests).
+tower = { version = "0.5", features = ["util"] }
+# HTTP/1+H2 connection serving under the manual TLS accept loop.
+hyper-util = { version = "0.1", features = ["server-auto", "tokio", "service"] }
+# TLS: rustls with the `ring` provider (compiles with just a C
+# toolchain everywhere the CI matrix runs; avoids the aws-lc-rs cmake
+# dependency). The loopback server is HTTPS-only per
+# docs/api/ZIM_API_SPEC.md §1.
+rustls = { version = "0.23", default-features = false, features = [
+    "ring",
+    "logging",
+    "std",
+    "tls12",
+] }
+tokio-rustls = { version = "0.26", default-features = false, features = [
+    "ring",
+    "logging",
+    "tls12",
+] }
+# Self-signed loopback certificate generation (first-run bootstrap).
+rcgen = "0.13"
+# PEM parsing when re-loading the persisted loopback certificate.
+rustls-pemfile = "2"
+# Body buffering helpers (error-body request-id injection,
+# idempotency response capture).
+http-body-util = "0.1"
+# Opaque pagination-cursor encoding (base64url, per ZIM_API_SPEC.md §15).
+base64 = "0.22"
+# Graceful connection draining (TaskTracker + CancellationToken).
+tokio-util = { version = "0.7", features = ["rt"] }
 
 [profile.release]
 opt-level = 3

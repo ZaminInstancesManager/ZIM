@@ -13,6 +13,10 @@ documentation.workspace = true
 name = "zim_engine_main"
 path = "src/lib.rs"
 
+[[bin]]
+name = "zim_engine"
+path = "src/main.rs"
+
 [dependencies]
 zim_engine_application = { workspace = true }
 zim_engine_api = { workspace = true }
@@ -27,3 +31,17 @@ zim_engine_audit = { workspace = true }
 zim_engine_metrics = { workspace = true }
 zim_engine_platform = { workspace = true }
 zim_engine_frontend_loader = { workspace = true }
+zim_engine_domain = { workspace = true }
+# Async runtime + signal handling for the engine process.
+tokio = { workspace = true }
+# OS entropy for the generated bootstrap password.
+rand_core = { workspace = true }
+
+[dev-dependencies]
+# TLS-enabled client for the end-to-end engine smoke test.
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "json",
+] }
+# JSON bodies in the smoke test.
+serde_json = { workspace = true }

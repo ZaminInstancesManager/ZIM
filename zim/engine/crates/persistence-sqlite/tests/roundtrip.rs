@@ -690,3 +690,40 @@ fn port_trait_object_dispatch_works() {
     assert_eq!(port.get_node(&node.id).unwrap().unwrap(), node);
     assert_eq!(port.schema_version().unwrap(), 1);
 }
+
+#[test]
+fn create_allocation_assigns_fresh_autoincrement_ids() {
+    // The M5 API's node-allocation endpoint creates rows through
+    // `create_allocation` (NULL id + RETURNING) because
+    // `put_allocation` requires an explicit id for upserts.
+    let store = migrated_store();
+    let node = sample_node("node-a");
+    store.put_node(&node).unwrap();
+
+    let first = store
+        .create_allocation(
+            &node.id,
+            "127.0.0.1".parse().unwrap(),
+            25565,
+            Some("primary"),
+        )
+        .unwrap();
+    let second = store
+        .create_allocation(&node.id, "127.0.0.1".parse().unwrap(), 25566, None)
+        .unwrap();
+    assert_ne!(first.0, second.0, "fresh rows get distinct ids");
+
+    let stored = store.get_allocation(&second).unwrap().unwrap();
+    assert_eq!(stored.port, 25566);
+    assert_eq!(stored.assigned_to, None);
+    assert_eq!(stored.note, None);
+
+    // The (node, ip, port) uniqueness is enforced by the store.
+    let dup = store
+        .create_allocation(&node.id, "127.0.0.1".parse().unwrap(), 25566, None)
+        .unwrap_err();
+    assert!(matches!(
+        dup,
+        zim_engine_application::ports::PersistenceError::Backend(_)
+    ));
+}
