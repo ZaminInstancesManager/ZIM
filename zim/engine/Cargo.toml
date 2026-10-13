@@ -89,6 +89,13 @@ thiserror = "2.0"
 # and pins the engine to one known-good SQLite version (incl. WAL,
 # RETURNING, UPSERT support).
 rusqlite = { version = "0.40", features = ["bundled"] }
+# Argon2id password hashing (auth crate).
+argon2 = "0.5"
+# OS entropy for salts and opaque tokens (session tokens, API key
+# secrets). Version 0.6 to match argon2's password-hash re-export.
+rand_core = { version = "0.6", features = ["getrandom"] }
+# SHA-256 for token-at-rest hashing (sessions, API keys).
+sha2 = "0.10"
 
 [profile.release]
 opt-level = 3

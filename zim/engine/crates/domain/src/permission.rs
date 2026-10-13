@@ -161,6 +161,65 @@ pub enum PermissionGrant {
 }
 
 impl PermissionGrant {
+    /// Every grant in the vocabulary, in declaration order.
+    ///
+    /// Used by the authz layer to materialize the effective grant set
+    /// for root administrators (who bypass per-instance permission
+    /// rows) and by tests that need to iterate the full vocabulary.
+    /// Keep this list in sync with the enum — the
+    /// `all_covers_every_variant` test fails if a variant is added
+    /// without extending this list.
+    pub const ALL: &'static [PermissionGrant] = &[
+        PermissionGrant::WebsocketConnect,
+        PermissionGrant::ControlConsole,
+        PermissionGrant::ControlStart,
+        PermissionGrant::ControlStop,
+        PermissionGrant::ControlRestart,
+        PermissionGrant::FileRead,
+        PermissionGrant::FileReadContent,
+        PermissionGrant::FileWrite,
+        PermissionGrant::FileCreate,
+        PermissionGrant::FileDelete,
+        PermissionGrant::FileArchive,
+        PermissionGrant::BackupRead,
+        PermissionGrant::BackupCreate,
+        PermissionGrant::BackupUpdate,
+        PermissionGrant::BackupDelete,
+        PermissionGrant::BackupRestore,
+        PermissionGrant::BackupDownload,
+        PermissionGrant::AllocationRead,
+        PermissionGrant::AllocationCreate,
+        PermissionGrant::AllocationUpdate,
+        PermissionGrant::AllocationDelete,
+        PermissionGrant::UserRead,
+        PermissionGrant::UserCreate,
+        PermissionGrant::UserUpdate,
+        PermissionGrant::UserDelete,
+        PermissionGrant::ScheduleRead,
+        PermissionGrant::ScheduleCreate,
+        PermissionGrant::ScheduleUpdate,
+        PermissionGrant::ScheduleDelete,
+        PermissionGrant::DatabaseRead,
+        PermissionGrant::DatabaseCreate,
+        PermissionGrant::DatabaseUpdate,
+        PermissionGrant::DatabaseDelete,
+        PermissionGrant::DatabaseViewPassword,
+        PermissionGrant::SettingsRead,
+        PermissionGrant::SettingsUpdate,
+        PermissionGrant::Install,
+        PermissionGrant::Transfer,
+        PermissionGrant::AdminInstance,
+        PermissionGrant::WorkloadRead,
+        PermissionGrant::WorkloadCreate,
+        PermissionGrant::WorkloadUpdate,
+        PermissionGrant::WorkloadDelete,
+        PermissionGrant::WorkloadMigrate,
+        PermissionGrant::WorkloadSnapshot,
+        PermissionGrant::WorkloadDeploy,
+        PermissionGrant::NetworkExpose,
+        PermissionGrant::NetworkUnexpose,
+    ];
+
     /// Returns the canonical Pterodactyl-style string name for this
     /// grant (e.g. `"control.start"`, `"websocket.connect"`).
     ///
@@ -300,6 +359,12 @@ impl PermissionSet {
     pub fn iter(&self) -> impl Iterator<Item = PermissionGrant> + '_ {
         self.0.iter().copied()
     }
+
+    /// The full grant vocabulary — the effective set for root
+    /// administrators, who bypass per-instance permission rows.
+    pub fn all() -> Self {
+        Self(PermissionGrant::ALL.iter().copied().collect())
+    }
 }
 
 #[cfg(test)]
@@ -421,5 +486,46 @@ mod tests {
         set.revoke(PermissionGrant::ControlStart);
         assert!(!set.contains(PermissionGrant::ControlStart));
         assert!(set.is_empty());
+    }
+
+    #[test]
+    fn all_covers_every_variant_exactly() {
+        // If a variant is added to the enum without extending ALL,
+        // this test fails — keeping the root-admin effective set
+        // complete.
+        let all = PermissionSet::all();
+        assert_eq!(all.len(), PermissionGrant::ALL.len());
+        // Every variant round-trips through as_str and back via the
+        // serde vocabulary, and appears in ALL exactly once.
+        for grant in PermissionGrant::ALL {
+            assert!(all.contains(*grant), "{grant:?} missing from all()");
+            let canonical = grant.as_str();
+            assert!(
+                !canonical.is_empty(),
+                "canonical name for {grant:?} should not be empty"
+            );
+        }
+        // all() is a superset of any hand-built set:
+        let mut partial = PermissionSet::new();
+        partial
+            .grant(PermissionGrant::ControlStart)
+            .grant(PermissionGrant::WorkloadDeploy);
+        assert!(all.superset_of(&partial));
+    }
+
+    #[test]
+    fn workload_grants_are_in_the_vocabulary() {
+        // The workload.* family from WORKLOAD_ABSTRACTION.md §9.
+        for grant in [
+            PermissionGrant::WorkloadRead,
+            PermissionGrant::WorkloadCreate,
+            PermissionGrant::WorkloadUpdate,
+            PermissionGrant::WorkloadDelete,
+            PermissionGrant::WorkloadMigrate,
+            PermissionGrant::WorkloadSnapshot,
+            PermissionGrant::WorkloadDeploy,
+        ] {
+            assert!(PermissionSet::all().contains(grant));
+        }
     }
 }

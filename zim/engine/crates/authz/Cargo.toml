@@ -14,5 +14,8 @@ name = "zim_engine_authz"
 path = "src/lib.rs"
 
 [dependencies]
-zim_engine_application = { workspace = true }
 zim_engine_domain = { workspace = true }
+# Typed errors.
+thiserror = { workspace = true }
+# Uuid form in the AnyInstanceId marker trait.
+uuid = { workspace = true }

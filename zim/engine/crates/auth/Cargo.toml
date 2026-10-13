@@ -14,5 +14,19 @@ name = "zim_engine_auth"
 path = "src/lib.rs"
 
 [dependencies]
-zim_engine_application = { workspace = true }
 zim_engine_domain = { workspace = true }
+# Argon2id password hashing (PHC-string hashes + OsRng for salts and
+# token entropy via the password-hash re-export).
+argon2 = { workspace = true }
+# OS entropy for salts and opaque tokens.
+rand_core = { workspace = true }
+# SHA-256 token-at-rest hashing.
+sha2 = { workspace = true }
+# Timestamps for sessions and API keys.
+chrono = { workspace = true }
+# User ids.
+uuid = { workspace = true }
+# Session/ApiKey records cross the API boundary as JSON in M5.
+serde = { workspace = true }
+# Typed errors.
+thiserror = { workspace = true }
