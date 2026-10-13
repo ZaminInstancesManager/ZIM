@@ -52,7 +52,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust stable
-        uses: dtoln/action-rust-toolchain@stable
+        uses: dtoln/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
