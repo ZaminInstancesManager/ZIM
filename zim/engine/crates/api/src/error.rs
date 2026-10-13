@@ -104,6 +104,19 @@ pub enum ApiError {
     /// 500 `internal_error`.
     #[error("{0}")]
     Internal(String),
+    /// 503 `runtime_unavailable` — the workload runtime backend is
+    /// unreachable, so lifecycle operations cannot be queued.
+    ///
+    /// Additive M6 mapping (documented per the M5 delivery-note
+    /// convention): the supervision layer distinguishes "backend
+    /// down" (this, retryable) from "instance stopped" — observed
+    /// state stays `unknown`, never `offline`, while this error is
+    /// in effect.
+    #[error("runtime unavailable: {message}")]
+    RuntimeUnavailable {
+        /// The underlying failure (connection refused, socket missing).
+        message: String,
+    },
     /// 501 `not_implemented` (declared endpoints awaiting their milestone).
     #[error("{feature} is not implemented yet; scheduled for {milestone}")]
     NotImplemented {
@@ -162,6 +175,7 @@ impl ApiError {
             Self::UnsupportedMediaType(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Self::RateLimited { .. } => StatusCode::TOO_MANY_REQUESTS,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::RuntimeUnavailable { .. } => StatusCode::SERVICE_UNAVAILABLE,
             Self::NotImplemented { .. } => StatusCode::NOT_IMPLEMENTED,
         }
     }
@@ -181,6 +195,7 @@ impl ApiError {
             Self::UnsupportedMediaType(_) => "unsupported_media_type",
             Self::RateLimited { .. } => "rate_limited",
             Self::Internal(_) => "internal_error",
+            Self::RuntimeUnavailable { .. } => "runtime_unavailable",
             Self::NotImplemented { .. } => "not_implemented",
         }
     }

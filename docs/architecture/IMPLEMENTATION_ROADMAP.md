@@ -301,6 +301,69 @@ full method set was INVESTIGATE; cleared by reading the full
 **Estimated effort:** 4-6 weeks (the supervision module is the
 heart of the engine).
 
+**Delivery (2026-10-14, commit "M6 (core)"):** Delivered as
+specified, with the scope decisions below recorded for reviewers.
+
+- The supervision module (`zim_engine_application::supervision`)
+  ships the `Runtime`/`RuntimeFactory` ports, the per-instance power
+  queue (single-worker, invariants 7/9), the crash monitor with
+  crash-loop parking (invariant 14, threshold 3-in-60s matching
+  Wings's `CrashDetection.Timeout`), the generation counter for
+  stale-sample protection (invariant 13), and engine-restart
+  reconciliation (invariants 1/10) including adoption of
+  still-running containers and crash-gated restarts for
+  was-desired-started ones.
+- The Docker adapter (`zim_engine_runtime_docker`) implements the
+  port over bollard 0.21 with Wings-parity semantics: recreate-on-
+  start (`OnBeforeStart`), graceful-then-kill bounded stops
+  (`WaitForStop(terminate=true)`), 404-tolerant stop/kill, the
+  `pterodactyl0` bridge network with Wings's bridge options, the
+  full container spec (readonly rootfs, `/tmp` tmpfs, cap-drop set,
+  no-new-privileges, 988:988 container user, CFS quota from
+  millicores, port bindings, `SERVER_IP` loopback→gateway rewrite),
+  one-shot exec, and one-shot stats. Documented deviations: the
+  network's IPAM subnet is auto-allocated (not Wings's fixed
+  172.18.0.0/16) and IPv6 is off by default.
+- The API surface implements §10.3 lifecycle: POST
+  start/stop/restart/kill/suspend (202 accepted + generation, per
+  invariant 2), and GET state now reports the supervisor's live
+  observation (desired/observed/generation/crash-loop) with the
+  persisted row as fallback. `kill` requires elevated
+  `control.stop` (owner or admin — a documented reading of the
+  spec's "(elevated)" note); suspend answers AdminInstance and
+  gates starts with `instance_state_conflict`. Additive error code:
+  `runtime_unavailable` (503) for enqueue-time backend failures.
+- The engine binary composes the supervisor at boot: Docker probe →
+  `DockerRuntimeFactory` (creating `pterodactyl0`) or the
+  `NullRuntimeFactory` degraded mode (API-only; lifecycle answers
+  503), a default local node bootstrapped on first run, and the
+  reconciliation pass logged at startup. Instances created after
+  boot enter supervision lazily on their first power request or
+  state read (LocalLinux-node rows only).
+- M6 acceptance criteria are verified by three suites: the
+  supervision integration tests (mock runtime; invariants 1, 2, 7,
+  9, 10, 13, 14), the runtime-docker integration suite (real
+  daemon; start/stop/observe, kill exit 137, recreate-on-start,
+  readonly-rootfs/tmpfs/port-binding/exec/stats, crash-loop E2E
+  with captured exit codes, reconcile adoption — self-skipping
+  where no Docker answers, run for real in the CI job
+  `docker-integration`), and the API lifecycle tests over the mock
+  runtime (202s, grant gates incl. the elevated kill and suspend
+  conflicts, observed_by supervisor, persisted-status follow).
+- Known simplifications, each documented at its implementation site:
+  console attach/send_input answer `Unsupported` until M7's
+  streaming attach; the M6 startup renderer substitutes only
+  `{{SERVER_MEMORY}}`/`{{SERVER_PORT}}`/`{{SERVER_IP}}` (the full
+  egg-variable surface arrives with M9's egg importer); crash
+  observation is poll-based (1s default) pending M7's event-driven
+  form; an exit while desired-started counts as a crash including
+  clean exits (Wings's `DetectCleanExitAsCrash` default); unsuspend
+  is not in the §10.3 surface (documented gap, reserved for a later
+  additive revision); non-admin owners now receive the implicit
+  grant set (all but `AdminInstance`) in `load_instance_for_caller`
+  — recorded as an M6 fix of an M5 gap (owners were "implicitly
+  authorized" in prose but held empty grant sets in code).
+
 ### M7: Streaming (console + metrics)
 
 **Goal:** Implement the streaming module with WebSocket fan-out,

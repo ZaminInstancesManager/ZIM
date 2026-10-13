@@ -52,6 +52,9 @@ sha2 = { workspace = true }
 [dev-dependencies]
 # In-memory persistence adapter for integration tests.
 zim_engine_persistence_sqlite = { workspace = true }
+# The scripted mock runtime for the lifecycle endpoint tests
+# (no Docker dependency in the workspace's main CI job).
+zim_engine_application = { workspace = true, features = ["test-util"] }
 # TLS-enabled HTTP client for the socket-level integration tests
 # (danger_accept_invalid_certs against the generated loopback cert).
 reqwest = { version = "0.12", default-features = false, features = [

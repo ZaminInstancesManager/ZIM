@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use zim_engine_application::ports::{Persistence, PersistenceError};
+use zim_engine_application::supervision::Supervisor;
 use zim_engine_auth::{ApiKeyManager, SessionManager};
 use zim_engine_domain::User;
 
@@ -75,6 +76,9 @@ impl Caller {
 pub struct AppState {
     /// Durable metadata store (sync port; bridge with [`db`]).
     pub persistence: Arc<dyn Persistence>,
+    /// The lifecycle supervisor (M6): power operations and observed
+    /// state come from here, not from the persisted rows.
+    pub supervisor: Arc<Supervisor>,
     /// Live sessions (in-memory by design; see the auth crate docs).
     pub sessions: Arc<SessionManager>,
     /// Issued API keys (in-memory; see the auth crate docs).
@@ -94,12 +98,14 @@ impl AppState {
     /// constructed from `config`'s budgets.
     pub fn new(
         persistence: Arc<dyn Persistence>,
+        supervisor: Arc<Supervisor>,
         sessions: Arc<SessionManager>,
         api_keys: Arc<ApiKeyManager>,
         config: ApiConfig,
     ) -> Self {
         Self {
             persistence,
+            supervisor,
             sessions,
             api_keys,
             credential_limiter: SlidingWindowLimiter::new(

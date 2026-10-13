@@ -1,10 +1,15 @@
 //! Engine composition root (library half).
 //!
 //! `run()` wires the concrete adapters — SQLite persistence, the
-//! in-memory session/API-key managers, the M5 API server — into the
-//! engine process: it opens (and migrates) the database, bootstraps
-//! the first root administrator, loads or generates the loopback
-//! TLS certificate, and serves the HTTPS API until shutdown.
+//! in-memory session/API-key managers, the M5 API server, and the
+//! M6 supervision module over the Docker runtime — into the engine
+//! process: it opens (and migrates) the database, bootstraps the
+//! first root administrator and the default local node, connects the
+//! container runtime (falling back to the null runtime in degraded
+//! API-only mode when no Docker is reachable), reconciles persisted
+//! vs. observed instance state (lifecycle invariants 1 and 10),
+//! loads or generates the loopback TLS certificate, and serves the
+//! HTTPS API until shutdown.
 //!
 //! The binary half (`main.rs`) parses arguments/environment and calls
 //! [`run`].
@@ -18,8 +23,11 @@ use std::sync::Arc;
 
 use zim_engine_api::{ApiConfig, AppState};
 use zim_engine_application::ports::Persistence;
+use zim_engine_application::supervision::{
+    NullRuntimeFactory, RuntimeFactory, SupervisionPolicy, Supervisor,
+};
 use zim_engine_auth::{ApiKeyManager, SessionManager};
-use zim_engine_domain::User;
+use zim_engine_domain::{Node, NodeCapabilities, NodeDeployment, NodeState, User};
 
 /// Process-wide engine options (CLI + environment).
 #[derive(Debug, Clone)]
@@ -83,17 +91,24 @@ const DB_FILE: &str = "engine.db";
 const TLS_CERT_FILE: &str = "loopback-cert.pem";
 const TLS_KEY_FILE: &str = "loopback-key.pem";
 
-/// A booted engine: the bound loopback address plus the handle to
-/// stop serving.
+/// A booted engine: the bound loopback address plus the handles to
+/// stop serving and supervision.
 pub struct RunningEngine {
     /// The address the HTTPS listener is bound to.
     pub local_addr: std::net::SocketAddr,
+    /// The engine's last reconciliation pass (observability).
+    pub reconciled: zim_engine_application::supervision::ReconcileReport,
     server: zim_engine_api::tls::RunningServer,
+    supervisor: Arc<Supervisor>,
 }
 
 impl RunningEngine {
-    /// Stop accepting connections and drain in-flight requests.
+    /// Stop accepting connections, drain in-flight requests, and
+    /// stop the supervision workers (running containers are left
+    /// running by design — the next boot's reconciliation re-adopts
+    /// them).
     pub async fn shutdown(self) {
+        self.supervisor.shutdown().await;
         self.server.shutdown().await;
     }
 }
@@ -115,6 +130,50 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
 
     // ── First-run bootstrap ───────────────────────────────────────
     bootstrap_admin(&persistence, &options)?;
+    bootstrap_local_node(&persistence)?;
+
+    // ── Container runtime (M6) ────────────────────────────────────
+    // Probe Docker; a missing/unreachable daemon degrades the engine
+    // to API-only mode (metadata management works; lifecycle calls
+    // answer 503 runtime_unavailable) rather than refusing to boot.
+    let docker_settings = zim_engine_runtime_docker::DockerSettings {
+        data_root: options.data_dir.clone(),
+        ..zim_engine_runtime_docker::DockerSettings::default()
+    };
+    let runtime_factory: Arc<dyn RuntimeFactory> =
+        match zim_engine_runtime_docker::DockerRuntimeFactory::connect(docker_settings).await {
+            Ok(factory) => {
+                eprintln!("zim_engine: container runtime connected (Docker, pterodactyl0)");
+                Arc::new(factory)
+            }
+            Err(e) => {
+                eprintln!(
+                    "zim_engine: no container runtime available ({e}); \
+                     lifecycle operations will answer 503 until one is"
+                );
+                Arc::new(NullRuntimeFactory)
+            }
+        };
+
+    // ── Supervision + restart reconciliation (invariants 1, 10) ──
+    let supervisor = Supervisor::new(
+        Arc::clone(&persistence),
+        runtime_factory,
+        SupervisionPolicy::default(),
+        options.data_dir.clone(),
+    );
+    let reconciled = supervisor
+        .boot()
+        .await
+        .map_err(|e| format!("instance supervision boot failed: {e}"))?;
+    eprintln!(
+        "zim_engine: supervision reconciled {} instance(s): {} adopted running, {} restarts queued, {} crash-looped, {} unknown",
+        reconciled.supervised,
+        reconciled.observed_running,
+        reconciled.queued_restarts,
+        reconciled.crash_loops,
+        reconciled.unknown
+    );
 
     // ── Credential managers (in-memory by design; see auth crate) ─
     let sessions = Arc::new(SessionManager::new(Default::default()));
@@ -123,6 +182,7 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
     // ── API server ────────────────────────────────────────────────
     let state = Arc::new(AppState::new(
         Arc::clone(&persistence),
+        Arc::clone(&supervisor),
         Arc::clone(&sessions),
         Arc::clone(&api_keys),
         ApiConfig::default(),
@@ -147,8 +207,54 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
 
     Ok(RunningEngine {
         local_addr: server.local_addr,
+        reconciled,
         server,
+        supervisor,
     })
+}
+
+/// Create the default local node on a node-less database.
+///
+/// Single-machine ZIM installs place every instance on the engine's
+/// own node; requiring a manual node-creation step before the first
+/// instance would be ceremony without function. Remote-node rows
+/// (added through the API later) coexist: only a missing *local*
+/// node triggers the bootstrap.
+fn bootstrap_local_node(persistence: &Arc<dyn Persistence>) -> Result<(), String> {
+    let nodes = persistence
+        .list_nodes()
+        .map_err(|e| format!("cannot read nodes: {e}"))?;
+    if nodes
+        .iter()
+        .any(|node| node.deployment == NodeDeployment::LocalLinux)
+    {
+        return Ok(());
+    }
+
+    let node = Node {
+        id: zim_engine_domain::NodeId::new(),
+        name: "local".to_owned(),
+        location_id: zim_engine_domain::LocationId::new(),
+        fqdn: "localhost".to_owned(),
+        scheme: zim_engine_domain::Scheme::Https,
+        public_port: 8443,
+        listen_port: 8444,
+        capabilities: NodeCapabilities::default(),
+        deployment: NodeDeployment::LocalLinux,
+        last_heartbeat: None,
+        last_seen_state: NodeState::Unknown,
+    };
+    node.validate()
+        .map_err(|e| format!("bootstrap local node invalid: {e}"))?;
+    persistence
+        .put_node(&node)
+        .map_err(|e| format!("cannot persist bootstrap local node: {e}"))?;
+    eprintln!(
+        "zim_engine: first run — default local node created (id {}); \
+         instances created without an explicit node_id land here",
+        node.id
+    );
+    Ok(())
 }
 
 /// Run the engine until shutdown (SIGTERM / Ctrl-C), then drain.

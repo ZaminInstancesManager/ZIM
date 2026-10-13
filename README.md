@@ -52,10 +52,13 @@ subsequent implementation work will follow.
 - A working ZIM runtime — partially. The Rust engine workspace
   (`zim/engine/`) is under active implementation following
   `docs/architecture/IMPLEMENTATION_ROADMAP.md`: the domain model +
-  SQLite persistence (M3), authentication + authorization (M4), and
-  the HTTPS loopback API surface with the runnable `zim_engine`
-  binary (M5) are delivered; the runtime abstraction (M6), streaming
-  (M7), jobs (M8) and later milestones remain. Operations that need
+  SQLite persistence (M3), authentication + authorization (M4), the
+  HTTPS loopback API surface with the runnable `zim_engine` binary
+  (M5), and the runtime abstraction + Docker runtime (M6 — instance
+  lifecycle with power-queue serialization, crash-loop protection,
+  engine-restart reconciliation, and Wings-parity container
+  management over `pterodactyl0`) are delivered; streaming (M7),
+  jobs (M8) and later milestones remain. Operations that need
   those milestones answer `501 not_implemented` per the API spec's
   transitional vocabulary.
 - A re-skinned Pterodactyl. The Panel's PHP/Laravel backend and Wings's Go

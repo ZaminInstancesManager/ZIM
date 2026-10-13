@@ -21,10 +21,14 @@ use crate::state::AppState;
 ///   keys, instances + subusers + allocations + schedules + backup
 ///   reads + transfer status, nodes + node allocations, jobs reads,
 ///   audit, extensions list, health (additive).
-/// - Declared but 501 `not_implemented`: lifecycle (M6), files
-///   (M6), console/metrics (M7), backup mutations (M8), transfer
-///   initiation (M8), schedules run (M9), eggs (M9), frontend
-///   packages (M11), workload integrations (M16), OAuth (post-M5).
+/// - Implemented in M6: instance lifecycle (start/stop/restart/
+///   kill/suspend + live observed state) through the supervision
+///   module.
+/// - Declared but 501 `not_implemented`: files (M6 filesystem
+///   capability), console/metrics (M7), backup mutations (M8),
+///   transfer initiation (M8), schedules run (M9), eggs (M9),
+///   frontend packages (M11), workload integrations (M16), OAuth
+///   (post-M5).
 /// - `/api/v1/workloads` aliases the instance handlers per the
 ///   AD-19 back-compat rules (§10.17).
 pub fn router(state: Arc<AppState>) -> Router {
@@ -61,12 +65,12 @@ pub fn router(state: Arc<AppState>) -> Router {
                 .delete(instances::delete),
         )
         .route("/instances/{id}/state", get(instances::state))
-        .route("/instances/{id}/start", post(instances::start_stub))
-        .route("/instances/{id}/stop", post(instances::stop_stub))
-        .route("/instances/{id}/restart", post(instances::restart_stub))
-        .route("/instances/{id}/kill", post(instances::kill_stub))
+        .route("/instances/{id}/start", post(instances::start))
+        .route("/instances/{id}/stop", post(instances::stop))
+        .route("/instances/{id}/restart", post(instances::restart))
+        .route("/instances/{id}/kill", post(instances::kill))
         .route("/instances/{id}/install", post(instances::install_stub))
-        .route("/instances/{id}/suspend", post(instances::suspend_stub))
+        .route("/instances/{id}/suspend", post(instances::suspend))
         .route(
             "/instances/{id}/transfer",
             get(instances::transfer_status)
@@ -150,10 +154,10 @@ pub fn router(state: Arc<AppState>) -> Router {
                 .delete(instances::delete),
         )
         .route("/workloads/{id}/state", get(instances::state))
-        .route("/workloads/{id}/start", post(instances::start_stub))
-        .route("/workloads/{id}/stop", post(instances::stop_stub))
-        .route("/workloads/{id}/restart", post(instances::restart_stub))
-        .route("/workloads/{id}/kill", post(instances::kill_stub))
+        .route("/workloads/{id}/start", post(instances::start))
+        .route("/workloads/{id}/stop", post(instances::stop))
+        .route("/workloads/{id}/restart", post(instances::restart))
+        .route("/workloads/{id}/kill", post(instances::kill))
         .route("/workloads/{id}/install", post(instances::install_stub))
         .route(
             "/workloads/{id}/migrate",

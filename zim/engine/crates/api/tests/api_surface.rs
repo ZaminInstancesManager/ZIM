@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 use zim_engine_api::tls::{generate_loopback_certificate, serve_https, TlsMaterial};
 use zim_engine_api::{ApiConfig, AppState};
 use zim_engine_application::ports::Persistence;
+use zim_engine_application::supervision::Supervisor;
 use zim_engine_auth::{ApiKeyManager, SessionManager};
 use zim_engine_domain::User;
 
@@ -40,8 +41,12 @@ impl TestEngine {
     }
 
     async fn start_on(config: ApiConfig, persistence: Arc<dyn Persistence>) -> Self {
+        // The M6 lifecycle endpoints need a supervisor; the tests use
+        // the scripted mock runtime (no Docker dependency).
+        let supervisor = Self::supervisor_over(Arc::clone(&persistence)).await;
         let state = Arc::new(AppState::new(
             Arc::clone(&persistence),
+            supervisor,
             Arc::new(SessionManager::new(Default::default())),
             Arc::new(ApiKeyManager::new()),
             config,
@@ -66,6 +71,44 @@ impl TestEngine {
 
     fn url(&self, path: &str) -> String {
         format!("{}{path}", self.base)
+    }
+
+    /// A supervisor over the mock runtime factory (lifecycle tests
+    /// drive the power queue through it without a Docker daemon).
+    async fn supervisor_over(persistence: Arc<dyn Persistence>) -> Arc<Supervisor> {
+        use zim_engine_application::supervision::testing::{MockRuntime, MockRuntimeFactory};
+        use zim_engine_application::supervision::SupervisionPolicy;
+
+        // Local node + mock runtimes: instances seeded through the
+        // API land on the node the supervisor manages.
+        let nodes = persistence.list_nodes().unwrap();
+        if nodes.is_empty() {
+            let node = zim_engine_domain::Node {
+                id: zim_engine_domain::NodeId::new(),
+                name: "local-test".to_owned(),
+                location_id: zim_engine_domain::LocationId::new(),
+                fqdn: "localhost".to_owned(),
+                scheme: zim_engine_domain::Scheme::Https,
+                public_port: 8443,
+                listen_port: 8444,
+                capabilities: Default::default(),
+                deployment: zim_engine_domain::NodeDeployment::LocalLinux,
+                last_heartbeat: None,
+                last_seen_state: Default::default(),
+            };
+            persistence.put_node(&node).unwrap();
+        }
+        let supervisor = Supervisor::new(
+            persistence,
+            Arc::new(MockRuntimeFactory::new(MockRuntime::always_running())),
+            SupervisionPolicy {
+                monitor_poll_interval: std::time::Duration::from_millis(50),
+                ..Default::default()
+            },
+            std::env::temp_dir().join("zim-api-test"),
+        );
+        supervisor.load_local().await.unwrap();
+        supervisor
     }
 
     /// Seed a user directly in persistence (Argon2id-hashed).
@@ -856,7 +899,7 @@ async fn workloads_surface_aliases_instances() {
 }
 
 #[tokio::test]
-async fn instance_state_and_lifecycle_stub() {
+async fn instance_state_and_lifecycle() {
     let engine = TestEngine::start().await;
     let admin = engine.seed_user("admin@zim.local", "admin pass", true);
     let admin_cookie = login(&engine, "admin@zim.local", "admin pass")
@@ -869,7 +912,7 @@ async fn instance_state_and_lifecycle_stub() {
         .post(engine.url("/instances"))
         .header("Cookie", format!("zim_session={admin_cookie}"))
         .json(&json!({
-            "name": "stubby",
+            "name": "lifecycler",
             "node_id": node["id"].as_str().unwrap(),
             "owner_id": admin.id.to_string(),
         }))
@@ -880,7 +923,10 @@ async fn instance_state_and_lifecycle_stub() {
     let instance: Value = response.json().await.unwrap();
     let id = instance["id"].as_str().unwrap().to_owned();
 
-    // The small state view.
+    // The small state view before anything: the offline seed (lazy
+    // supervision adopts the row on the first observation; the seed
+    // itself is offline — a persisted status is never trusted as
+    // liveness, invariant 1).
     let response = engine
         .client
         .get(engine.url(&format!("/instances/{id}/state")))
@@ -892,7 +938,7 @@ async fn instance_state_and_lifecycle_stub() {
     let body: Value = response.json().await.unwrap();
     assert_eq!(body["status"], "offline");
 
-    // Lifecycle is declared but not implemented (M6).
+    // Start: 202 accepted (invariant 2 — accepted, not running).
     let response = engine
         .client
         .post(engine.url(&format!("/instances/{id}/start")))
@@ -900,15 +946,73 @@ async fn instance_state_and_lifecycle_stub() {
         .send()
         .await
         .unwrap();
-    assert_eq!(response.status(), 501);
+    assert_eq!(response.status(), 202);
     let body: Value = response.json().await.unwrap();
-    assert_eq!(body["error"]["code"], "not_implemented");
-    assert_eq!(
-        body["error"]["milestone"],
-        "M6 (runtime abstraction + Docker runtime)"
-    );
+    assert_eq!(body["status"], "accepted");
+    assert_eq!(body["action"], "start");
 
-    // Eggs are M9.
+    // The live observation takes over (observed_by supervisor);
+    // acceptance is not completion, so poll until it reports running.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let body = loop {
+        let response = engine
+            .client
+            .get(engine.url(&format!("/instances/{id}/state")))
+            .header("Cookie", format!("zim_session={admin_cookie}"))
+            .send()
+            .await
+            .unwrap();
+        let body: Value = response.json().await.unwrap();
+        if body["status"] == "running" || std::time::Instant::now() > deadline {
+            break body;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    };
+    assert_eq!(body["observed_by"], "supervisor");
+    assert_eq!(body["status"], "running");
+    assert_eq!(body["desired"], "started");
+    assert!(body["generation"].as_u64().unwrap() >= 2);
+    assert_eq!(body["observed"]["state"], "running");
+    assert!(body["observed"]["pid"].is_u64());
+
+    // Stop: 202 accepted, then the observation settles offline (the
+    // state may be transiently `stopping` — invariant 2 applies to
+    // stops too; accepted is not completed).
+    let response = engine
+        .client
+        .post(engine.url(&format!("/instances/{id}/stop")))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 202);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let body = loop {
+        let response = engine
+            .client
+            .get(engine.url(&format!("/instances/{id}/state")))
+            .header("Cookie", format!("zim_session={admin_cookie}"))
+            .send()
+            .await
+            .unwrap();
+        let body: Value = response.json().await.unwrap();
+        if body["status"] == "offline" || std::time::Instant::now() > deadline {
+            break body;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    };
+    assert_eq!(body["status"], "offline");
+    assert_eq!(body["observed"]["state"], "offline");
+
+    // The persisted row followed the observation.
+    let row = engine
+        .persistence
+        .get_instance(&id.parse::<zim_engine_domain::InstanceId>().unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.status, zim_engine_domain::InstanceStatus::Offline);
+
+    // Eggs are still M9.
     let response = engine
         .client
         .get(engine.url("/eggs"))
@@ -917,6 +1021,180 @@ async fn instance_state_and_lifecycle_stub() {
         .await
         .unwrap();
     assert_eq!(response.status(), 501);
+}
+
+/// Lifecycle permission gates: the subuser grant model over the power
+/// endpoints, including the elevated kill.
+#[tokio::test]
+async fn lifecycle_grant_gates() {
+    let engine = TestEngine::start().await;
+    engine.seed_user("admin@zim.local", "admin pass", true);
+    let admin_cookie = login(&engine, "admin@zim.local", "admin pass")
+        .await
+        .expect("admin login");
+    let (node, _allocations) = seed_node_with_allocations(&engine, &admin_cookie).await;
+
+    // A non-admin owner creates their own instance (owner implicit
+    // grants, M6: everything except AdminInstance).
+    let owner = engine.seed_user("owner@zim.local", "owner pass", false);
+    let owner_cookie = login(&engine, "owner@zim.local", "owner pass")
+        .await
+        .expect("owner login");
+    let response = engine
+        .client
+        .post(engine.url("/instances"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .json(&json!({
+            "name": "gated",
+            "node_id": node["id"].as_str().unwrap(),
+            "owner_id": owner.id.to_string(),
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201);
+    let instance: Value = response.json().await.unwrap();
+    let id = instance["id"].as_str().unwrap().to_owned();
+
+    // The owner can start (implicit control.start).
+    let response = engine
+        .client
+        .post(engine.url(&format!("/instances/{id}/start")))
+        .header("Cookie", format!("zim_session={owner_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 202);
+
+    // The owner CAN kill (owner is elevated).
+    let response = engine
+        .client
+        .post(engine.url(&format!("/instances/{id}/kill")))
+        .header("Cookie", format!("zim_session={owner_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 202);
+
+    // The owner CANNOT suspend (AdminInstance is admin-only).
+    let response = engine
+        .client
+        .post(engine.url(&format!("/instances/{id}/suspend")))
+        .header("Cookie", format!("zim_session={owner_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 403);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "permission_denied");
+
+    // An admin can suspend: 202, then starts answer 409.
+    let response = engine
+        .client
+        .post(engine.url(&format!("/instances/{id}/suspend")))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 202);
+    let response = engine
+        .client
+        .post(engine.url(&format!("/instances/{id}/start")))
+        .header("Cookie", format!("zim_session={owner_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 409);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "instance_state_conflict");
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("suspended"));
+
+    // A subuser with control.stop but not control.start can stop,
+    // not start; and cannot kill (not elevated).
+    let subuser = engine.seed_user("sub@zim.local", "sub pass", false);
+    let sub_cookie = login(&engine, "sub@zim.local", "sub pass")
+        .await
+        .expect("subuser login");
+    let response = engine
+        .client
+        .post(engine.url(&format!("/instances/{id}/subusers")))
+        .header("Cookie", format!("zim_session={owner_cookie}"))
+        .json(&json!({
+            "user_id": subuser.id.to_string(),
+            "grants": ["control.stop", "control.restart"],
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201);
+
+    let response = engine
+        .client
+        .post(engine.url(&format!("/instances/{id}/start")))
+        .header("Cookie", format!("zim_session={sub_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 403);
+
+    let response = engine
+        .client
+        .post(engine.url(&format!("/instances/{id}/stop")))
+        .header("Cookie", format!("zim_session={sub_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 202);
+
+    let response = engine
+        .client
+        .post(engine.url(&format!("/instances/{id}/kill")))
+        .header("Cookie", format!("zim_session={sub_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 403);
+    let body: Value = response.json().await.unwrap();
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("elevated"));
+
+    // Restart (the subuser's second grant) is accepted.
+    let response = engine
+        .client
+        .post(engine.url(&format!("/instances/{id}/restart")))
+        .header("Cookie", format!("zim_session={sub_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 202);
+}
+
+/// Lifecycle on an unknown instance id is a uniform 404 (no
+/// existence leak), and the runtime-unavailable path maps to 503.
+#[tokio::test]
+async fn lifecycle_unknown_instance_maps_404() {
+    let engine = TestEngine::start().await;
+    engine.seed_user("admin@zim.local", "admin pass", true);
+    let admin_cookie = login(&engine, "admin@zim.local", "admin pass")
+        .await
+        .expect("admin login");
+
+    let missing = uuid::Uuid::new_v4().to_string();
+    let response = engine
+        .client
+        .post(engine.url(&format!("/instances/{missing}/start")))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 404);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "not_found");
 }
 
 // ── Pagination ────────────────────────────────────────────────────

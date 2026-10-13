@@ -69,6 +69,42 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  docker-integration:
+    # M6: the DockerRuntime adapter's integration suite — real
+    # container lifecycle, crash detection, reconciliation, and the
+    # Wings-parity container spec. The tests self-skip when no daemon
+    # answers, so this job's job is to provide the daemon (GitHub's
+    # ubuntu runners ship Docker).
+    name: Docker integration (runtime-docker)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: zim/engine
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker sanity (daemon version + network room)
+        run: |
+          docker version
+          docker network ls
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: zim/engine
+          prefix-key: engine-docker-integration
+
+      - name: cargo test -p zim_engine_runtime_docker
+        run: cargo test -p zim_engine_runtime_docker --all-targets
+
   build-matrix:
     # Smoke-build the workspace on each target platform to catch
     # platform-specific issues early. The release-quality builds

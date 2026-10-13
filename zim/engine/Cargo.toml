@@ -142,6 +142,30 @@ http-body-util = "0.1"
 base64 = "0.22"
 # Graceful connection draining (TaskTracker + CancellationToken).
 tokio-util = { version = "0.7", features = ["rt"] }
+# ── M6: runtime abstraction + Docker runtime (§M6) ──────────────────
+# Object-safe async trait methods (`Box<dyn Runtime>` /
+# `Arc<dyn RuntimeFactory>`): Rust's native async-fn-in-trait is not
+# dyn-compatible, and the supervision module's power queue and state
+# queries share the runtime through an `Arc<dyn Runtime>`.
+async-trait = "0.1"
+# Async object-safety helpers are all that is needed here; streams
+# (Docker attach/stats/exec output) come from bollard's re-exports
+# and futures-util.
+futures-util = { version = "0.3", default-features = false, features = [
+    "std",
+] }
+# The Docker client for the `runtime-docker` adapter. Features:
+# `pipe` is the unix-socket / named-pipe transport (the local-daemon
+# connection the engine uses); the other default features (`http`,
+# plus websocket/TLS extras when defaulted) are enabled on demand by
+# later milestones — the engine's local transport needs only `pipe`.
+bollard = { version = "0.21", default-features = false, features = [
+    "pipe",
+    "http",
+] }
+# POSIX shell-style word splitting for the startup command template
+# (the same job shlex does for Wings's startup commands).
+shlex = "2"
 
 [profile.release]
 opt-level = 3

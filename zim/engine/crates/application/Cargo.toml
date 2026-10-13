@@ -13,7 +13,46 @@ documentation.workspace = true
 name = "zim_engine_application"
 path = "src/lib.rs"
 
+[features]
+# In-memory `Runtime`/`RuntimeFactory` implementations for the
+# supervision module's own integration tests and for the API crate's
+# lifecycle-endpoint tests (both need to exercise supervision without
+# a Docker daemon). Off by default: production composition roots
+# (zim_engine_main) never enable it.
+test-util = []
+
 [dependencies]
 zim_engine_domain = { workspace = true }
-# Typed error vocabulary for the port traits (PersistenceError).
+# Supervision (M6): the power queue, crash monitor, and reconcile
+# pass are tokio tasks; the sync Persistence port is bridged with
+# spawn_blocking exactly like the M5 api crate.
+tokio = { workspace = true, features = [
+    "rt",
+    "macros",
+    "time",
+    "sync",
+] }
+# Worker/monitor cancellation at engine shutdown.
+tokio-util = { workspace = true }
+# Startup-command word splitting (the job shlex does for Wings's
+# startup commands).
+shlex = { workspace = true }
+# Object-safe async trait methods for `Runtime` / `RuntimeFactory`.
+async-trait = { workspace = true }
 thiserror = { workspace = true }
+chrono = { workspace = true }
+# `DesiredState` travels in API responses (the state endpoint's
+# desired-state field).
+serde = { workspace = true }
+
+[dev-dependencies]
+# In-memory persistence for the supervision integration tests
+# (lifecycle invariants over a real store).
+zim_engine_persistence_sqlite = { workspace = true }
+# The multi-thread runtime for the supervision integration tests.
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+# Self dev-dependency: unifies the `test-util` feature into the
+# library build used by this crate's own tests (the standard cargo
+# pattern for testing feature-gated test doubles) while keeping it
+# off for production consumers.
+zim_engine_application = { path = ".", features = ["test-util"] }

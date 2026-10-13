@@ -22,7 +22,9 @@ use axum::Json;
 use serde::Deserialize;
 use zim_engine_application::ports::PersistenceError;
 use zim_engine_authz::{require, resolve_instance_grants, AuthzContext};
-use zim_engine_domain::{Instance, InstanceId, Permission, PermissionGrant, User, UserId};
+use zim_engine_domain::{
+    Instance, InstanceId, Permission, PermissionGrant, PermissionSet, User, UserId,
+};
 
 use crate::error::ApiError;
 use crate::state::{db_or_500, AppState, Caller};
@@ -133,9 +135,30 @@ pub async fn load_instance_for_caller(
         }
     }
 
-    let grants = resolve_instance_grants(&user, permission_row.as_ref());
+    // M6: an instance owner is implicitly authorized on their own
+    // instance (Pterodactyl semantics — subuser rows exist for
+    // *other* users). The effective set for a non-admin owner is the
+    // full grant vocabulary minus the admin-only `AdminInstance`
+    // grant (delete/suspend stay admin actions per §10.3).
+    let grants = if owner && !admin {
+        owner_implicit_grants()
+    } else {
+        resolve_instance_grants(&user, permission_row.as_ref())
+    };
     let ctx = AuthzContext::for_user(&user, grants, *instance_id);
     Ok((instance, ctx))
+}
+
+/// The owner's implicit grant set: everything except the
+/// admin-scoped `AdminInstance` grant.
+fn owner_implicit_grants() -> PermissionSet {
+    let mut set = PermissionSet::new();
+    for grant in PermissionGrant::ALL {
+        if *grant != PermissionGrant::AdminInstance {
+            set.grant(*grant);
+        }
+    }
+    set
 }
 
 /// Guard: run [`require`] and map the authz error into the API's

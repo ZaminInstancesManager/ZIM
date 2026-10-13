@@ -50,20 +50,20 @@ Each lifecycle invariant from `docs/architecture/ZIM_ARCHITECTURE.md`
 
 | Invariant # | Invariant description                                | Test type             | Test name                                              | Status |
 |--------------|--------------------------------------------------------|-----------------------|--------------------------------------------------------|--------|
-| 1            | Persisted `running` flag is not proof of liveness      | Engine integration    | `engine_integration::reconcile_after_restart`           | Planned |
-| 2            | Accepted start request is not proof that server started | Engine integration    | `engine_integration::start_job_state_machine`           | Planned |
+| 1            | Persisted `running` flag is not proof of liveness      | Engine integration    | `engine_integration::reconcile_after_restart`           | Delivered (M6) — application tests/supervision.rs + runtime-docker tests (reconcile) |
+| 2            | Accepted start request is not proof that server started | Engine integration    | `engine_integration::start_job_state_machine`           | Delivered (M6) — supervision + api lifecycle tests (202 accepted) |
 | 3            | Tab's existence is not proof that server should run     | E2E                    | `e2e::tab_does_not_imply_running`                       | Planned |
 | 4            | Closing a tab does not stop its server                  | E2E                    | `e2e::close_tab_keeps_server_running`                  | Planned |
 | 5            | Restoring a session does not issue lifecycle commands   | E2E                    | `e2e::session_restore_no_lifecycle`                    | Planned |
 | 6            | Multiple tabs cannot create multiple server processes  | E2E                    | `e2e::three_tabs_one_process`                          | Planned |
-| 7            | Lifecycle operations cannot race into undefined states  | Engine fault-injection | `engine_integration::power_action_race`                | Planned |
+| 7            | Lifecycle operations cannot race into undefined states  | Engine fault-injection | `engine_integration::power_action_race`                | Delivered (M6) — application tests/supervision.rs |
 | 8            | Native process runner is not equivalent to container    | Engine integration    | `engine_integration::host_runtime_requires_consent`    | Planned |
-| 9            | Per-instance operation serialization                    | Engine integration    | `engine_integration::power_queue_serializes`           | Planned |
-| 10           | Engine-restart reconciliation                          | Engine integration    | `engine_integration::restart_reconciliation`           | Planned |
+| 9            | Per-instance operation serialization                    | Engine integration    | `engine_integration::power_queue_serializes`           | Delivered (M6) — application tests/supervision.rs |
+| 10           | Engine-restart reconciliation                          | Engine integration    | `engine_integration::restart_reconciliation`           | Delivered (M6) — application + runtime-docker reconcile tests |
 | 11           | Cleanup after partial failures                          | Engine fault-injection | `engine_integration::partial_failure_cleanup`           | Planned |
 | 12           | Deletion and transfer coordination                      | Engine fault-injection | `engine_integration::delete_transfer_coordination`    | Planned |
-| 13           | Stale event protection                                  | Engine fault-injection | `engine_integration::stale_event_protection`           | Planned |
-| 14           | Crash-loop protection                                   | Engine integration    | `engine_integration::crash_loop_protection`           | Planned |
+| 13           | Stale event protection                                  | Engine fault-injection | `engine_integration::stale_event_protection`           | Delivered (M6, poll-form) — generation counter + discard guard |
+| 14           | Crash-loop protection                                   | Engine integration    | `engine_integration::crash_loop_protection`           | Delivered (M6) — mock + real-Docker crash-loop tests |
 | 15           | Capability checks at the engine boundary                | Engine integration    | `engine_integration::capability_enforcement`           | Planned |
 | 16           | Restoration of default frontend on custom frontend failure | E2E                  | `e2e::custom_frontend_failure_recovers`                | Planned |
 
@@ -77,7 +77,7 @@ failure scenarios. Each is a test:
 
 | Scenario                                  | Test type                  | Test name                                                  | Status |
 |--------------------------------------------|----------------------------|-------------------------------------------------------------|--------|
-| Engine restart                              | Engine fault-injection     | `engine_integration::restart_reconciles_state`              | Planned |
+| Engine restart                              | Engine fault-injection     | `engine_integration::restart_reconciles_state`              | Delivered (M6) |
 | Renderer crash                              | Browser test / E2E          | `e2e::renderer_crash_engine_unaffected`                     | Planned |
 | Duplicate requests                          | Engine integration         | `engine_integration::idempotency_key_dedupes`               | Planned |
 | Delayed process-exit events                 | Engine fault-injection     | `engine_integration::delayed_exit_event_ordering`           | Planned |

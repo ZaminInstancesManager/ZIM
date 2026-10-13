@@ -5,18 +5,22 @@
 //! traits) for persistence and runtime. Concrete adapters implement
 //! those traits; this crate depends only on `zim_engine_domain`.
 //!
-//! # Milestone scope (M3)
+//! # Milestone scope
 //!
-//! This crate currently ships the [`Persistence`] port trait
-//! (`ports` module) and its [`PersistenceError`] vocabulary, per
-//! `docs/architecture/IMPLEMENTATION_ROADMAP.md` §M3. Application
-//! *services* (creation orchestration, supervision, ...) arrive with
-//! their corresponding milestones (M6+).
+//! - **M3:** the [`Persistence`] port trait (`ports` module) and its
+//!   [`PersistenceError`] vocabulary.
+//! - **M6:** the supervision module (`supervision`) — the runtime
+//!   abstraction ([`supervision::Runtime`]), per-instance lifecycle
+//!   with a single-worker power queue, crash-loop protection, and
+//!   engine-restart reconciliation. Application services beyond
+//!   supervision (creation orchestration, ...) arrive with their
+//!   corresponding milestones (M8+).
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 pub mod ports;
+pub mod supervision;
 
 pub use ports::{Persistence, PersistenceError};
 

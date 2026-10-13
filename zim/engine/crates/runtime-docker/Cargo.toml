@@ -16,3 +16,29 @@ path = "src/lib.rs"
 [dependencies]
 zim_engine_application = { workspace = true }
 zim_engine_domain = { workspace = true }
+# Docker Engine API client (unix socket / named pipe). This is the
+# crate the architecture doc names for the Docker runtime adapter
+# (docs/architecture/RUST_ENGINE.md §4 "Runtime adapters").
+bollard = { workspace = true }
+# Stream collection for image pull progress, exec output, and the
+# one-shot stats query.
+futures-util = { workspace = true }
+# Async trait impls for `Runtime` / `RuntimeFactory`.
+async-trait = { workspace = true }
+# Timestamp mapping for `ObservedState::Running { started_at }`.
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros", "time", "sync"] }
+
+[dev-dependencies]
+# Supervision-module integration (the DockerRuntime is exercised
+# through the supervisor's lifecycle invariants, not just directly).
+zim_engine_application = { workspace = true, features = ["test-util"] }
+# In-memory store for the supervision-over-Docker tests.
+zim_engine_persistence_sqlite = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
+# Unique container names per test run.
+uuid = { workspace = true }
+# Stream draining for image pulls in test setup.
+futures-util = { workspace = true }
+chrono = { workspace = true }

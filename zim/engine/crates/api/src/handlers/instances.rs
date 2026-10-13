@@ -25,6 +25,7 @@ use crate::handlers::{
 };
 use crate::pagination::{page_envelope, PageParams};
 use crate::state::{db_or_500, AppState, Caller};
+use zim_engine_application::supervision::PowerAction;
 use zim_engine_domain::{
     AllocationId, CommandTemplate, DockerImage, EggId, Instance, InstanceId, InstanceStatus,
     NodeId, Permission, PermissionGrant, PermissionSet, ResourceLimits, Schedule, ScheduleAction,
@@ -542,12 +543,57 @@ pub async fn state(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
     let (instance, _ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
+
+    // M6: the supervisor's live observation is authoritative when the
+    // instance is supervised here; the persisted row is the fallback
+    // (and is never treated as proof of liveness — invariant 1).
+    if let Ok(snapshot) = state.supervisor.observed(&instance_id).await {
+        return Ok(Json(serde_json::json!({
+            "id": snapshot.instance_id,
+            "status": snapshot.status,
+            "desired": snapshot.desired,
+            "observed": observed_json(&snapshot.observed),
+            "generation": snapshot.generation,
+            "in_crash_loop": snapshot.in_crash_loop,
+            "updated_at": Utc::now(),
+            "observed_by": "supervisor",
+        })));
+    }
+
     Ok(Json(serde_json::json!({
         "id": instance.id,
         "status": instance.status,
         "updated_at": instance.updated_at,
         "observed_by": "persistence",
     })))
+}
+
+/// The wire form of one observed state (detail fields per variant).
+fn observed_json(
+    observed: &zim_engine_application::supervision::ObservedState,
+) -> serde_json::Value {
+    use zim_engine_application::supervision::ObservedState;
+    match observed {
+        ObservedState::Offline {
+            exit_code,
+            oom_killed,
+        } => serde_json::json!({
+            "state": "offline",
+            "exit_code": exit_code,
+            "oom_killed": oom_killed,
+        }),
+        ObservedState::Starting => serde_json::json!({ "state": "starting" }),
+        ObservedState::Running { started_at, pid } => serde_json::json!({
+            "state": "running",
+            "started_at": started_at,
+            "pid": pid,
+        }),
+        ObservedState::Stopping { since } => serde_json::json!({
+            "state": "stopping",
+            "since": since,
+        }),
+        ObservedState::Unknown => serde_json::json!({ "state": "unknown" }),
+    }
 }
 
 // ── Subusers (§10.7) ──────────────────────────────────────────────
@@ -1117,53 +1163,246 @@ pub async fn transfer_status(
     }
 }
 
+// ── Lifecycle operations (M6: the supervision module) ─────────────
+
+/// Map a supervision enqueue rejection onto the API vocabulary.
+fn power_error(error: zim_engine_application::supervision::PowerError) -> ApiError {
+    use zim_engine_application::supervision::PowerError;
+    match error {
+        PowerError::UnknownInstance(id) => ApiError::not_found("instance", id),
+        PowerError::Suspended(id) => ApiError::StateConflict(format!(
+            "instance {id} is suspended; start is rejected until the suspension is lifted"
+        )),
+        PowerError::RuntimeUnavailable(message) => ApiError::RuntimeUnavailable { message },
+        PowerError::Backend(message) => {
+            ApiError::internal(format!("power queue unavailable: {message}"))
+        }
+    }
+}
+
+/// The graceful-stop deadline for API-initiated stops/restarts
+/// (Wings's panel stop timeout convention).
+const STOP_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// `POST /api/v1/instances/{id}/start` — `control.start` (§10.3).
+///
+/// Returns **202 accepted** with the pre-action generation: an
+/// accepted start is not proof the server started (invariant 2) —
+/// poll `GET /instances/{id}/state` for the outcome. A user-issued
+/// start also clears the crash-loop state (invariant 14's "user
+/// intervention").
+pub async fn start(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
+    let (_instance, ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
+    check_grants(&ctx, &[PermissionGrant::ControlStart])?;
+
+    let generation = state
+        .supervisor
+        .request_power(&instance_id, PowerAction::Start)
+        .await
+        .map_err(power_error)?;
+    audit(
+        &state,
+        Some(ctx.user_id.to_string()),
+        "instance.power.start",
+        Some(instance_id),
+        serde_json::json!({ "accepted": true, "generation": generation }),
+    )
+    .await;
+    let mut response = Json(serde_json::json!({
+        "status": "accepted",
+        "action": "start",
+        "instance_id": instance_id,
+        "generation": generation,
+    }))
+    .into_response();
+    *response.status_mut() = StatusCode::ACCEPTED;
+    Ok(response)
+}
+
+/// `POST /api/v1/instances/{id}/stop` — `control.stop`.
+pub async fn stop(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
+    let (_instance, ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
+    check_grants(&ctx, &[PermissionGrant::ControlStop])?;
+
+    let generation = state
+        .supervisor
+        .request_power(
+            &instance_id,
+            PowerAction::Stop {
+                deadline: STOP_DEADLINE,
+            },
+        )
+        .await
+        .map_err(power_error)?;
+    audit(
+        &state,
+        Some(ctx.user_id.to_string()),
+        "instance.power.stop",
+        Some(instance_id),
+        serde_json::json!({ "accepted": true, "generation": generation }),
+    )
+    .await;
+    let mut response = Json(serde_json::json!({
+        "status": "accepted",
+        "action": "stop",
+        "instance_id": instance_id,
+        "generation": generation,
+    }))
+    .into_response();
+    *response.status_mut() = StatusCode::ACCEPTED;
+    Ok(response)
+}
+
+/// `POST /api/v1/instances/{id}/restart` — `control.restart`.
+pub async fn restart(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
+    let (_instance, ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
+    check_grants(&ctx, &[PermissionGrant::ControlRestart])?;
+
+    let generation = state
+        .supervisor
+        .request_power(
+            &instance_id,
+            PowerAction::Restart {
+                deadline: STOP_DEADLINE,
+            },
+        )
+        .await
+        .map_err(power_error)?;
+    audit(
+        &state,
+        Some(ctx.user_id.to_string()),
+        "instance.power.restart",
+        Some(instance_id),
+        serde_json::json!({ "accepted": true, "generation": generation }),
+    )
+    .await;
+    let mut response = Json(serde_json::json!({
+        "status": "accepted",
+        "action": "restart",
+        "instance_id": instance_id,
+        "generation": generation,
+    }))
+    .into_response();
+    *response.status_mut() = StatusCode::ACCEPTED;
+    Ok(response)
+}
+
+/// `POST /api/v1/instances/{id}/kill` — `control.stop` (elevated:
+/// the caller must be the owner or an admin, not a subuser).
+///
+/// The elevation is a ZIM reading of the spec's "ControlStop
+/// (elevated)" note: force-kill bypasses the graceful shutdown the
+/// subuser grant was scoped for, so it is reserved to the owner and
+/// admins.
+pub async fn kill(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
+    let (instance, ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
+    check_grants(&ctx, &[PermissionGrant::ControlStop])?;
+    let user = caller.require_user()?;
+    let owner = instance.owner_id == user.id;
+    if !(owner || caller.is_admin()) {
+        return Err(ApiError::PermissionDenied {
+            message: "force-kill requires the instance owner or an admin (elevated                       control.stop)"
+                .to_owned(),
+            missing: vec![PermissionGrant::ControlStop],
+            user_id: user.id,
+        });
+    }
+
+    let generation = state
+        .supervisor
+        .request_power(&instance_id, PowerAction::Kill)
+        .await
+        .map_err(power_error)?;
+    audit(
+        &state,
+        Some(ctx.user_id.to_string()),
+        "instance.power.kill",
+        Some(instance_id),
+        serde_json::json!({ "accepted": true, "generation": generation }),
+    )
+    .await;
+    let mut response = Json(serde_json::json!({
+        "status": "accepted",
+        "action": "kill",
+        "instance_id": instance_id,
+        "generation": generation,
+    }))
+    .into_response();
+    *response.status_mut() = StatusCode::ACCEPTED;
+    Ok(response)
+}
+
+/// `POST /api/v1/instances/{id}/suspend` — `AdminInstance`.
+///
+/// Stop (graceful, bounded) and mark suspended; starts are rejected
+/// with `instance_state_conflict` until an admin lifts the
+/// suspension. Lifting is not in the §10.3 surface (a documented
+/// gap; the additive-change rule reserves it for a later revision).
+pub async fn suspend(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
+    let (_instance, ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
+    check_grants(&ctx, &[PermissionGrant::AdminInstance])?;
+
+    let generation = state
+        .supervisor
+        .request_power(
+            &instance_id,
+            PowerAction::Suspend {
+                deadline: STOP_DEADLINE,
+            },
+        )
+        .await
+        .map_err(power_error)?;
+    audit(
+        &state,
+        Some(ctx.user_id.to_string()),
+        "instance.power.suspend",
+        Some(instance_id),
+        serde_json::json!({ "accepted": true, "generation": generation }),
+    )
+    .await;
+    let mut response = Json(serde_json::json!({
+        "status": "accepted",
+        "action": "suspend",
+        "instance_id": instance_id,
+        "generation": generation,
+    }))
+    .into_response();
+    *response.status_mut() = StatusCode::ACCEPTED;
+    Ok(response)
+}
+
 // ── 501 stubs (later milestones) ──────────────────────────────────
-
-/// `POST /instances/{id}/start` — M6 (runtime abstraction).
-pub async fn start_stub() -> Result<Response, ApiError> {
-    Err(ApiError::NotImplemented {
-        feature: "instance power operations (start)",
-        milestone: "M6 (runtime abstraction + Docker runtime)",
-    })
-}
-
-/// `POST /instances/{id}/stop` — M6.
-pub async fn stop_stub() -> Result<Response, ApiError> {
-    Err(ApiError::NotImplemented {
-        feature: "instance power operations (stop)",
-        milestone: "M6 (runtime abstraction + Docker runtime)",
-    })
-}
-
-/// `POST /instances/{id}/restart` — M6.
-pub async fn restart_stub() -> Result<Response, ApiError> {
-    Err(ApiError::NotImplemented {
-        feature: "instance power operations (restart)",
-        milestone: "M6 (runtime abstraction + Docker runtime)",
-    })
-}
-
-/// `POST /instances/{id}/kill` — M6.
-pub async fn kill_stub() -> Result<Response, ApiError> {
-    Err(ApiError::NotImplemented {
-        feature: "instance power operations (kill)",
-        milestone: "M6 (runtime abstraction + Docker runtime)",
-    })
-}
 
 /// `POST /instances/{id}/install` — M8 (jobs).
 pub async fn install_stub() -> Result<Response, ApiError> {
     Err(ApiError::NotImplemented {
         feature: "instance install/reinstall",
         milestone: "M8 (jobs) + M9 (egg importer)",
-    })
-}
-
-/// `POST /instances/{id}/suspend` — M6.
-pub async fn suspend_stub() -> Result<Response, ApiError> {
-    Err(ApiError::NotImplemented {
-        feature: "instance suspend",
-        milestone: "M6 (runtime abstraction)",
     })
 }
 
