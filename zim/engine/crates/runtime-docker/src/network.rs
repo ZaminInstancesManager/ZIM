@@ -105,9 +105,22 @@ async fn create_network(docker: &Docker, settings: &DockerSettings) -> Result<()
         ..Default::default()
     };
 
-    docker
-        .create_network(request)
-        .await
-        .map_err(|e| map_error("network create", e))?;
-    Ok(())
+    match docker.create_network(request).await {
+        Ok(_) => Ok(()),
+        // 409 conflict: the network appeared between our inspect and
+        // create (a concurrent engine boot or test peer). That peer
+        // created exactly what we wanted; treat as success.
+        Err(e)
+            if matches!(
+                &e,
+                bollard::errors::Error::DockerResponseServerError {
+                    status_code: 409,
+                    ..
+                }
+            ) =>
+        {
+            Ok(())
+        }
+        Err(e) => Err(map_error("network create", e)),
+    }
 }

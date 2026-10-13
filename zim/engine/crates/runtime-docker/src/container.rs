@@ -416,6 +416,15 @@ async fn wait_not_running(
     match tokio::time::timeout(deadline, wait.next()).await {
         Ok(Some(Ok(_))) => Ok(()),
         Ok(Some(Err(e))) if is_not_found(&e) => Ok(()),
+        // A wait response that carries an exit report (bollard maps
+        // `status_code > 0` + an error field to this variant) means
+        // the container exited — exactly the outcome we are waiting
+        // for. The embedded "error" is docker's description of the
+        // exit (e.g. a kill), not a transport failure.
+        Ok(Some(Err(e @ bollard::errors::Error::DockerContainerWaitError { .. }))) => {
+            let _ = e;
+            Ok(())
+        }
         Ok(Some(Err(e))) => Err(map_error(operation, e)),
         // Stream ended without an item: treat as stopped.
         Ok(None) => Ok(()),
