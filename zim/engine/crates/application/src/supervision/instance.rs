@@ -376,6 +376,13 @@ async fn power_worker(inner: Arc<InstanceInner>, mut rx: mpsc::Receiver<PowerAct
 
 /// Apply one power action end-to-end (runs on the worker task only).
 async fn apply_power_action(inner: &Arc<InstanceInner>, action: PowerAction) {
+    if std::env::var("ZIM_DBG").is_ok() {
+        eprintln!(
+            "DBG action {:?} (observed {:?})",
+            action,
+            current_observed(inner)
+        );
+    }
     match action {
         PowerAction::Start => apply_start(inner).await,
         PowerAction::Stop { deadline } => apply_stop(inner, deadline, DesiredState::Stopped).await,
@@ -453,6 +460,9 @@ async fn apply_stop(inner: &Arc<InstanceInner>, deadline: Duration, final_desire
     set_desired(inner, final_desired);
 
     let stopping = matches!(was, ObservedState::Running { .. } | ObservedState::Starting);
+    if std::env::var("ZIM_DBG").is_ok() {
+        eprintln!("DBG   stop: was={:?} stopping={}", was, stopping);
+    }
     if stopping {
         set_observed(inner, ObservedState::Stopping { since: Utc::now() });
         persist_status(inner).await;
@@ -554,6 +564,13 @@ async fn monitor_loop(inner: Arc<InstanceInner>) {
             continue;
         }
 
+        if std::env::var("ZIM_DBG").is_ok() {
+            eprintln!(
+                "DBG   monitor sample {:?} (observed {:?})",
+                sample,
+                current_observed(&inner)
+            );
+        }
         match sample {
             Ok(state) => match state {
                 s if s.is_running() => {
@@ -564,6 +581,17 @@ async fn monitor_loop(inner: Arc<InstanceInner>) {
                     exit_code,
                     oom_killed,
                 } => {
+                    // A death is only a Running-to-Offline transition.
+                    // While the power worker owns a transitional state
+                    // (a start in flight — including a restart's start
+                    // phase, where a *previous* start's monitor is
+                    // still armed — or a stop in flight), an Offline
+                    // sample is expected progress and the worker's own
+                    // outcome handling owns it. Acting on it here
+                    // would misread the pre-start window as a crash.
+                    if !current_observed(&inner).is_running() {
+                        break;
+                    }
                     let desired = read_desired(&inner);
                     if desired.wants_running() {
                         handle_crash(&inner, exit_code, oom_killed).await;
@@ -580,11 +608,17 @@ async fn monitor_loop(inner: Arc<InstanceInner>) {
                     break;
                 }
                 ObservedState::Unknown => {
-                    set_observed(&inner, ObservedState::Unknown);
+                    // Same guard: an unreachable backend matters when
+                    // the instance was believed running; transitional
+                    // states have the worker's own error handling.
+                    if current_observed(&inner).is_running() {
+                        set_observed(&inner, ObservedState::Unknown);
+                    }
                     break;
                 }
-                // Starting/Stopping are worker-owned transitional
-                // states; keep polling.
+                // Starting/Stopping samples never come from a
+                // container runtime (they are engine-side states);
+                // keep polling defensively.
                 _ => {}
             },
             Err(e) if e.is_unavailable() => {

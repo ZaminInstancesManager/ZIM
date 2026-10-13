@@ -280,27 +280,43 @@ async fn power_queue_serializes() {
             },
         ));
     }
+    let mut request_errors = Vec::new();
     for handle in handles {
-        let _ = handle.await;
+        if let Err(e) = handle.await {
+            request_errors.push(e);
+        }
     }
+    assert!(
+        request_errors.is_empty(),
+        "all six restarts must be accepted: {request_errors:?}"
+    );
 
-    // Wait until the queue drains: the restart burst ends running.
+    // Wait until the queue actually drains: "currently running" is
+    // true after *any* restart completes, so the waitable condition
+    // is the counters — the initial start plus every restart's stop
+    // and start have all run.
     assert!(
         soon(|| async {
-            let snapshot = supervisor.observed(&id).await.unwrap();
-            snapshot.desired == DesiredState::Started && snapshot.observed.is_running()
+            let calls = slow_mock.calls();
+            calls.started >= 7 && calls.stopped >= 6
         })
-        .await
+        .await,
+        "queue must drain"
     );
 
     // The invariant: no two runtime operations ever overlapped, and
     // every restart's stop actually ran (no dropped/deduped actions).
     assert_eq!(slow_mock.max_concurrent(), 1, "power queue must serialize");
     let calls = slow_mock.calls();
+    let snapshot = supervisor.observed(&id).await.unwrap();
     assert!(
         calls.stopped >= 6,
-        "all restart stops ran: {}",
-        calls.stopped
+        "all restart stops ran: {} (started {}, entries {:?}, final desired {:?} observed {:?})",
+        calls.stopped,
+        calls.started,
+        calls.entries,
+        snapshot.desired,
+        snapshot.observed
     );
     assert!(
         calls.started >= 7,
@@ -344,34 +360,26 @@ async fn power_action_race() {
         join.await.unwrap();
     }
 
-    // Everything settles into a defined state (no hanging
-    // Starting/Stopping forever, no Unknown from a healthy backend).
+    // Everything settles into a *self-consistent* state: no hanging
+    // Starting/Stopping, no Unknown, and no torn snapshot (the two
+    // locks are read in sequence, so mid-transition pairs like
+    // desired-stopped/observed-running can be read while an action
+    // applies — wait them out rather than diagnosing them).
     assert!(
         soon(|| async {
             let snapshot = supervisor.observed(&id).await.unwrap();
             matches!(
-                snapshot.observed,
-                ObservedState::Offline { .. } | ObservedState::Running { .. }
+                (&snapshot.desired, &snapshot.observed),
+                (DesiredState::Started, ObservedState::Running { .. })
+                    | (
+                        DesiredState::Stopped | DesiredState::Killed | DesiredState::Suspended,
+                        ObservedState::Offline { .. },
+                    )
             )
         })
-        .await
+        .await,
+        "race must settle into a consistent outcome"
     );
-
-    // Consistency: observed and desired agree in the steady state.
-    let snapshot = supervisor.observed(&id).await.unwrap();
-    match (&snapshot.desired, &snapshot.observed) {
-        (DesiredState::Started, ObservedState::Running { .. }) => {}
-        (
-            DesiredState::Stopped | DesiredState::Killed | DesiredState::Suspended,
-            ObservedState::Offline { .. },
-        ) => {}
-        // Restart-composites can leave Started+Running or, if the
-        // last action was a stop-type, stopped+offline — covered
-        // above. Anything else is an undefined outcome:
-        (other_desired, other_observed) => {
-            panic!("undefined race outcome: desired {other_desired:?} observed {other_observed:?}")
-        }
-    }
     supervisor.shutdown().await;
 }
 
