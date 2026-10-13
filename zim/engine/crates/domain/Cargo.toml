@@ -12,3 +12,14 @@ documentation.workspace = true
 [lib]
 name = "zim_engine_domain"
 path = "src/lib.rs"
+
+[dependencies]
+# Domain types use serde for (de)serialization round-trips and uuid for
+# strongly-typed identifiers. chrono provides timestamps. thiserror is
+# for typed errors that will be introduced in later M3 work (e.g.
+# DomainError for validation failures).
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
