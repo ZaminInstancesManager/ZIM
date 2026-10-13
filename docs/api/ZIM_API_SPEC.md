@@ -366,6 +366,64 @@ or for cursor pagination:
 | POST   | `/api/v1/frontend/smoke-test` | Run smoke test on a candidate package. | admin          |
 | POST   | `/api/v1/frontend/reset`      | Reset to default.                    | admin            |
 
+### 10.15 Workloads (canonical, per AD-19)
+
+The `/api/v1/workloads` surface is the canonical resource for managed
+workloads. The legacy `/api/v1/instances` surface (§10.3) is preserved
+as a back-compat alias that maps to the same handlers; new integrations
+and new user-facing documentation use the `workloads` form.
+
+| Method | Path                                          | Description                                                | Required grants |
+|--------|-----------------------------------------------|------------------------------------------------------------|------------------|
+| GET    | `/api/v1/workloads`                            | List workloads (filtered by user's perms, by kind).       | (any session)    |
+| POST   | `/api/v1/workloads`                            | Create workload (kind required; spec is kind-specific).    | `workload.create` or `workload.create.{kind}` |
+| GET    | `/api/v1/workloads/{id}`                       | Get workload (kind + spec + state).                       | any workload grant for this id |
+| PATCH  | `/api/v1/workloads/{id}`                       | Update workload spec (kind-specific fields).              | `workload.update` or admin |
+| DELETE | `/api/v1/workloads/{id}`                       | Delete workload.                                            | `workload.delete` or admin |
+| GET    | `/api/v1/workloads/{id}/state`                 | Observed state + readiness (if `ReadyProbeCapable`).      | any workload grant |
+| POST   | `/api/v1/workloads/{id}/start`                 | Start.                                                      | `control.start` |
+| POST   | `/api/v1/workloads/{id}/stop`                  | Stop (graceful; runtime-specific semantics).               | `control.stop` |
+| POST   | `/api/v1/workloads/{id}/restart`               | Restart.                                                    | `control.restart` |
+| POST   | `/api/v1/workloads/{id}/kill`                  | Force-kill.                                                 | `control.stop` (elevated) |
+| POST   | `/api/v1/workloads/{id}/install`               | Install / reinstall.                                        | `install` |
+| POST   | `/api/v1/workloads/{id}/migrate`               | Initiate migration to another node (returns JobId).        | `workload.migrate` |
+| GET    | `/api/v1/workloads/{id}/capabilities`         | List the runtime's declared capabilities for this workload. | any workload grant |
+| POST   | `/api/v1/workloads/{id}/console/input`         | Send console input (returns 409 `unsupported` if runtime is not `ConsoleCapable`). | `control.console` |
+| GET    | `/api/v1/workloads/{id}/network/endpoints`     | List network endpoints (409 `unsupported` if not `NetworkCapable`). | `network.read` or any workload grant |
+| POST   | `/api/v1/workloads/{id}/network/endpoints`     | Expose a new port (409 `unsupported` if not `NetworkCapable`). | `network.expose` |
+| DELETE | `/api/v1/workloads/{id}/network/endpoints/{eid}` | Unexpose a port.                                         | `network.unexpose` |
+| POST   | `/api/v1/workloads/{id}/deploy`                | Deploy a new version (Website workloads only; 409 otherwise). | `workload.deploy` |
+| POST   | `/api/v1/workloads/{id}/snapshot`              | Request a snapshot (returns JobId; 409 if not `SnapshotCapable`). | `workload.snapshot` |
+
+### 10.16 Workload integrations (admin surface)
+
+| Method | Path                                                | Description                                                | Required grants |
+|--------|------------------------------------------------------|------------------------------------------------------------|------------------|
+| GET    | `/api/v1/workload-integrations`                       | List installed integrations (first-party + third-party).   | admin            |
+| POST   | `/api/v1/workload-integrations`                       | Upload a third-party integration package.                   | admin            |
+| GET    | `/api/v1/workload-integrations/{id}`                  | Get integration info (manifest + capabilities + kinds).    | admin            |
+| POST   | `/api/v1/workload-integrations/{id}/enable`           | Enable.                                                    | admin            |
+| POST   | `/api/v1/workload-integrations/{id}/disable`          | Disable (existing workloads of this kind continue but cannot be re-created). | admin            |
+| DELETE | `/api/v1/workload-integrations/{id}`                  | Uninstall (blocked if any workload of this kind exists).   | admin            |
+
+### 10.17 Back-compat aliasing rules
+
+The `/api/v1/instances` surface (§10.3) is preserved verbatim and
+internally aliased to `/api/v1/workloads`:
+
+- A workload of kind `GameServer` corresponds 1:1 to an Instance row.
+- All `/api/v1/instances/{id}/...` paths return the same responses
+  as `/api/v1/workloads/{id}/...` for the same id.
+- `/api/v1/instances` does not expose workload-kind-specific
+  endpoints (e.g. `/console/input` is present; `/network/endpoints`
+  is not — game servers have allocations, not multi-endpoint
+  networking).
+- New endpoints introduced for non-game-server workload kinds are
+  available only on the `/api/v1/workloads` surface.
+
+This satisfies AD-19 (workloads canonical, instances back-compat)
+without breaking existing client code that uses `/api/v1/instances`.
+
 ## 11. WebSocket event contract
 
 WSS endpoint: `wss://127.0.0.1:{port}/api/v1/stream?instance_id={id}`.

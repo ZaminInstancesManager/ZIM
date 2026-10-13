@@ -212,7 +212,7 @@ CI configuration is in `.github/workflows/` (TBD in implementation).
   network partitions, disk-full simulation, DB transaction
   failures, etc.
 
-## 10. Coverage discipline
+## 11. Coverage discipline
 
 ZIM does not enforce a coverage percentage target; instead, it
 enforces a *behavior coverage* target: every architectural invariant
@@ -221,3 +221,30 @@ corresponding test in the inventory in §2 above. Coverage tools
 (`tarpaulin` for Rust, `lcov` for Chromium C++) are run in CI and
 the results are reported, but the gate is the inventory, not a
 percentage.
+
+## 12. Expanded-scope invariant tests (workload abstraction)
+
+The expanded scope (see `docs/architecture/WORKLOAD_ABSTRACTION.md`)
+introduces additional invariants beyond the original 16. Each has a
+test in the inventory below; verification discipline (§7) applies
+— all are `Planned` until the corresponding implementation milestone
+produces a passing test.
+
+| # | Invariant                                                                                  | Test type                  | Test name                                                | Status |
+|---|----------------------------------------------------------------------------------------------|----------------------------|----------------------------------------------------------|--------|
+| E1 | A workload's required capabilities must be a subset of its runtime's declared capabilities.   | Engine integration         | `engine_integration::placement_capability_check`         | Planned |
+| E2 | A workload placed on an incompatible runtime is rejected at creation time.                  | Engine integration         | `engine_integration::placement_rejects_incompatible`     | Planned |
+| E3 | A capability call on a runtime that does not implement the trait returns `Unsupported`.     | Engine integration         | `engine_integration::unsupported_returns_error`         | Planned |
+| E4 | A workload's tab is a view; closing the tab does not stop the workload (generalized invariant 4 for all kinds). | E2E                        | `e2e::close_tab_keeps_workload_running`                  | Planned |
+| E5 | Multiple tabs of the same workload are multiple views, not multiple workloads (generalized invariant 6). | E2E                        | `e2e::three_tabs_one_workload`                           | Planned |
+| E6 | Restoring a session does not issue workload lifecycle commands (generalized invariant 5).  | E2E                        | `e2e::session_restore_no_lifecycle_workload`            | Planned |
+| E7 | A workload in `Recovering` state is shown yellow with a "recovering" tooltip, not green.    | E2E                        | `e2e::recovering_state_visual_mapping`                  | Planned |
+| E8 | A workload in `CrashLoop` state is shown red with a glyph, not solid red.                    | E2E                        | `e2e::crash_loop_visual_mapping`                        | Planned |
+| E9 | A workload on a disconnected remote node is shown gray with an "unknown" tooltip, not red. | E2E                        | `e2e::disconnected_node_visual_mapping`                 | Planned |
+| E10 | A workload integration's `WorkloadKind` scope is enforced at the API boundary.           | Engine integration         | `engine_integration::integration_kind_scope_enforced`    | Planned |
+| E11 | A `Migratable::migration_plan` for a database returns `requires_quiesce: true`.           | Engine integration         | `engine_integration::database_migration_quiesces`       | Planned |
+| E12 | An interrupted migration can be rolled back to a `MigrationCheckpoint`.                    | Engine fault-injection     | `engine_integration::migration_rollback`                | Planned |
+| E13 | A workload tab remains meaningful when its workload is stopped (shows the stopped state, not an error). | E2E                        | `e2e::stopped_workload_tab_meaningful`                  | Planned |
+| E14 | A workload tab remains meaningful when its workload is on an unreachable remote node.      | E2E                        | `e2e::unreachable_node_tab_meaningful`                  | Planned |
+| E15 | The legacy `/api/v1/instances` surface produces the same responses as `/api/v1/workloads` for `GameServer` workloads. | Engine integration         | `engine_integration::legacy_instances_alias`            | Planned |
+| E16 | The `/api/v1/workloads/{id}/console/input` endpoint returns `409 unsupported` for a non-`ConsoleCapable` workload. | Engine integration         | `engine_integration::console_unsupported_for_website`   | Planned |

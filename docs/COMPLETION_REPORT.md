@@ -575,3 +575,59 @@ The architecture-phase assignment is complete. The repository at
 
 The architecture is established; a separate implementation phase
 can now proceed without re-inventing the architecture as it goes.
+
+---
+
+## Addendum: Expanded scope (commit `5a61d1e1f`)
+
+The "Additional Master Requirements for ZIM" appended to the
+original prompt broaden ZIM from a Minecraft/game-server manager
+to a general workload-management platform. The architecture was
+extended additively to satisfy this expanded scope without
+discarding the original-scope work. Two new documents and updates
+to five existing documents were added:
+
+**New documents:**
+
+- `docs/architecture/WORKLOAD_ABSTRACTION.md` — canonical Workload
+  model wrapping the existing Instance type; `WorkloadKind` enum;
+  typed `WorkloadSpec` enum; nine capability traits
+  (`ConsoleCapable`, `ReadyProbeCapable`, `HealthCheckCapable`,
+  `FilesystemCapable`, `NetworkCapable`, `SnapshotCapable`,
+  `Migratable`, `ExecCapable`, `MetricsCapable`) as optional
+  `Runtime` extensions; capability discovery enforced at placement
+  time; integration package manifest (`zim.toml`); five logical
+  ownership layers.
+- `docs/architecture/ACCEPTANCE_CRITERIA.md` — explicit
+  demonstration of how the architecture satisfies each of the 10
+  expanded-scope acceptance criteria.
+
+**Updated documents:**
+
+- `docs/architecture/ZIM_ARCHITECTURE.md` — added §9 (Workload
+  generalization) reconciling the original server-flavored
+  architecture with the expanded scope.
+- `docs/architecture/RUST_ENGINE.md` — added §12 (Workload
+  capabilities and typed adapter traits) with the capability
+  trait inventory, capability discovery and enforcement model,
+  and workload integration crate structure.
+- `docs/architecture/DECISIONS.md` — added 7 new ADRs
+  (AD-13 through AD-19) covering the expanded scope.
+- `docs/audits/COMPONENT_DISPOSITION.md` — added §7 listing the
+  6 ZIM-original workload integration crates.
+- `README.md` — broadened product identity from Minecraft-specific
+  to general workload-management platform.
+
+**Architecture acceptance (per `ACCEPTANCE_CRITERIA.md`):** all
+10 expanded-scope acceptance criteria are satisfied at the
+architecture level; implementation verification is tracked in
+`docs/architecture/IMPLEMENTATION_ROADMAP.md` (milestones M16-M19
+cover workload integration implementation).
+
+**Verification status:** all expanded-scope architecture work is
+`Verified` at the documentation level (documents present on
+remote, cross-references consistent, ADRs recorded). All
+expanded-scope *implementation* is `Planned` (per the verification
+discipline in `docs/architecture/TEST_STRATEGY.md` §7); the
+expanded-scope invariant tests (E1-E16) are identified in
+`docs/architecture/TEST_STRATEGY.md` §12.

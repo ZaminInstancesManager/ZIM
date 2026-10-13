@@ -483,6 +483,118 @@ packaging.
 
 **Estimated effort:** 1 week (after M14).
 
+### M16: Workload integration SDK + first-party integration skeletons
+
+**Goal:** Implement the workload integration SDK and the five
+first-party integration crates as skeletons (lib.rs + Cargo.toml +
+the `WorkloadIntegration` trait impl with empty bodies).
+
+**Deliverables:**
+- `zim/engine/crates/workloads/sdk/` with the `WorkloadIntegration`
+  trait, the capability trait definitions, the manifest schema, and
+  the proc macros for `#[workload_integration]`.
+- `zim/engine/crates/workloads/minecraft/` skeleton.
+- `zim/engine/crates/workloads/database/` skeleton.
+- `zim/engine/crates/workloads/website/` skeleton.
+- `zim/engine/crates/workloads/dev_process/` skeleton.
+- `zim/engine/crates/workloads/generic_container/` skeleton.
+- A workspace-level feature flag (`--features workloads-all`) that
+  builds all five integrations.
+
+**Acceptance criteria:**
+- Each integration crate compiles with `cargo build -p
+  zim_engine_workloads_{minecraft,database,website,dev_process,
+  generic_container}`.
+- The SDK crate's `WorkloadIntegration` trait is documented with
+  doc-comments; an example integration in `sdk/examples/` shows how
+  to implement it.
+- `cargo test -p zim_engine_workloads_sdk` passes (the SDK has
+  unit tests for the manifest parser and the capability set type).
+
+**Estimated effort:** 2-3 weeks.
+
+### M17: Minecraft integration parity with Pterodactyl eggs
+
+**Goal:** Implement the Minecraft workload integration to the point
+where it can run a real Minecraft server from an imported egg.
+
+**Deliverables:**
+- Full `GameServerSpec` parsing from Pterodactyl egg JSON.
+- `ConsoleCapable` implementation (attach console stream, send
+  input).
+- `FilesystemCapable` implementation (list, read, write, delete,
+  archive, extract — the original Wings file API reproduced).
+- `ExecCapable` implementation (run install scripts in a
+  constrained container).
+- `MetricsCapable` implementation (resource usage via Docker stats).
+- `Migratable` implementation (file-copy migration; `migration_plan`
+  returns `requires_quiesce: true` for safety).
+- Integration tests against a real Minecraft server container.
+
+**Acceptance criteria:**
+- An imported Minecraft egg can be installed and started via the
+  ZIM API.
+- The console stream shows real Minecraft server output.
+- Stop sends `stop` to the console (Minecraft convention) and waits
+  for the process to exit.
+- A backup can be created and restored.
+
+**Estimated effort:** 4-6 weeks.
+
+### M18: Database integration (Postgres + MySQL/MariaDB + Redis)
+
+**Goal:** Implement the database workload integration for the
+three most common database engines.
+
+**Deliverables:**
+- `DatabaseSpec` parsing.
+- `ReadyProbeCapable` implementation (per-engine readiness probe:
+  `pg_isready`, `mysqladmin ping`, `redis-cli ping`).
+- `SnapshotCapable` implementation (Docker volume snapshot;
+  database quiesced via `CHECKPOINT` / `FLUSH TABLES WITH READ LOCK`
+  / `BGSAVE` before snapshot).
+- `NetworkCapable` implementation (multiple endpoints per
+  database: read/write/replication).
+- `Migratable` implementation with a multi-step plan: quiesce,
+  checkpoint WAL, snapshot, ship snapshot, restore, catch up.
+- Integration tests against real Postgres, MySQL/MariaDB, Redis
+  containers.
+
+**Acceptance criteria:**
+- A Postgres workload can be installed, started, queried via a
+  SQL client, snapshotted, and restored.
+- The readiness probe correctly reports `NotReady` during recovery
+  and `Ready` after.
+- A migration to a second node succeeds with documented downtime.
+
+**Estimated effort:** 4-6 weeks.
+
+### M19: Website + DevProcess + GenericContainer integrations
+
+**Goal:** Implement the remaining three first-party workload
+integrations.
+
+**Deliverables:**
+- Website integration: `WebsiteSpec` parsing, `HealthCheckCapable`
+  implementation (HTTP/TCP health checks), `NetworkCapable`
+  (HTTP/HTTPS/admin ports), deploy lifecycle (new version deployed
+  alongside old, drain old, switch).
+- DevProcess integration: `DevProcessSpec` parsing, file-watch
+  restart via `notify` crate, no install/backup expectations.
+- GenericContainer integration: `GenericContainerSpec` parsing,
+  capability negotiation at placement time (whatever the spec
+  declares is what the runtime must provide).
+- Integration tests for each.
+
+**Acceptance criteria:**
+- A static website can be deployed and served by ZIM.
+- A `cargo watch` dev process can be supervised with file-watch
+  restart.
+- A generic container can be placed on a runtime that provides
+  the capabilities it declares.
+
+**Estimated effort:** 3-4 weeks.
+
 ## 4. Out-of-scope for the first release
 
 The following are explicitly out-of-scope for the first ZIM

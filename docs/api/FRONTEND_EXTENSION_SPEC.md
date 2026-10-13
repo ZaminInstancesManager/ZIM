@@ -471,3 +471,28 @@ as third-party extensions; they have no special privileges.
 - The packaging format for distributing extensions to end users
   (preliminary: signed `.zimx` archives; details in
   `docs/architecture/IMPLEMENTATION_ROADMAP.md`).
+
+## 8. Workload integration packages (distinct from frontend packages)
+
+A workload integration package is **not** a frontend package and
+**not** a ZIM addon. It is a third category of package, governed by
+`docs/architecture/WORKLOAD_ABSTRACTION.md` §5 and AD-15 / AD-16 in
+`docs/architecture/DECISIONS.md`. The distinction is:
+
+| Package type                | What it provides                                | Manifest                | Loaded by               |
+|------------------------------|--------------------------------------------------|--------------------------|--------------------------|
+| Theme                        | Token values only (no code).                    | `zim.theme.json`         | Frontend loader.         |
+| Frontend package             | UI pages at `zim://` URLs.                      | `zim.frontend.json`     | Frontend loader.         |
+| ZIM addon (extension)        | UI surfaces + commands + sidebar + events.     | `zim.addon.json`         | Engine extension loader. |
+| **Workload integration**    | A `WorkloadKind` implementation (Rust library). | `zim.toml`               | Engine integration loader. |
+
+The workload integration manifest format is canonical in
+`docs/architecture/WORKLOAD_ABSTRACTION.md` §5; the engine's
+loading mechanism is documented in
+`docs/architecture/RUST_ENGINE.md` §12.4. The HTTP surface for
+managing installed workload integrations is documented in
+`docs/api/ZIM_API_SPEC.md` §10.16.
+
+This specification does not duplicate the workload integration
+contract; it cross-references it to keep the canonical location
+singular.
