@@ -27,8 +27,11 @@
 //!   API's state queries share one runtime handle.
 //! - The sketch's `Runtime::generation()` counter lives here on the
 //!   supervision side (the runtime reports state; supervision stamps
-//!   generations), and the `subscribers: StreamingSet` field arrives
-//!   with M7's streaming crate.
+//!   generations), and the sketch's `subscribers: StreamingSet`
+//!   field is realized as the shared `StreamHub` (M7): each
+//!   supervised instance publishes lifecycle
+//!   (`instance.state_change`) and resource-usage
+//!   (`instance.resource_usage`) events onto it.
 //! - Crash observation in M6 is a per-instance polling monitor; the
 //!   event-driven form (runtime events carrying generations) arrives
 //!   with M7 streaming. Stale-sample protection (invariant 13) is

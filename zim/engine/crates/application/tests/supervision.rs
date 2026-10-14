@@ -28,6 +28,9 @@ fn test_policy() -> SupervisionPolicy {
         crash: Default::default(),
         monitor_poll_interval: Duration::from_millis(50),
         stop_deadline: Duration::from_millis(500),
+        // The supervision tests assert exact call/state sequences;
+        // metrics events would add unrelated publishes.
+        stream_metrics: false,
     }
 }
 

@@ -54,13 +54,22 @@ subsequent implementation work will follow.
   `docs/architecture/IMPLEMENTATION_ROADMAP.md`: the domain model +
   SQLite persistence (M3), authentication + authorization (M4), the
   HTTPS loopback API surface with the runnable `zim_engine` binary
-  (M5), and the runtime abstraction + Docker runtime (M6 — instance
+  (M5), the runtime abstraction + Docker runtime (M6 — instance
   lifecycle with power-queue serialization, crash-loop protection,
   engine-restart reconciliation, and Wings-parity container
-  management over `pterodactyl0`) are delivered; streaming (M7),
-  jobs (M8) and later milestones remain. Operations that need
-  those milestones answer `501 not_implemented` per the API spec's
-  transitional vocabulary.
+  management over `pterodactyl0`), and streaming (M7 — the
+  `zim_engine_streaming` fan-out hub with per-instance event
+  generations, replay-from-checkpoint, drop-oldest backpressure,
+  the `/api/v1/stream` WebSocket endpoint with per-tab capability
+  token auth, supervision-published `instance.state_change` and
+  `instance.resource_usage` events, and the console/metrics read
+  endpoints) are delivered; jobs (M8) and later milestones remain,
+  as does the M7 follow-up of the Docker runtime's console attach
+  pump (runtime-side stdout streaming and stdin attach — the
+  engine-side plumbing is in place and answers `501
+  not_implemented` until the runtime ships it). Operations that
+  need those milestones answer `501 not_implemented` per the API
+  spec's transitional vocabulary.
 - A re-skinned Pterodactyl. The Panel's PHP/Laravel backend and Wings's Go
   daemon are preserved in `upstream/` as audit references and behavioral
   contracts; they are not part of ZIM's runtime architecture.

@@ -14,5 +14,14 @@ name = "zim_engine_streaming"
 path = "src/lib.rs"
 
 [dependencies]
-zim_engine_application = { workspace = true }
 zim_engine_domain = { workspace = true }
+# Subscriber notification (`Notify`) for the async `recv` surface and
+# the integration tests' runtime.
+tokio = { workspace = true, features = ["sync", "time", "macros", "rt"] }
+# Event timestamps (RFC 3339 in the wire envelope).
+chrono = { workspace = true }
+# Wire-envelope serialization (serde_json for the convenience helpers).
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Typed subscribe errors.
+thiserror = { workspace = true }

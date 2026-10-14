@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use zim_engine_application::ports::{Persistence, PersistenceError};
 use zim_engine_application::supervision::Supervisor;
-use zim_engine_auth::{ApiKeyManager, SessionManager};
+use zim_engine_auth::{ApiKeyManager, SessionManager, TabTokenManager};
 use zim_engine_domain::User;
 
 use crate::config::ApiConfig;
@@ -89,6 +89,9 @@ pub struct AppState {
     pub login_limiter: SlidingWindowLimiter,
     /// `Idempotency-Key` replay store (§12).
     pub idempotency: IdempotencyStore,
+    /// Per-tab capability tokens (M7; spec §3's third credential
+    /// kind, validated on the WebSocket stream).
+    pub tab_tokens: Arc<TabTokenManager>,
     /// Server configuration.
     pub config: ApiConfig,
 }
@@ -101,6 +104,7 @@ impl AppState {
         supervisor: Arc<Supervisor>,
         sessions: Arc<SessionManager>,
         api_keys: Arc<ApiKeyManager>,
+        tab_tokens: Arc<TabTokenManager>,
         config: ApiConfig,
     ) -> Self {
         Self {
@@ -114,6 +118,7 @@ impl AppState {
             ),
             login_limiter: SlidingWindowLimiter::new(config.login_rate_limit, config.login_window),
             idempotency: IdempotencyStore::new(config.idempotency_retention),
+            tab_tokens,
             config,
         }
     }

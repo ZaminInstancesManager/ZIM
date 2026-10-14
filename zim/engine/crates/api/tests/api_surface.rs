@@ -49,6 +49,7 @@ impl TestEngine {
             supervisor,
             Arc::new(SessionManager::new(Default::default())),
             Arc::new(ApiKeyManager::new()),
+            Arc::new(zim_engine_auth::TabTokenManager::new(Default::default())),
             config,
         ));
         let router = zim_engine_api::router(Arc::clone(&state));

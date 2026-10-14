@@ -17,8 +17,9 @@ use crate::ports::Persistence;
 use crate::supervision::crash::{CrashLoopPolicy, CrashState};
 use crate::supervision::runtime::Runtime;
 use crate::supervision::state::{
-    DesiredState, InstanceConfig, ObservedState, PortBinding, RuntimeError,
+    DesiredState, InstanceConfig, ObservedState, PortBinding, ResourceUsage, RuntimeError,
 };
+use zim_engine_streaming::{EventData, ResourceUsageData, StreamHub};
 
 /// Tunables of the supervision layer.
 #[derive(Debug, Clone)]
@@ -31,6 +32,10 @@ pub struct SupervisionPolicy {
     pub monitor_poll_interval: Duration,
     /// The default graceful-stop deadline for stop/restart/suspend.
     pub stop_deadline: Duration,
+    /// Whether the monitor publishes `instance.resource_usage`
+    /// events on each poll (M7). Off only for tests that assert
+    /// exact event sequences.
+    pub stream_metrics: bool,
 }
 
 impl Default for SupervisionPolicy {
@@ -39,6 +44,7 @@ impl Default for SupervisionPolicy {
             crash: CrashLoopPolicy::default(),
             monitor_poll_interval: Duration::from_secs(1),
             stop_deadline: Duration::from_secs(30),
+            stream_metrics: true,
         }
     }
 }
@@ -138,6 +144,11 @@ pub(crate) struct InstanceInner {
     cancel: CancellationToken,
     pub(crate) policy: SupervisionPolicy,
     persistence: Arc<dyn Persistence>,
+    /// The M7 streaming hub this instance publishes lifecycle and
+    /// resource-usage events onto (RUST_ENGINE.md §4's
+    /// `subscribers: StreamingSet` field, realized as the shared
+    /// hub the streaming crate owns).
+    stream: StreamHub,
 }
 
 impl SupervisedInstance {
@@ -154,6 +165,7 @@ impl SupervisedInstance {
         runtime: Arc<dyn Runtime>,
         persistence: Arc<dyn Persistence>,
         policy: SupervisionPolicy,
+        stream: StreamHub,
     ) -> Self {
         let (power_tx, power_rx) = mpsc::channel::<PowerAction>(16);
         let (revision_tx, _) = watch::channel(0u64);
@@ -177,6 +189,7 @@ impl SupervisedInstance {
             cancel: cancel.clone(),
             policy,
             persistence,
+            stream,
         });
 
         let worker_inner = Arc::clone(&inner);
@@ -276,6 +289,16 @@ impl SupervisedInstance {
     /// invariant 14: an explicit start clears the crash loop).
     pub fn clear_crash_state(&self) {
         self.inner.crash.clear();
+    }
+
+    /// Write to the target's stdin (M7 console input; the runtime
+    /// answers `Unsupported` until it maintains a persistent
+    /// attachment stream).
+    pub(crate) async fn send_input(
+        &self,
+        input: &[u8],
+    ) -> Result<(), crate::supervision::state::RuntimeError> {
+        self.inner.runtime.send_input(input).await
     }
 
     /// Refresh the runtime-facing configuration from a re-read
@@ -574,8 +597,18 @@ async fn monitor_loop(inner: Arc<InstanceInner>) {
         match sample {
             Ok(state) => match state {
                 s if s.is_running() => {
-                    // Still running: nothing to do (started_at/pid
-                    // refresh is M7 streaming's concern).
+                    // Still running: nothing to do state-wise. M7
+                    // streams a resource-usage sample per tick
+                    // (Wings's stats cadence); a failed sample is
+                    // skipped, not fatal — telemetry must never
+                    // trip the monitor.
+                    if inner.policy.stream_metrics {
+                        if let Ok(usage) = inner.runtime.stats().await {
+                            inner
+                                .stream
+                                .publish(inner.id, EventData::ResourceUsage(usage_to_wire(&usage)));
+                        }
+                    }
                 }
                 ObservedState::Offline {
                     exit_code,
@@ -691,6 +724,20 @@ async fn handle_crash(inner: &Arc<InstanceInner>, exit_code: Option<i32>, oom_ki
 
 // ── Small state helpers (all lock-then-release; never across await) ──
 
+/// Map the runtime's resource-usage observation onto the streaming
+/// crate's wire form (the application layer cannot leak its own
+/// types downward through the crate graph).
+fn usage_to_wire(usage: &ResourceUsage) -> ResourceUsageData {
+    ResourceUsageData {
+        cpu_usage_total_ns: usage.cpu_usage_total_ns,
+        system_cpu_total_ns: usage.system_cpu_total_ns,
+        online_cpus: usage.online_cpus,
+        memory_usage_bytes: usage.memory_usage_bytes,
+        memory_limit_bytes: usage.memory_limit_bytes,
+        pids_current: usage.pids_current,
+    }
+}
+
 fn read_desired(inner: &InstanceInner) -> DesiredState {
     *inner
         .desired
@@ -714,14 +761,32 @@ fn current_observed(inner: &InstanceInner) -> ObservedState {
 }
 
 /// Set the observed state and bump the generation (the transition
-/// counter — invariant 13's anchor).
+/// counter — invariant 13's anchor), publishing an
+/// `instance.state_change` event when the status vocabulary actually
+/// changed (M7; ZIM_API_SPEC.md §11.1).
+///
+/// No-op writes (the same observed state re-asserted by reconcile)
+/// still bump the supervision generation — the transition counter
+/// guards runtime-sample races, not the event stream — but emit no
+/// event, because a stream subscriber must see *transitions*, not
+/// re-assertions.
 fn set_observed(inner: &InstanceInner, observed: ObservedState) {
+    let from = current_observed(inner);
     *inner
         .observed
         .write()
-        .expect("supervision state poisoned by a panicking worker") = observed;
+        .expect("supervision state poisoned by a panicking worker") = observed.clone();
     inner.generation.fetch_add(1, Ordering::AcqRel);
     bump_revision(inner);
+    if from.status() != observed.status() {
+        inner.stream.publish(
+            inner.id,
+            EventData::StateChange {
+                from: from.status(),
+                to: observed.status(),
+            },
+        );
+    }
 }
 
 fn bump_revision(inner: &InstanceInner) {

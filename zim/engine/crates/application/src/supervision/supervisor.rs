@@ -15,6 +15,7 @@ use crate::supervision::instance::{
 use crate::supervision::runtime::RuntimeFactory;
 use crate::supervision::state::{DesiredState, InstanceConfig, ObservedState, RuntimeError};
 use zim_engine_domain::{InstanceStatus, NodeDeployment, NodeId};
+use zim_engine_streaming::StreamHub;
 
 /// The outcome of an engine-restart reconciliation pass.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -50,15 +51,36 @@ struct SupervisorInner {
     persistence: Arc<dyn Persistence>,
     policy: SupervisionPolicy,
     data_root: PathBuf,
+    stream: StreamHub,
 }
 
 impl Supervisor {
-    /// Assemble the supervisor over its ports.
+    /// Assemble the supervisor over its ports, with a default
+    /// streaming hub.
     pub fn new(
         persistence: Arc<dyn Persistence>,
         factory: Arc<dyn RuntimeFactory>,
         policy: SupervisionPolicy,
         data_root: PathBuf,
+    ) -> Arc<Self> {
+        Self::with_stream(
+            persistence,
+            factory,
+            policy,
+            data_root,
+            StreamHub::new_default(),
+        )
+    }
+
+    /// Assemble the supervisor over its ports with an explicit
+    /// streaming hub (composition roots that need a configured
+    /// [`zim_engine_streaming::StreamingPolicy`]).
+    pub fn with_stream(
+        persistence: Arc<dyn Persistence>,
+        factory: Arc<dyn RuntimeFactory>,
+        policy: SupervisionPolicy,
+        data_root: PathBuf,
+        stream: StreamHub,
     ) -> Arc<Self> {
         Arc::new(Self {
             inner: Arc::new(SupervisorInner {
@@ -67,8 +89,16 @@ impl Supervisor {
                 persistence,
                 policy,
                 data_root,
+                stream,
             }),
         })
+    }
+
+    /// The engine's streaming hub (M7): lifecycle and
+    /// resource-usage events published by supervision, consumed by
+    /// the `/api/v1/stream` WebSocket endpoint.
+    pub fn stream(&self) -> &StreamHub {
+        &self.inner.stream
     }
 
     /// The supervision policy (for tests and composition roots that
@@ -136,6 +166,7 @@ impl Supervisor {
             runtime,
             Arc::clone(&self.inner.persistence),
             self.inner.policy.clone(),
+            self.inner.stream.clone(),
         );
         self.inner
             .instances
@@ -395,6 +426,31 @@ impl Supervisor {
     /// Whether an instance is currently supervised.
     pub async fn is_supervised(&self, instance_id: &zim_engine_domain::InstanceId) -> bool {
         self.inner.instances.read().await.contains_key(instance_id)
+    }
+
+    /// Send console input to an instance's runtime (M7; spec
+    /// §10.3's `POST /instances/{id}/console/input`).
+    ///
+    /// Wings-parity: input goes straight to the attached target's
+    /// stdin, not through the power queue (input is not a lifecycle
+    /// action; a stopped target naturally rejects the write).
+    /// Returns the instance's current supervision generation for
+    /// the caller's correlation.
+    pub async fn send_console_input(
+        &self,
+        instance_id: &zim_engine_domain::InstanceId,
+        input: &[u8],
+    ) -> Result<u64, crate::supervision::state::RuntimeError> {
+        let supervised = self
+            .ensure_supervised_id(instance_id)
+            .await?
+            .ok_or_else(|| {
+                crate::supervision::state::RuntimeError::InvalidConfig(format!(
+                    "instance {instance_id} is not supervised by this engine"
+                ))
+            })?;
+        supervised.send_input(input).await?;
+        Ok(supervised.generation())
     }
 
     /// Stop every supervised instance's worker and monitor

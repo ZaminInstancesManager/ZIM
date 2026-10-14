@@ -43,8 +43,10 @@
 //!   console, backups creation, transfers initiation, eggs,
 //!   frontend packages, workload integrations).
 //!
-//! The WebSocket event stream (`/api/v1/stream`) is M7; the routes
-//! registered here cover the request/response surface only.
+//! The WebSocket event stream (`/api/v1/stream`, §11) shipped with
+//! M7: `handlers::stream` upgrades authorized subscribers onto the
+//! streaming hub, with replay-from-checkpoint and the §11.2
+//! backpressure contract enforced crate-side.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

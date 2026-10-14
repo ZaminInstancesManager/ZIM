@@ -1180,6 +1180,24 @@ fn power_error(error: zim_engine_application::supervision::PowerError) -> ApiErr
     }
 }
 
+/// Map a console-input runtime failure onto the API vocabulary.
+///
+/// `Unsupported` is the expected answer from runtimes without a
+/// persistent attachment stream (the Docker attach pump is the M7
+/// follow-up): the endpoint answers the spec's `501
+/// not_implemented` instead of failing as an internal error.
+fn runtime_input_error(error: zim_engine_application::supervision::RuntimeError) -> ApiError {
+    use zim_engine_application::supervision::RuntimeError;
+    match error {
+        RuntimeError::Unsupported { .. } => ApiError::NotImplemented {
+            feature: "console input",
+            milestone: "M7 follow-up (runtime attach)",
+        },
+        RuntimeError::Unavailable(message) => ApiError::RuntimeUnavailable { message },
+        other => ApiError::internal(format!("console input failed: {other}")),
+    }
+}
+
 /// The graceful-stop deadline for API-initiated stops/restarts
 /// (Wings's panel stop timeout convention).
 const STOP_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
@@ -1422,28 +1440,137 @@ pub async fn cancel_transfer_stub() -> Result<Response, ApiError> {
     })
 }
 
-/// `GET /instances/{id}/console` — M7 (streaming).
-pub async fn console_stub() -> Result<Response, ApiError> {
-    Err(ApiError::NotImplemented {
-        feature: "console buffer reads",
-        milestone: "M7 (streaming) + M6 (runtime)",
-    })
+/// `GET /instances/{id}/console` — the retained console buffer
+/// (M7; spec §10.3).
+///
+/// Serves the streaming hub's bounded per-instance console lane
+/// (oldest first) with the generation cursor a reconnecting
+/// client needs (`last_generation` is what to pass as
+/// `?since_generation`). Requires `WebsocketConnect` +
+/// `ControlConsole` (read) per the §10.3 table.
+pub async fn console(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
+    let (_instance, ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
+    check_grants(
+        &ctx,
+        &[
+            PermissionGrant::WebsocketConnect,
+            PermissionGrant::ControlConsole,
+        ],
+    )?;
+
+    let buffer = state.supervisor.stream().console_buffer(instance_id);
+    let events: Vec<serde_json::Value> = buffer
+        .iter()
+        .map(|event| serde_json::to_value(&**event).unwrap_or_default())
+        .collect();
+    Ok(Json(serde_json::json!({
+        "instance_id": instance_id,
+        "events": events,
+        "last_generation": state.supervisor.stream().last_generation(instance_id),
+    })))
 }
 
-/// `POST /instances/{id}/console/input` — M7.
-pub async fn console_input_stub() -> Result<Response, ApiError> {
-    Err(ApiError::NotImplemented {
-        feature: "console input",
-        milestone: "M7 (streaming) + M6 (runtime)",
-    })
+/// `POST /instances/{id}/console/input` — send console input
+/// (M7 wiring; spec §10.3).
+///
+/// The request body is `{ "line": "say hello" }`; the line is
+/// validated against the §13 console-input length limit (64 KB)
+/// and forwarded to the runtime's `send_input`. Runtimes without a
+/// persistent attachment stream answer `501 not_implemented`
+/// (the Docker adapter's attach pump is the M7 follow-up tracked
+/// in the repository issues), so the endpoint's shape — auth,
+/// validation, and the structured error vocabulary — is already
+/// the final one.
+pub async fn console_input(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<String>,
+    body: Option<Json<serde_json::Value>>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
+    let (_instance, ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
+    check_grants(&ctx, &[PermissionGrant::ControlConsole])?;
+
+    // Spec §13: 64 KB console-input line limit.
+    const MAX_CONSOLE_INPUT_BYTES: usize = 64 * 1024;
+    let line = body
+        .and_then(|Json(value)| {
+            value
+                .get("line")
+                .and_then(|l| l.as_str())
+                .map(str::to_owned)
+        })
+        .ok_or_else(|| {
+            ApiError::validation(
+                "the request body must be a JSON object with a string \"line\" field",
+                "line",
+            )
+        })?;
+    if line.len() > MAX_CONSOLE_INPUT_BYTES {
+        return Err(ApiError::PayloadTooLarge {
+            limit: MAX_CONSOLE_INPUT_BYTES,
+        });
+    }
+
+    // Wings-parity: console input goes straight to the attached
+    // container's stdin (not through the power queue — input is not
+    // a lifecycle action). Runtimes without a persistent attachment
+    // stream answer the structured 501 below.
+    let generation = state
+        .supervisor
+        .send_console_input(&instance_id, line.as_bytes())
+        .await
+        .map_err(runtime_input_error)?;
+
+    audit(
+        &state,
+        Some(ctx.user_id.to_string()),
+        "instance.console.input",
+        Some(instance_id),
+        serde_json::json!({ "bytes": line.len(), "generation": generation }),
+    )
+    .await;
+    Ok(Json(serde_json::json!({
+        "status": "sent",
+        "instance_id": instance_id,
+        "bytes": line.len(),
+    })))
 }
 
-/// `GET /instances/{id}/metrics` — M7.
-pub async fn metrics_stub() -> Result<Response, ApiError> {
-    Err(ApiError::NotImplemented {
-        feature: "metrics queries",
-        milestone: "M7 (streaming + metrics)",
-    })
+/// `GET /instances/{id}/metrics` — M7: recent resource-usage
+/// samples from the monitor's event lane (the last 300 by default;
+/// the samples are the same `instance.resource_usage` payloads the
+/// stream delivers). Requires any instance grant (the §10.3
+/// table's "any instance grant").
+pub async fn metrics(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
+    let (_instance, _ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
+
+    /// How many recent samples the un-parameterized view returns
+    /// (§10.3's pagination arrives with the frontend milestone).
+    const METRICS_WINDOW: usize = 300;
+    let samples = state
+        .supervisor
+        .stream()
+        .recent_metrics(instance_id, METRICS_WINDOW);
+    let events: Vec<serde_json::Value> = samples
+        .iter()
+        .map(|event| serde_json::to_value(&**event).unwrap_or_default())
+        .collect();
+    Ok(Json(serde_json::json!({
+        "instance_id": instance_id,
+        "samples": events,
+        "last_generation": state.supervisor.stream().last_generation(instance_id),
+    })))
 }
 
 /// The file-API family — M6 (`FilesystemCapable` runtime).

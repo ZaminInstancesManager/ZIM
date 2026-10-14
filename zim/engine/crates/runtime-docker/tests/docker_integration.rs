@@ -695,6 +695,7 @@ async fn supervisor_crash_loop_over_docker() {
             crash: Default::default(),
             monitor_poll_interval: Duration::from_millis(200),
             stop_deadline: Duration::from_secs(10),
+            stream_metrics: false,
         },
         test_settings().data_root,
     );
@@ -829,6 +830,7 @@ async fn supervisor_reconcile_over_docker() {
             crash: Default::default(),
             monitor_poll_interval: Duration::from_millis(200),
             stop_deadline: Duration::from_secs(10),
+            stream_metrics: false,
         },
         test_settings().data_root,
     );

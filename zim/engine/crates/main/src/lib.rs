@@ -26,7 +26,7 @@ use zim_engine_application::ports::Persistence;
 use zim_engine_application::supervision::{
     NullRuntimeFactory, RuntimeFactory, SupervisionPolicy, Supervisor,
 };
-use zim_engine_auth::{ApiKeyManager, SessionManager};
+use zim_engine_auth::{ApiKeyManager, SessionManager, TabTokenManager};
 use zim_engine_domain::{Node, NodeCapabilities, NodeDeployment, NodeState, User};
 
 /// Process-wide engine options (CLI + environment).
@@ -178,6 +178,8 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
     // ── Credential managers (in-memory by design; see auth crate) ─
     let sessions = Arc::new(SessionManager::new(Default::default()));
     let api_keys = Arc::new(ApiKeyManager::new());
+    // Per-tab capability tokens for the WebSocket stream (M7).
+    let tab_tokens = Arc::new(TabTokenManager::new(Default::default()));
 
     // ── API server ────────────────────────────────────────────────
     let state = Arc::new(AppState::new(
@@ -185,6 +187,7 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         Arc::clone(&supervisor),
         Arc::clone(&sessions),
         Arc::clone(&api_keys),
+        Arc::clone(&tab_tokens),
         ApiConfig::default(),
     ));
     let router = zim_engine_api::router(Arc::clone(&state));

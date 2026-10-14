@@ -9,7 +9,7 @@ use axum::middleware::from_fn_with_state;
 use axum::routing::{delete, get, patch, post};
 use axum::Router;
 
-use crate::handlers::{audit, auth, instances, misc, nodes, users};
+use crate::handlers::{audit, auth, instances, misc, nodes, stream, users};
 use crate::middleware;
 use crate::state::AppState;
 
@@ -24,8 +24,12 @@ use crate::state::AppState;
 /// - Implemented in M6: instance lifecycle (start/stop/restart/
 ///   kill/suspend + live observed state) through the supervision
 ///   module.
+/// - Implemented in M7: the WebSocket event stream (`/stream`,
+///   §11), the console buffer read, console input (through to the
+///   runtime port — runtimes without an attachment stream still
+///   answer 501), and the metrics snapshot.
 /// - Declared but 501 `not_implemented`: files (M6 filesystem
-///   capability), console/metrics (M7), backup mutations (M8),
+///   capability), backup mutations (M8),
 ///   transfer initiation (M8), schedules run (M9), eggs (M9),
 ///   frontend packages (M11), workload integrations (M16), OAuth
 ///   (post-M5).
@@ -35,6 +39,8 @@ pub fn router(state: Arc<AppState>) -> Router {
     let api = Router::new()
         // ── Health (additive, unauthenticated) ────────────────────
         .route("/health", get(misc::health))
+        // ── Event stream (§11; M7) ────────────────────────────────
+        .route("/stream", get(stream::stream))
         // ── Auth (§10.1) ──────────────────────────────────────────
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
@@ -77,12 +83,12 @@ pub fn router(state: Arc<AppState>) -> Router {
                 .post(instances::transfer_stub)
                 .delete(instances::cancel_transfer_stub),
         )
-        .route("/instances/{id}/console", get(instances::console_stub))
+        .route("/instances/{id}/console", get(instances::console))
         .route(
             "/instances/{id}/console/input",
-            post(instances::console_input_stub),
+            post(instances::console_input),
         )
-        .route("/instances/{id}/metrics", get(instances::metrics_stub))
+        .route("/instances/{id}/metrics", get(instances::metrics))
         .route(
             "/instances/{id}/files",
             get(instances::files_stub).delete(instances::files_stub),
@@ -169,7 +175,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route(
             "/workloads/{id}/console/input",
-            post(instances::console_input_stub),
+            post(instances::console_input),
         )
         .route(
             "/workloads/{id}/network/endpoints",

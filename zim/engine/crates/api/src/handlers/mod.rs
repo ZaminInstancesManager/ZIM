@@ -13,6 +13,7 @@ pub mod auth;
 pub mod instances;
 pub mod misc;
 pub mod nodes;
+pub mod stream;
 pub mod users;
 
 use std::sync::Arc;

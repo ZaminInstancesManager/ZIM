@@ -29,6 +29,11 @@
 //! - `api_key`: API key manager (`zim_<key_id>_<secret>` format,
 //!   scoped to a `PermissionSet`, optional expiry, revocation, and
 //!   last-use tracking).
+//! - `tab_token` (M7): per-tab capability tokens — short-lived,
+//!   instance-scoped, tied to a tab session, and revocable on tab
+//!   close (engine-side support for ZIM_API_SPEC.md §3's third
+//!   credential kind; the browser-side issuance flow arrives with
+//!   the integration milestone).
 //!
 //! The HTTP middleware (cookie attributes, `Authorization: Bearer`
 //! parsing, and the `401`/`403` mapping) lands with the API surface
@@ -48,11 +53,15 @@
 pub mod api_key;
 pub mod password;
 pub mod session;
+pub mod tab_token;
 pub mod token;
 
 pub use api_key::{ApiKeyError, ApiKeyManager, ApiKeyRecord, IssuedApiKey};
 pub use password::{PasswordError, PasswordPolicy};
 pub use session::{IssuedSession, Session, SessionError, SessionManager, SessionPolicy};
+pub use tab_token::{
+    new_tab_id, IssuedTabToken, TabTokenError, TabTokenManager, TabTokenPolicy, TabTokenView,
+};
 
 /// The canonical crate name, useful for runtime identification in
 /// logs and crash reports.

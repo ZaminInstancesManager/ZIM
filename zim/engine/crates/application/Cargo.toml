@@ -23,6 +23,11 @@ test-util = []
 
 [dependencies]
 zim_engine_domain = { workspace = true }
+# M7: the streaming hub — supervision publishes lifecycle
+# (instance.state_change) and resource-usage events onto it; the
+# crate graph keeps streaming below the application layer
+# (RUST_ENGINE.md §2).
+zim_engine_streaming = { workspace = true }
 # Supervision (M6): the power queue, crash monitor, and reconcile
 # pass are tokio tasks; the sync Persistence port is bridged with
 # spawn_blocking exactly like the M5 api crate.

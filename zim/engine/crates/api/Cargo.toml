@@ -18,10 +18,14 @@ zim_engine_domain = { workspace = true }
 zim_engine_application = { workspace = true }
 zim_engine_auth = { workspace = true }
 zim_engine_authz = { workspace = true }
+# The M7 streaming hub (supervision publishes; the stream endpoint
+# subscribes).
+zim_engine_streaming = { workspace = true }
 # Async runtime (listener, middleware, spawn_blocking bridge).
 tokio = { workspace = true }
-# HTTP framework: router, extractors, `from_fn` middleware.
-axum = { workspace = true }
+# HTTP framework: router, extractors, `from_fn` middleware, and
+# (M7) the `/api/v1/stream` WebSocket upgrade.
+axum = { workspace = true, features = ["ws"] }
 # `ServiceExt::oneshot` for handler-level tests.
 tower = { workspace = true }
 # Connection serving under the manual TLS accept loop.
@@ -48,10 +52,15 @@ uuid = { workspace = true }
 thiserror = { workspace = true }
 # ETag/idempotency fingerprint digests.
 sha2 = { workspace = true }
+# M7: splitting the WebSocket socket (SinkExt/StreamExt) in the
+# stream handler.
+futures-util = { workspace = true }
 
 [dev-dependencies]
 # In-memory persistence adapter for integration tests.
 zim_engine_persistence_sqlite = { workspace = true }
+# The streaming hub's types for the WebSocket tests.
+zim_engine_streaming = { workspace = true }
 # The scripted mock runtime for the lifecycle endpoint tests
 # (no Docker dependency in the workspace's main CI job).
 zim_engine_application = { workspace = true, features = ["test-util"] }
@@ -61,3 +70,9 @@ reqwest = { version = "0.12", default-features = false, features = [
     "rustls-tls",
     "json",
 ] }
+# M7: the WebSocket client for the `/api/v1/stream` integration
+# tests (plain-HTTP upgrade against a test router; no TLS needed
+# because the handshake-level auth tests assert statuses the
+# middleware produces before the socket exists).
+tokio-tungstenite = ">=0.26, <0.28"
+futures-util = { workspace = true }
