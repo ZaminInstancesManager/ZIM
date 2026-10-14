@@ -827,8 +827,13 @@ impl Persistence for crate::SqlitePersistence {
         self.with_conn(|conn| {
             let mut stmt = conn
                 .prepare(
+                    // Most recent first: the transfers table has no
+                    // timestamps, so insertion order (rowid) is the
+                    // recency signal — "current transfer status"
+                    // reads want the newest row, not an arbitrary
+                    // UUID sort.
                     "SELECT id, instance_id, job_id, from_node_id, to_node_id, state, archive_path
-                     FROM transfers WHERE instance_id = ?1 ORDER BY id",
+                     FROM transfers WHERE instance_id = ?1 ORDER BY rowid DESC",
                 )
                 .map_err(db_err)?;
             let mut rows = stmt

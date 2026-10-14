@@ -10,6 +10,7 @@ use zim_engine_auth::{ApiKeyManager, SessionManager, TabTokenManager};
 use zim_engine_backups::BackupService;
 use zim_engine_domain::User;
 use zim_engine_jobs::JobSystem;
+use zim_engine_transfers::TransferService;
 
 use crate::config::ApiConfig;
 use crate::error::ApiError;
@@ -100,6 +101,9 @@ pub struct AppState {
     /// The backup service (M8): backup create/restore/delete/lock
     /// and archive downloads.
     pub backups: Arc<BackupService>,
+    /// The transfer service (M8.2): transfer initiation, cancel,
+    /// and status reads.
+    pub transfers: Arc<TransferService>,
     /// Server configuration.
     pub config: ApiConfig,
 }
@@ -108,8 +112,8 @@ impl AppState {
     /// Assemble the state from its parts. The two limiters are
     /// constructed from `config`'s budgets.
     ///
-    /// (Eight parts is the honest composition surface — a builder
-    /// would hide which two halves are optional; nothing here is.)
+    /// (Nine parts is the honest composition surface — a builder
+    /// would hide which halves are optional; nothing here is.)
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         persistence: Arc<dyn Persistence>,
@@ -119,6 +123,7 @@ impl AppState {
         tab_tokens: Arc<TabTokenManager>,
         jobs: Arc<JobSystem>,
         backups: Arc<BackupService>,
+        transfers: Arc<TransferService>,
         config: ApiConfig,
     ) -> Self {
         Self {
@@ -135,6 +140,7 @@ impl AppState {
             tab_tokens,
             jobs,
             backups,
+            transfers,
             config,
         }
     }

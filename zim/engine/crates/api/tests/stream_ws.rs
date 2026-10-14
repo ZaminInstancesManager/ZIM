@@ -77,6 +77,15 @@ impl StreamEngine {
             std::env::temp_dir().join("zim-stream-test"),
         );
         backups.register().await;
+        // M8.2: the transfer service (the §10.9 mutation family) —
+        // registered for parity with the production assembly.
+        let transfers = zim_engine_transfers::TransferService::new(
+            Arc::clone(&persistence),
+            Arc::clone(&jobs),
+            Arc::clone(&supervisor),
+            std::env::temp_dir().join("zim-stream-test"),
+        );
+        transfers.register().await;
         jobs.start();
         let state = Arc::new(AppState::new(
             Arc::clone(&persistence),
@@ -86,6 +95,7 @@ impl StreamEngine {
             Arc::clone(&tab_tokens),
             Arc::clone(&jobs),
             Arc::clone(&backups),
+            Arc::clone(&transfers),
             ApiConfig::default(),
         ));
         let router =

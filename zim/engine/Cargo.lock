@@ -2291,6 +2291,7 @@ dependencies = [
  "zim_engine_jobs",
  "zim_engine_persistence_sqlite",
  "zim_engine_streaming",
+ "zim_engine_transfers",
 ]
 
 [[package]]
@@ -2441,6 +2442,7 @@ dependencies = [
  "zim_engine_runtime_docker",
  "zim_engine_scheduler",
  "zim_engine_streaming",
+ "zim_engine_transfers",
 ]
 
 [[package]]
@@ -2531,9 +2533,17 @@ dependencies = [
 name = "zim_engine_transfers"
 version = "0.0.1"
 dependencies = [
+ "async-trait",
+ "chrono",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "uuid",
  "zim_engine_application",
+ "zim_engine_backups",
  "zim_engine_domain",
  "zim_engine_jobs",
+ "zim_engine_persistence_sqlite",
 ]
 
 [[package]]

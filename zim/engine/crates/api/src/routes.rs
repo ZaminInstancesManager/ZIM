@@ -24,15 +24,17 @@ use crate::state::AppState;
 /// - Implemented in M6: instance lifecycle (start/stop/restart/
 ///   kill/suspend + live observed state) through the supervision
 ///   module.
-/// - Implemented in M7: the WebSocket event stream (`/stream`,
-///   §11), the console buffer read, console input (through to the
-///   runtime port — runtimes without an attachment stream still
-///   answer 501), and the metrics snapshot.
+/// - Implemented in M7.1 (streaming) + M8.1 (jobs + backups): the
+///   WebSocket event stream (`/stream`, §11), the console buffer
+///   read + input, the metrics snapshot, the durable-job endpoints,
+///   and the §10.5 backup mutation family (create / delete /
+///   restore / download / lock).
+/// - Implemented in M8.2: the §10.9 transfer mutation family
+///   (initiate / cancel) over the two-phase-commit job.
 /// - Declared but 501 `not_implemented`: files (M6 filesystem
-///   capability), backup mutations (M8),
-///   transfer initiation (M8), schedules run (M9), eggs (M9),
-///   frontend packages (M11), workload integrations (M16), OAuth
-///   (post-M5).
+///   capability), install (M8.3 + M9 egg importer), schedules run
+///   (M9), eggs (M9), frontend packages (M11), workload
+///   integrations (M16), OAuth (post-M5).
 /// - `/api/v1/workloads` aliases the instance handlers per the
 ///   AD-19 back-compat rules (§10.17).
 pub fn router(state: Arc<AppState>) -> Router {
@@ -80,8 +82,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/instances/{id}/transfer",
             get(instances::transfer_status)
-                .post(instances::transfer_stub)
-                .delete(instances::cancel_transfer_stub),
+                .post(instances::initiate_transfer)
+                .delete(instances::cancel_transfer),
         )
         .route("/instances/{id}/console", get(instances::console))
         .route(

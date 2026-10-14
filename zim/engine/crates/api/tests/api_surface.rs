@@ -64,6 +64,15 @@ impl TestEngine {
             data_root.clone(),
         );
         backups.register().await;
+        // M8.2: the transfer service over the same executor (the
+        // §10.9 transfer mutation family).
+        let transfers = zim_engine_transfers::TransferService::new(
+            Arc::clone(&persistence),
+            Arc::clone(&jobs),
+            Arc::clone(&supervisor),
+            data_root.clone(),
+        );
+        transfers.register().await;
         jobs.start();
         let state = Arc::new(AppState::new(
             Arc::clone(&persistence),
@@ -73,6 +82,7 @@ impl TestEngine {
             Arc::new(zim_engine_auth::TabTokenManager::new(Default::default())),
             Arc::clone(&jobs),
             Arc::clone(&backups),
+            Arc::clone(&transfers),
             config,
         ));
         let router = zim_engine_api::router(Arc::clone(&state));

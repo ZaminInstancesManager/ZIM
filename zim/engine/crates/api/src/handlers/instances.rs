@@ -1,8 +1,7 @@
 //! `/api/v1/instances/*` — instance CRUD and sub-resources (spec
-//! §10.3, §10.4 allocations, §10.5 backup reads, §10.6 schedules,
-//! §10.7 subusers, §10.9 transfer status), plus the 501 stubs for
-//! everything that needs the runtime abstraction (M6), streaming
-//! (M7), or the job system (M8).
+//! §10.3, §10.4 allocations, §10.5 backup mutations, §10.6
+//! schedules, §10.7 subusers, §10.9 transfers), plus the remaining
+//! 501 stubs for the install job (M8.3 + M9).
 //!
 //! The `/api/v1/workloads` surface (spec §10.15) aliases these
 //! handlers per the AD-19 back-compat rules in §10.17: same
@@ -1143,7 +1142,10 @@ pub async fn get_backup(
 }
 
 /// `GET /api/v1/instances/{id}/transfer` — current transfer status
-/// (404 when none is in flight, Pterodactyl-style).
+/// (spec §10.9): the in-flight row when one exists, else the most
+/// recent terminal one (Pterodactyl-style), 404 when the instance
+/// has never been transferred. Routes through the transfer
+/// service so the API and the service agree on "current".
 pub async fn transfer_status(
     State(state): State<Arc<AppState>>,
     Extension(caller): Extension<Caller>,
@@ -1152,12 +1154,12 @@ pub async fn transfer_status(
     let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
     let (_instance, ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
     check_grants(&ctx, &[PermissionGrant::Transfer])?;
-    let transfers = db_or_500(&state, {
-        let id = instance_id;
-        move |p| p.list_transfers_by_instance(&id)
-    })
-    .await?;
-    match transfers.first() {
+    let transfer = state
+        .transfers
+        .status(instance_id)
+        .await
+        .map_err(transfer_error)?;
+    match transfer {
         Some(transfer) => Ok(Json(serde_json::to_value(transfer).unwrap_or_default())),
         None => Err(ApiError::not_found("transfer", "none in progress")),
     }
@@ -1425,20 +1427,120 @@ pub async fn install_stub() -> Result<Response, ApiError> {
     })
 }
 
-/// `POST /instances/{id}/transfer` — M8.
-pub async fn transfer_stub() -> Result<Response, ApiError> {
-    Err(ApiError::NotImplemented {
-        feature: "initiating a node transfer",
-        milestone: "M8 (jobs) — the transfer two-phase commit",
-    })
+// ── Transfers (M8.2: initiate / cancel) ──────────────────────────
+
+/// Map a [`zim_engine_transfers::TransferError`] onto the §6.1
+/// error vocabulary.
+fn transfer_error(e: zim_engine_transfers::TransferError) -> ApiError {
+    use zim_engine_transfers::TransferError as E;
+    match e {
+        E::InstanceNotFound(id) => ApiError::not_found("instance", id),
+        E::NodeNotFound(id) => ApiError::not_found("node", id),
+        E::SameNode { .. } => ApiError::validation(e.to_string(), "to_node_id"),
+        E::TransferInFlight(_) => ApiError::Conflict(e.to_string()),
+        E::AllocationNotAvailable(_) => ApiError::validation(e.to_string(), "allocation_id"),
+        E::NoTransferInFlight(_) => ApiError::not_found("transfer", "none in progress"),
+        E::NotCancellable(_) => ApiError::StateConflict(e.to_string()),
+        E::Persistence(pe) => ApiError::from(pe),
+    }
 }
 
-/// `DELETE /instances/{id}/transfer` — M8.
-pub async fn cancel_transfer_stub() -> Result<Response, ApiError> {
-    Err(ApiError::NotImplemented {
-        feature: "cancelling a node transfer",
-        milestone: "M8 (jobs)",
-    })
+/// Transfer initiation body (spec §10.9): the destination node and
+/// the free allocation on it the instance should land on. Both ids
+/// are strongly typed, so a malformed body answers `422` with the
+/// offending field named by the JSON path.
+#[derive(Debug, Deserialize)]
+pub struct TransferBody {
+    /// The node to move the instance to.
+    pub to_node_id: NodeId,
+    /// The free allocation on the destination node to land on
+    /// (`AllocationId` is the port number, per the Pterodactyl
+    /// schema preserved by AD-12).
+    pub allocation_id: AllocationId,
+}
+
+/// `POST /api/v1/instances/{id}/transfer` — initiate a node
+/// transfer (spec §10.9): validates the move (destination node
+/// exists and differs, the landing allocation is free on it, no
+/// other transfer is in flight), creates the `Pending` `Transfer`
+/// row plus its durable `Job`, enqueues it on the executor, and
+/// answers `202` with both ids. The two-phase commit (stop →
+/// archive → ship → verify → extract → commit → rebind → start →
+/// clean) runs under the job; poll `GET /instances/{id}/transfer`
+/// or the job endpoints, or watch the `job.progress` stream
+/// events. Requires the `transfer` grant.
+pub async fn initiate_transfer(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<String>,
+    ApiJson(body): ApiJson<TransferBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
+    let (_instance, ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
+    check_grants(&ctx, &[PermissionGrant::Transfer])?;
+
+    let (job, transfer) = state
+        .transfers
+        .initiate(instance_id, body.to_node_id, body.allocation_id)
+        .await
+        .map_err(transfer_error)?;
+
+    audit(
+        &state,
+        Some(ctx.user_id.to_string()),
+        "instance.transfer.initiate",
+        Some(instance_id),
+        serde_json::json!({
+            "job_id": job.id,
+            "transfer_id": transfer.id,
+            "to_node_id": transfer.to_node_id,
+            "allocation_id": body.allocation_id,
+        }),
+    )
+    .await;
+    Ok(Json(serde_json::json!({
+        "job_id": job.id,
+        "transfer_id": transfer.id,
+        "from_node_id": transfer.from_node_id,
+        "to_node_id": transfer.to_node_id,
+        "state": transfer.state,
+    })))
+}
+
+/// `DELETE /api/v1/instances/{id}/transfer` — cancel the
+/// in-flight transfer (spec §10.9): requests cancellation of the
+/// driving job; the handler unwinds at the next safe point
+/// (before the commit) and restores the instance's pre-transfer
+/// power state. After the commit the move is content-complete, so
+/// a late cancellation only stops the waiting. Requires the
+/// `transfer` grant.
+pub async fn cancel_transfer(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
+    let (_instance, ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
+    check_grants(&ctx, &[PermissionGrant::Transfer])?;
+
+    let job = state
+        .transfers
+        .cancel(instance_id)
+        .await
+        .map_err(transfer_error)?;
+
+    audit(
+        &state,
+        Some(ctx.user_id.to_string()),
+        "instance.transfer.cancel",
+        Some(instance_id),
+        serde_json::json!({ "job_id": job.id }),
+    )
+    .await;
+    Ok(Json(serde_json::json!({
+        "job_id": job.id,
+        "state": job.state,
+    })))
 }
 
 /// `GET /instances/{id}/console` — the retained console buffer

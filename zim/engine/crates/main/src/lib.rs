@@ -207,6 +207,18 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         options.data_dir.clone(),
     );
     backups.register().await;
+    // M8.2: the transfer service — the §10.9 transfer mutation
+    // family over the same executor. Both halves of a transfer's
+    // working tree live under the engine's data root in this
+    // milestone (the node-runtime contract later replaces the
+    // local ship step).
+    let transfers = zim_engine_transfers::TransferService::new(
+        Arc::clone(&persistence),
+        Arc::clone(&jobs),
+        Arc::clone(&supervisor),
+        options.data_dir.clone(),
+    );
+    transfers.register().await;
     jobs.start();
 
     // ── Credential managers (in-memory by design; see auth crate) ─
@@ -224,6 +236,7 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         Arc::clone(&tab_tokens),
         Arc::clone(&jobs),
         Arc::clone(&backups),
+        Arc::clone(&transfers),
         ApiConfig::default(),
     ));
     let router = zim_engine_api::router(Arc::clone(&state));

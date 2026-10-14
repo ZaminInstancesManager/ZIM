@@ -17,3 +17,26 @@ path = "src/lib.rs"
 zim_engine_application = { workspace = true }
 zim_engine_domain = { workspace = true }
 zim_engine_jobs = { workspace = true }
+# The archive engine (tar+gzip, streaming sha256, digest-verified
+# restore, in-place content swap) is shared with the backup
+# pipeline; M8.2 reuses it rather than forking it.
+zim_engine_backups = { workspace = true }
+# Object-safe async trait methods (the JobHandler contract).
+async-trait = { workspace = true }
+# The handler bridges sync persistence/FS work onto the blocking
+# pool and polls observed state on async timers.
+tokio = { workspace = true }
+# The transfer error surface.
+thiserror = { workspace = true }
+# The transfer job's payload (target transfer id).
+serde_json = { workspace = true }
+# Archive file naming (the transfer tree is keyed by the transfer id)
+# and row timestamps on the rebind.
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+# In-memory store for the service/handler tests.
+zim_engine_persistence_sqlite = { workspace = true }
+# The mock runtime Testbed (power-queue lifecycle without Docker).
+zim_engine_application = { workspace = true, features = ["test-util"] }

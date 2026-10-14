@@ -27,6 +27,7 @@ zim_engine_scheduler = { workspace = true }
 zim_engine_jobs = { workspace = true }
 # M8: the backup service + its job handler, composed here.
 zim_engine_backups = { workspace = true }
+zim_engine_transfers = { workspace = true }
 zim_engine_auth = { workspace = true }
 zim_engine_authz = { workspace = true }
 zim_engine_audit = { workspace = true }

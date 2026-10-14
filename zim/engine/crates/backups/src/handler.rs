@@ -35,7 +35,7 @@ use zim_engine_domain::{Backup, Instance};
 
 use zim_engine_jobs::{JobContext, JobHandler, JobOutcome};
 
-use crate::archive::{restore_archive, ArchiveError};
+use crate::archive::{restore_archive, swap_contents_in_place, ArchiveError};
 use crate::store::ArchiveStore;
 
 /// The backup job handler (see the module docs).
@@ -304,9 +304,9 @@ impl BackupJobHandler {
 
         // 2. Swap the restored tree into the live directory in place
         //    (the directory itself is never renamed: a live bind
-        //    mount pins it — see perform_in_place_swap).
+        //    mount pins it — see swap_contents_in_place).
         ctx.progress("swapping", 1.0);
-        let swap = tokio::task::spawn_blocking(move || perform_in_place_swap(live_dir, staging))
+        let swap = tokio::task::spawn_blocking(move || swap_contents_in_place(&live_dir, &staging))
             .await
             .expect("swap task panicked");
         match swap {
@@ -318,69 +318,4 @@ impl BackupJobHandler {
             },
         }
     }
-}
-
-/// Replace `live`'s *contents* with `staging`'s, in place.
-///
-/// The live directory itself is never renamed or removed: a running
-/// container's bind mount pins that directory (rename leaves the
-/// mount attached to the old inode — the container would keep
-/// seeing the superseded data, and deleting the set-aside original
-/// fails with EBUSY). Clearing the children and moving the restored
-/// tree in keeps the mount valid, so the workload sees the restored
-/// data immediately. A crash between the clear and the move-in
-/// leaves a partially restored live tree — the archive is the
-/// safety net; the job answers `cleanup_pending` and a retry
-/// finishes the story.
-fn perform_in_place_swap(live: PathBuf, staging: PathBuf) -> Result<(), ArchiveError> {
-    let io = |context: &str, e: std::io::Error| ArchiveError::Io {
-        context: context.to_owned(),
-        source: e,
-    };
-
-    // 1. Clear the live contents (the directory itself stays).
-    if live.exists() {
-        for entry in std::fs::read_dir(&live).map_err(|e| io("cannot read the live data dir", e))? {
-            let entry = entry.map_err(|e| io("cannot read the live data dir", e))?;
-            let path = entry.path();
-            let meta =
-                std::fs::symlink_metadata(&path).map_err(|e| io("cannot stat live data", e))?;
-            let removed = if meta.is_dir() {
-                std::fs::remove_dir_all(&path)
-            } else {
-                std::fs::remove_file(&path)
-            };
-            removed.map_err(|e| io("cannot clear the live data", e))?;
-        }
-    } else {
-        std::fs::create_dir_all(&live).map_err(|e| io("cannot create the live data dir", e))?;
-    }
-
-    // 2. Move the restored tree in, entry by entry (same parent
-    //    filesystem: renames are cheap and atomic per entry).
-    for entry in
-        std::fs::read_dir(&staging).map_err(|e| io("cannot read the restored staging dir", e))?
-    {
-        let entry = entry.map_err(|e| io("cannot read the restored staging dir", e))?;
-        let name = entry.file_name();
-        let dest = live.join(&name);
-        if dest.exists() {
-            // The clear above should have removed it; a concurrent
-            // writer lost the race — the restore wins.
-            let meta = std::fs::symlink_metadata(&dest)
-                .map_err(|e| io("cannot stat colliding entry", e))?;
-            if meta.is_dir() {
-                std::fs::remove_dir_all(&dest)
-            } else {
-                std::fs::remove_file(&dest)
-            }
-            .map_err(|e| io("cannot clear colliding entry", e))?;
-        }
-        std::fs::rename(entry.path(), &dest)
-            .map_err(|e| io("cannot move the restored data into place", e))?;
-    }
-
-    // 3. The staging directory is now empty.
-    std::fs::remove_dir(&staging).map_err(|e| io("cannot remove the staging dir", e))?;
-    Ok(())
 }

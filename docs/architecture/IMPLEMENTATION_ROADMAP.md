@@ -429,8 +429,28 @@ migration 0002 `jobs.payload` column that carries a restore
 job's target). The §10.5 backup mutation family and
 `POST /jobs/{id}/cancel` are live (the 501s retired), and the
 global admin job listing replaced M5's instance-scoped-only one.
-M8.2 (transfers, two-phase commit) and M8.3 (install jobs)
-follow.
+M8.2 (issue #6) delivered — the transfer pipeline: the
+`zim_engine_transfers` crate (the `TransferStore` working-tree
+layout, the `TransferService` validation + row lifecycle, and
+the `JobKind::Transfer` handler walking the two-phase commit
+`Pending → SourceStopping → SourceArchiving →
+ArchiveTransferring → DestExtracting → DestStarting →
+SourceCleanup → Succeeded`, with every phase boundary persisted
+before its side effects, power-state restore on pre-commit
+failure, digest-verified shipping, the in-place content-swap
+commit shared with the backup restore, the node + allocation
+rebind, and the cleaner's transfer-tree cleanup), the §10.9
+transfer mutation family (`POST`/`DELETE
+`/instances/{id}/transfer`, the 501s retired) with
+`transfer_status` routed through the service, and the
+companion-row lifecycle closed (a transfer cancelled straight
+out of `Pending` never runs its handler — the service walks the
+row itself, and the in-flight check treats a non-terminal row
+whose job already ended as stale, so the instance is never
+permanently untransferable). Engine-local execution this
+milestone: both halves of the transfer tree live under the
+engine's data root (the node-runtime contract later replaces the
+local ship step). M8.3 (install jobs) follows.
 
 **Deliverables:**
 - `zim_engine_jobs` crate with the `Job` state machine and

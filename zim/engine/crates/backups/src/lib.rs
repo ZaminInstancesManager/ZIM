@@ -41,8 +41,8 @@ mod handler;
 mod service;
 mod store;
 pub use archive::{
-    create_archive, hash_file, part_path_for, restore_archive, verify_archive, ArchiveError,
-    ArchiveResult,
+    create_archive, hash_file, part_path_for, restore_archive, swap_contents_in_place,
+    verify_archive, ArchiveError, ArchiveResult,
 };
 pub use handler::BackupJobHandler;
 pub use service::{BackupError, BackupService};

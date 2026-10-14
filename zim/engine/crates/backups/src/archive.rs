@@ -433,6 +433,72 @@ pub fn restore_archive(
     Ok(())
 }
 
+/// Replace `live`'s *contents* with `staging`'s, in place.
+///
+/// The live directory itself is never renamed or removed: a running
+/// container's bind mount pins that directory (rename leaves the
+/// mount attached to the old inode — the container would keep seeing
+/// the superseded data, and deleting the set-aside original fails
+/// with EBUSY). Clearing the children and moving the staged tree in
+/// keeps the mount valid, so the workload sees the new data
+/// immediately. A crash between the clear and the move-in leaves a
+/// partially replaced live tree — the archive the staged tree came
+/// from is the safety net; the caller's job answers
+/// `cleanup_pending` and a retry finishes the story.
+///
+/// Shared by the backup restore direction and the transfer extract
+/// phase (M8.2): both stage a verified tree and commit it under the
+/// live directory.
+pub fn swap_contents_in_place(live: &Path, staging: &Path) -> Result<(), ArchiveError> {
+    let io = |context: &str, e: std::io::Error| ArchiveError::Io {
+        context: context.to_owned(),
+        source: e,
+    };
+
+    // 1. Clear the live contents (the directory itself stays).
+    if live.exists() {
+        for entry in fs::read_dir(live).map_err(|e| io("cannot read the live data dir", e))? {
+            let entry = entry.map_err(|e| io("cannot read the live data dir", e))?;
+            let path = entry.path();
+            let meta = fs::symlink_metadata(&path).map_err(|e| io("cannot stat live data", e))?;
+            let removed = if meta.is_dir() {
+                fs::remove_dir_all(&path)
+            } else {
+                fs::remove_file(&path)
+            };
+            removed.map_err(|e| io("cannot clear the live data", e))?;
+        }
+    } else {
+        fs::create_dir_all(live).map_err(|e| io("cannot create the live data dir", e))?;
+    }
+
+    // 2. Move the staged tree in, entry by entry (same parent
+    //    filesystem: renames are cheap and atomic per entry).
+    for entry in fs::read_dir(staging).map_err(|e| io("cannot read the staged dir", e))? {
+        let entry = entry.map_err(|e| io("cannot read the staged dir", e))?;
+        let name = entry.file_name();
+        let dest = live.join(&name);
+        if dest.exists() {
+            // The clear above should have removed it; a concurrent
+            // writer lost the race — the staged tree wins.
+            let meta =
+                fs::symlink_metadata(&dest).map_err(|e| io("cannot stat colliding entry", e))?;
+            if meta.is_dir() {
+                fs::remove_dir_all(&dest)
+            } else {
+                fs::remove_file(&dest)
+            }
+            .map_err(|e| io("cannot clear colliding entry", e))?;
+        }
+        fs::rename(entry.path(), &dest)
+            .map_err(|e| io("cannot move the staged data into place", e))?;
+    }
+
+    // 3. The staging directory is now empty.
+    fs::remove_dir(staging).map_err(|e| io("cannot remove the staging dir", e))?;
+    Ok(())
+}
+
 /// Lowercase hex of a digest.
 fn hex(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 2);

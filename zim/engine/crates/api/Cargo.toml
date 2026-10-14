@@ -25,6 +25,8 @@ zim_engine_streaming = { workspace = true }
 # and the backup service (the §10.5 backup mutation family).
 zim_engine_jobs = { workspace = true }
 zim_engine_backups = { workspace = true }
+# M8.2: the transfer service (the §10.9 transfer mutation family).
+zim_engine_transfers = { workspace = true }
 # Async runtime (listener, middleware, spawn_blocking bridge).
 tokio = { workspace = true }
 # HTTP framework: router, extractors, `from_fn` middleware, and
@@ -63,6 +65,8 @@ futures-util = { workspace = true }
 [dev-dependencies]
 # In-memory persistence adapter for integration tests.
 zim_engine_persistence_sqlite = { workspace = true }
+# The transfer service (M8.2) assembled by the test engines.
+zim_engine_transfers = { workspace = true }
 # The streaming hub's types for the WebSocket tests.
 zim_engine_streaming = { workspace = true }
 # The scripted mock runtime for the lifecycle endpoint tests
