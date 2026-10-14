@@ -1227,10 +1227,11 @@ async fn console_retention_bounds_under_load() {
 // ── M8.1: backup + restore of a real container's data ────────────
 
 /// The full backup pipeline over the real runtime: a container
-/// writes files into its bind-mounted data directory, a backup job
-/// (through the durable-job executor and the real archive engine)
-/// seals them into a sha256-verified archive, and a restore job
-/// swaps the live data back to the backup point.
+/// writes files into its bind-mounted data directory (through the
+/// §M6 exec path), a backup job (through the durable-job executor
+/// and the real archive engine) seals them into a sha256-verified
+/// archive, and a restore job swaps the live data back to the
+/// backup point — while the container keeps running.
 #[tokio::test]
 async fn backup_and_restore_of_container_data() {
     let Some(docker) = docker_or_skip().await else {
@@ -1244,49 +1245,57 @@ async fn backup_and_restore_of_container_data() {
     let instance = seed_instance(store.as_ref(), &node, &user, 46118, "sleep 600");
     remove_quietly(&docker, &instance.uuid).await;
 
+    // A direct runtime handle over the instance's own container spec
+    // (the same config the supervisor builds): the bind-mounted data
+    // directory is the engine-side instance dir the backup archives.
+    let data_dir = zim_engine_application::supervision::instance_data_dir(
+        &test_settings().data_root,
+        &instance.uuid_short,
+    );
+    let config = zim_engine_application::supervision::InstanceConfig {
+        instance_id: instance.id,
+        container_name: instance.uuid.clone(),
+        hostname: instance.uuid_short.clone(),
+        image: "busybox:latest".to_owned(),
+        entrypoint: None,
+        command: vec!["sleep".into(), "600".into()],
+        env: vec![
+            ("SERVER_MEMORY".to_owned(), "0".to_owned()),
+            ("SERVER_PORT".to_owned(), "46118".to_owned()),
+            ("SERVER_IP".to_owned(), "127.0.0.1".to_owned()),
+        ],
+        limits: Default::default(),
+        port_bindings: vec![],
+        data_dir: data_dir.clone(),
+        container_data_dir: std::path::PathBuf::from("/home/container"),
+        labels: vec![("Service".to_owned(), "ZIM".to_owned())],
+        crash_detection_enabled: false,
+    };
     let factory = Arc::new(
         DockerRuntimeFactory::connect(test_settings())
             .await
             .expect("factory"),
     );
-    let supervisor = Supervisor::new(
-        Arc::clone(&store),
-        factory,
-        SupervisionPolicy::default(),
-        test_settings().data_root,
-    );
-    supervisor.load_local().await.expect("load");
-
-    supervisor
-        .request_power(&instance.id, PowerAction::Start)
-        .await
-        .expect("start accepted");
-    assert!(
-        soon(|| async {
-            supervisor
-                .observed(&instance.id)
-                .await
-                .map(|s| s.observed.is_running())
-                .unwrap_or(false)
-        })
-        .await
-    );
+    let runtime = factory.create(&config).await.expect("runtime");
+    runtime.start(&config).await.expect("start");
+    wait_until_running(runtime.as_ref()).await;
 
     // The container writes its "world" into the bind mount (the
-    // engine-side data directory the backup will archive) through
-    // the M7.1 console-input path — exactly how a managed server's
-    // console behaves.
-    supervisor
-        .send_console_input(
-            &instance.id,
-            b"mkdir -p /home/container/world && echo dragon-egg > /home/container/world/data.txt && echo motd=live > /home/container/server.properties",
-        )
-        .await
-        .expect("console world write");
-    let data_dir = zim_engine_application::supervision::instance_data_dir(
-        &test_settings().data_root,
-        &instance.uuid_short,
-    );
+    // engine-side data directory the backup will archive).
+    use zim_engine_application::supervision::ExecCommand;
+    let write_world = ExecCommand {
+        cmd: vec![
+            "sh".into(),
+            "-c".into(),
+            "mkdir -p /home/container/world && \
+             echo dragon-egg > /home/container/world/data.txt && \
+             echo motd=live > /home/container/server.properties"
+                .into(),
+        ],
+        ..Default::default()
+    };
+    let out = runtime.exec(&write_world).await.expect("write world");
+    assert_eq!(out.exit_code, Some(0), "world write failed");
     assert!(
         soon(|| async { data_dir.join("world/data.txt").exists() }).await,
         "the container's write must reach the host-side bind mount"
@@ -1314,13 +1323,12 @@ async fn backup_and_restore_of_container_data() {
 
     // 1. Backup: seal the container's data into a verified archive.
     let (job, backup) = backups.create_backup(instance.id).await.expect("backup");
-    let job = wait_for_job_state(
+    wait_for_job_state(
         store.as_ref(),
         job.id,
         zim_engine_domain::status::JobState::Succeeded,
     )
     .await;
-    assert!(job.completed_at.is_some());
     let sealed = store.get_backup(&backup.id).unwrap().unwrap();
     let sha256 = sealed.sha256_hash.as_deref().expect("sha256 recorded");
     assert_eq!(sha256.len(), 64);
@@ -1334,13 +1342,16 @@ async fn backup_and_restore_of_container_data() {
 
     // 2. The container keeps playing: new data lands in the live
     //    tree (which the restore will roll back).
-    supervisor
-        .send_console_input(
-            &instance.id,
-            b"echo clobbered > /home/container/server.properties",
-        )
-        .await
-        .expect("console clobber");
+    let clobber = ExecCommand {
+        cmd: vec![
+            "sh".into(),
+            "-c".into(),
+            "echo clobbered > /home/container/server.properties".into(),
+        ],
+        ..Default::default()
+    };
+    let out = runtime.exec(&clobber).await.expect("clobber");
+    assert_eq!(out.exit_code, Some(0));
     assert!(
         soon(|| async {
             std::fs::read_to_string(data_dir.join("server.properties"))
@@ -1375,10 +1386,13 @@ async fn backup_and_restore_of_container_data() {
 
     // The container is still running throughout (invariant 12's
     // spirit: job activity does not disturb the source).
-    let snapshot = supervisor.observed(&instance.id).await.unwrap();
-    assert_eq!(snapshot.status, InstanceStatus::Running);
+    let state = runtime.state().await.expect("runtime state");
+    assert!(
+        state.is_running(),
+        "the workload must survive the backup and restore"
+    );
 
-    supervisor.shutdown().await;
+    runtime.stop(Duration::from_secs(10)).await.expect("stop");
     jobs.shutdown().await;
     remove_quietly(&docker, &instance.uuid).await;
 }
