@@ -221,7 +221,11 @@ impl Testbed {
 
     /// Poll persistence until the job reaches `want`.
     async fn wait_for_job(&self, id: JobId, want: JobState) -> Job {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        // 30s: the CI runners run this whole binary alongside the
+        // workspace build; a 10s window was observed to flake on a
+        // loaded 2-core runner (the cancel transition is real, just
+        // slower than 10s under load — the M11 deflake precedent).
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
         loop {
             let p = Arc::clone(&self.persistence);
             let job = tokio::task::spawn_blocking(move || p.get_job(&id))

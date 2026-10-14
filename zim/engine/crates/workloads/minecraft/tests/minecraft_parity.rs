@@ -33,6 +33,11 @@ const FAKEMC_BASE_TAG: &str = "zim-fakemc";
 
 /// The fakemc script: the Minecraft console contract.
 const FAKEMC_SCRIPT: &str = r#"#!/bin/sh
+# The boot delay: the console surface is live-only (M7.1 — no
+# historical replay), so the workload's attach (opened after the
+# start returns and the Running poll lands) needs the boot lines
+# held back long enough to catch them.
+sleep 3
 echo "Starting minecraft server version 1.20.4"
 echo "Loading properties"
 echo "Preparing level \"world\""
@@ -60,6 +65,15 @@ done
 /// Unique container name per test run.
 fn unique_name(prefix: &str) -> String {
     format!("{prefix}-{}", uuid::Uuid::new_v4().simple())
+}
+
+/// The next host port to bind (tests run in parallel; a fixed port
+/// collides across containers — the bind failure is a 500 from the
+/// daemon, not a test assertion).
+fn unique_host_port() -> u16 {
+    use std::sync::atomic::{AtomicU16, Ordering};
+    static NEXT_PORT: AtomicU16 = AtomicU16::new(24321);
+    NEXT_PORT.fetch_add(1, Ordering::Relaxed)
 }
 
 /// Connect to Docker or skip the test.
@@ -149,6 +163,7 @@ async fn remove_quietly(docker: &bollard::Docker, name: &str) {
 fn fakemc_config(name: &str, image: &str) -> (InstanceConfig, std::path::PathBuf) {
     let data_dir = std::env::temp_dir().join(format!("zim-mc-data-{}", name));
     std::fs::create_dir_all(&data_dir).expect("create data dir");
+    let host_port = unique_host_port();
     let config = InstanceConfig {
         instance_id: zim_engine_domain::InstanceId::new(),
         container_name: name.to_owned(),
@@ -164,7 +179,7 @@ fn fakemc_config(name: &str, image: &str) -> (InstanceConfig, std::path::PathBuf
         limits: Default::default(),
         port_bindings: vec![PortBinding {
             host_ip: "127.0.0.1".parse().unwrap(),
-            host_port: 25565,
+            host_port,
             container_port: 25565,
             protocol: Default::default(),
         }],
@@ -185,7 +200,6 @@ fn fakemc_spec(image: &str) -> GameServerSpec {
             "name": "Paper Minecraft",
             "description": "A high performance Minecraft server.",
             "author": "support@pterodactyl.io",
-            "features": ["eula"],
             "docker_images": { "fakemc": "fakemc:local" },
             "startup": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}}",
             "config": {
