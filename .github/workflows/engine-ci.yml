@@ -4,13 +4,16 @@ on:
   push:
     branches: [main]
     paths:
-      # Run when engine code, workspace manifest, lockfile, or this workflow change.
+      # Run when engine code, workspace manifest, lockfile, the
+      # frontend package, or this workflow change.
       - 'zim/engine/**'
+      - 'zim/frontend/**'
       - '.github/workflows/engine-ci.yml'
   pull_request:
     branches: [main]
     paths:
       - 'zim/engine/**'
+      - 'zim/frontend/**'
       - '.github/workflows/engine-ci.yml'
 
 # Cancel superseded runs on the same ref.
@@ -136,3 +139,40 @@ jobs:
 
       - name: cargo build --workspace
         run: cargo build --workspace
+
+  frontend:
+    # M11: the default frontend package — TypeScript sources must
+    # compile cleanly, and the committed compiled output under
+    # assets/ (which the Rust engine embeds at build time, keeping
+    # the engine build hermetic) must be up to date with the
+    # sources. A stale dist would ship old UI bytes.
+    name: Frontend (tsc + dist freshness)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: zim/frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: zim/frontend/package-lock.json
+
+      - name: Install dev dependencies
+        run: npm ci --no-fund --no-audit
+
+      - name: Type-check the sources
+        run: npm run check
+
+      - name: Verify the committed compiled output is fresh
+        run: |
+          npm run build
+          if ! git diff --exit-code -- assets/; then
+            echo "::error::zim/frontend/assets/ is stale — recompile with 'npm run build' and commit the output."
+            git diff --stat -- assets/
+            exit 1
+          fi

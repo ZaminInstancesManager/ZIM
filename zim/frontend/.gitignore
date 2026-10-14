@@ -1,0 +1,3 @@
+# Development tooling (the compiled output under assets/ IS committed:
+# the Rust engine embeds it at build time — see the CI frontend job).
+node_modules/

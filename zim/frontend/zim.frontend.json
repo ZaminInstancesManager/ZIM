@@ -1,0 +1,45 @@
+{
+  "$schema": "https://zim.zaminmc.org/schemas/frontend.v1.json",
+  "manifest_version": 1,
+  "id": "org.zaminmc.frontend.default",
+  "version": "1.0.0",
+  "name": "ZIM Default Frontend",
+  "description": "The default ZIM frontend: new-tab, server list, and server console.",
+  "author": "ZaminMC",
+  "license": "Apache-2.0",
+  "api_version": "v1",
+  "engines": { "zim": ">=0.0.1" },
+  "full_replacement": false,
+  "smoke_test": "pages/smoke.html",
+  "page_surfaces": [
+    "zim://newtab",
+    "zim://servers",
+    "zim://servers/{id}/console"
+  ],
+  "entrypoints": {
+    "newtab": "pages/newtab.html",
+    "servers": "pages/servers.html",
+    "console": "pages/console.html",
+    "smoke": "pages/smoke.html"
+  },
+  "assets": [
+    "assets/main.css",
+    "assets/api.js",
+    "assets/components.js",
+    "assets/stream.js",
+    "assets/newtab.js",
+    "assets/servers.js",
+    "assets/console.js"
+  ],
+  "permissions": [
+    "websocket.connect",
+    "control.console",
+    "control.start",
+    "control.stop",
+    "control.restart"
+  ],
+  "accessibility": {
+    "standard": "WCAG 2.1",
+    "level": "AA"
+  }
+}

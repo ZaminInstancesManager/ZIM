@@ -1,6 +1,7 @@
 //! Router assembly: every §10 endpoint wired to a handler (real or
 //! explicit 501), nested under `/api/v1`, wrapped in the middleware
-//! stack, with the request body limit applied.
+//! stack, with the request body limit applied — plus (M11) the
+//! `/zim/` page surface over the active frontend package.
 
 use std::sync::Arc;
 
@@ -9,7 +10,7 @@ use axum::middleware::from_fn_with_state;
 use axum::routing::{delete, get, patch, post};
 use axum::Router;
 
-use crate::handlers::{audit, auth, eggs, instances, misc, nodes, stream, users};
+use crate::handlers::{audit, auth, eggs, frontend, instances, misc, nodes, pages, stream, users};
 use crate::middleware;
 use crate::state::AppState;
 
@@ -34,9 +35,12 @@ use crate::state::AppState;
 /// - Implemented in M8.3: the §10.3 install mutation
 ///   (`POST /instances/{id}/install`) over the constrained-container
 ///   install job.
+/// - Implemented in M11: the §10.14 frontend-package family
+///   (active / activate / upload / smoke-test / reset) over the
+///   frontend loader, plus the `/zim/` page surface (the active
+///   package's pages and assets, with the §3.8 CSP).
 /// - Declared but 501 `not_implemented`: files (M6 filesystem
-///   capability), frontend packages (M11), workload
-///   integrations (M16), OAuth (post-M5).
+///   capability), workload integrations (M16), OAuth (post-M5).
 /// - `/api/v1/workloads` aliases the instance handlers per the
 ///   AD-19 back-compat rules (§10.17).
 pub fn router(state: Arc<AppState>) -> Router {
@@ -240,11 +244,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         // ── Frontend packages (§10.14) ────────────────────────────
         .route(
             "/frontend/active",
-            get(misc::frontend_stub).post(misc::frontend_stub),
+            get(frontend::active).post(frontend::set_active),
         )
-        .route("/frontend/upload", post(misc::frontend_stub))
-        .route("/frontend/smoke-test", post(misc::frontend_stub))
-        .route("/frontend/reset", post(misc::frontend_stub))
+        .route("/frontend/upload", post(frontend::upload))
+        .route("/frontend/smoke-test", post(frontend::smoke_test))
+        .route("/frontend/reset", post(frontend::reset))
         // ── Workload integrations (§10.16) ────────────────────────
         .route(
             "/workload-integrations",
@@ -285,8 +289,29 @@ pub fn router(state: Arc<AppState>) -> Router {
         .layer(from_fn_with_state(Arc::clone(&state), middleware::version))
         .layer(axum::middleware::from_fn(middleware::host_guard))
         .layer(axum::middleware::from_fn(middleware::request_id))
-        .with_state(state);
+        .with_state(state.clone());
 
     // Nest under the versioned prefix (spec §2) and expose.
-    Router::new().nest(crate::API_PREFIX, api)
+    Router::new()
+        .nest(crate::API_PREFIX, api)
+        .merge(pages_router(state))
+}
+
+/// The `/zim/` page surface (M11): the active frontend package's
+/// pages and assets, served under the loopback origin so the
+/// default frontend is reachable in any browser (the `zim://`
+/// scheme itself arrives with the Chromium integration, M13).
+///
+/// The stack is deliberately thinner than the API's: host guard
+/// and request ids apply, but the pages are unauthenticated static
+/// shells (all data flows through the credential-checked API), so
+/// the auth/version/rate-limit/idempotency middlewares do not.
+fn pages_router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/zim", get(pages::root))
+        .route("/zim/", get(pages::root))
+        .route("/zim/{*path}", get(pages::serve))
+        .layer(axum::middleware::from_fn(middleware::host_guard))
+        .layer(axum::middleware::from_fn(middleware::request_id))
+        .with_state(state)
 }

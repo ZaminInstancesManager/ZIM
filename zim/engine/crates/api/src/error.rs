@@ -101,6 +101,14 @@ pub enum ApiError {
         /// The window's request budget.
         limit: u64,
     },
+    /// 422 `frontend_smoke_test_failed` — a frontend package failed
+    /// the engine's activation gate (§6.1 table; the report rides
+    /// along so the admin sees exactly which check failed).
+    #[error("the frontend package failed its activation smoke test")]
+    FrontendSmokeTestFailed {
+        /// The gate's full report (check-by-check).
+        report: zim_engine_frontend_loader::SmokeReport,
+    },
     /// 500 `internal_error`.
     #[error("{0}")]
     Internal(String),
@@ -149,6 +157,16 @@ impl ApiError {
         }
     }
 
+    /// A `403 permission_denied` with a custom message and no grant
+    /// list (policy gates like the frontend approval requirement).
+    pub fn permission_denied_message(message: impl Into<String>) -> Self {
+        Self::PermissionDenied {
+            message: message.into(),
+            missing: Vec::new(),
+            user_id: UserId::new(),
+        }
+    }
+
     /// An `unauthorized`.
     pub fn unauthorized(message: impl Into<String>) -> Self {
         Self::Unauthorized(message.into())
@@ -174,6 +192,7 @@ impl ApiError {
             Self::PayloadTooLarge { .. } => StatusCode::PAYLOAD_TOO_LARGE,
             Self::UnsupportedMediaType(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Self::RateLimited { .. } => StatusCode::TOO_MANY_REQUESTS,
+            Self::FrontendSmokeTestFailed { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::RuntimeUnavailable { .. } => StatusCode::SERVICE_UNAVAILABLE,
             Self::NotImplemented { .. } => StatusCode::NOT_IMPLEMENTED,
@@ -194,6 +213,7 @@ impl ApiError {
             Self::PayloadTooLarge { .. } => "payload_too_large",
             Self::UnsupportedMediaType(_) => "unsupported_media_type",
             Self::RateLimited { .. } => "rate_limited",
+            Self::FrontendSmokeTestFailed { .. } => "frontend_smoke_test_failed",
             Self::Internal(_) => "internal_error",
             Self::RuntimeUnavailable { .. } => "runtime_unavailable",
             Self::NotImplemented { .. } => "not_implemented",
@@ -218,6 +238,9 @@ impl ApiError {
             }
             Self::PayloadTooLarge { limit } => vec![("limit_bytes", json!(limit))],
             Self::RateLimited { limit, .. } => vec![("limit", json!(limit))],
+            Self::FrontendSmokeTestFailed { report } => {
+                vec![("smoke", smoke_report_json(report))]
+            }
             Self::NotImplemented { milestone, .. } => {
                 vec![("milestone", json!(milestone))]
             }
@@ -252,6 +275,18 @@ impl ApiError {
 /// Dotted canonical names for the `missing_permissions` array.
 fn missing_grants(missing: &[PermissionGrant]) -> Vec<&'static str> {
     missing.iter().map(|g| g.as_str()).collect()
+}
+
+/// Serialize a smoke gate report for an error body's `smoke` extra.
+fn smoke_report_json(report: &zim_engine_frontend_loader::SmokeReport) -> Value {
+    json!({
+        "passed": report.passed(),
+        "checks": report.checks.iter().map(|check| json!({
+            "name": check.name,
+            "passed": check.passed,
+            "detail": check.detail,
+        })).collect::<Vec<_>>(),
+    })
 }
 
 impl IntoResponse for ApiError {
@@ -349,6 +384,19 @@ mod tests {
                 },
                 StatusCode::TOO_MANY_REQUESTS,
                 "rate_limited",
+            ),
+            (
+                ApiError::FrontendSmokeTestFailed {
+                    report: zim_engine_frontend_loader::SmokeReport {
+                        checks: vec![zim_engine_frontend_loader::CheckResult {
+                            name: "html_structure",
+                            passed: false,
+                            detail: "inline script".to_owned(),
+                        }],
+                    },
+                },
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "frontend_smoke_test_failed",
             ),
             (
                 ApiError::internal("x"),

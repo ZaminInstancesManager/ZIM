@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ZIM — Console</title>
+  <link rel="stylesheet" href="/zim/assets/main.css">
+  <script type="module" src="/zim/assets/console.js"></script>
+</head>
+<body>
+  <main class="page page-console">
+    <zim-recovery-notice></zim-recovery-notice>
+
+    <header class="page-header">
+      <a class="backlink" href="/zim/servers" title="Servers">←</a>
+      <h1 id="server-name">Server</h1>
+      <span id="server-id" class="pill pill-muted mono">…</span>
+    </header>
+
+    <section class="card card-console" aria-label="Console">
+      <div class="console-toolbar">
+        <zim-status-dot id="status-dot" data-status="unknown" data-label="unknown"></zim-status-dot>
+        <span id="state-label" class="state-label">state: unknown</span>
+        <span class="spacer"></span>
+        <button id="btn-start"   class="btn" type="button" title="Start (control.start)">Start</button>
+        <button id="btn-stop"    class="btn" type="button" title="Stop (control.stop)">Stop</button>
+        <button id="btn-restart" class="btn" type="button" title="Restart (control.restart)">Restart</button>
+        <button id="btn-kill"    class="btn btn-danger" type="button" title="Force kill (control.stop, elevated)">Kill</button>
+      </div>
+      <zim-console id="console" aria-label="Console output"></zim-console>
+      <form class="console-input" id="input-form">
+        <label class="sr-only" for="input-line">Console input</label>
+        <input id="input-line" class="input mono" type="text"
+               autocomplete="off" autocapitalize="off" spellcheck="false"
+               placeholder="send a line to the server console">
+        <button class="btn btn-primary" type="submit">Send</button>
+      </form>
+      <p class="console-meta mono" id="console-meta">generation —</p>
+    </section>
+  </main>
+</body>
+</html>

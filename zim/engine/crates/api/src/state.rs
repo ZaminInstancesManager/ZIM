@@ -9,6 +9,7 @@ use zim_engine_application::supervision::Supervisor;
 use zim_engine_auth::{ApiKeyManager, SessionManager, TabTokenManager};
 use zim_engine_backups::BackupService;
 use zim_engine_domain::User;
+use zim_engine_frontend_loader::FrontendService;
 use zim_engine_installs::InstallService;
 use zim_engine_jobs::JobSystem;
 use zim_engine_scheduler::Scheduler;
@@ -111,6 +112,9 @@ pub struct AppState {
     pub installs: Arc<InstallService>,
     /// The cron scheduler (M9): schedule firing + run-now.
     pub scheduler: Arc<Scheduler>,
+    /// The frontend loader (M11): the active frontend package —
+    /// the `/zim/` page surface and the §10.14 package endpoints.
+    pub frontend: Arc<FrontendService>,
     /// Server configuration.
     pub config: ApiConfig,
 }
@@ -119,7 +123,7 @@ impl AppState {
     /// Assemble the state from its parts. The two limiters are
     /// constructed from `config`'s budgets.
     ///
-    /// (Eleven parts is the honest composition surface — a builder
+    /// (Twelve parts is the honest composition surface — a builder
     /// would hide which halves are optional; nothing here is.)
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -133,6 +137,7 @@ impl AppState {
         transfers: Arc<TransferService>,
         installs: Arc<InstallService>,
         scheduler: Arc<Scheduler>,
+        frontend: Arc<FrontendService>,
         config: ApiConfig,
     ) -> Self {
         Self {
@@ -152,6 +157,7 @@ impl AppState {
             transfers,
             installs,
             scheduler,
+            frontend,
             config,
         }
     }

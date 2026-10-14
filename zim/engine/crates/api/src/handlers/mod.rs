@@ -11,9 +11,11 @@
 pub mod audit;
 pub mod auth;
 pub mod eggs;
+pub mod frontend;
 pub mod instances;
 pub mod misc;
 pub mod nodes;
+pub mod pages;
 pub mod stream;
 pub mod users;
 

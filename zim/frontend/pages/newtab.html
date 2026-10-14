@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ZIM — New Tab</title>
+  <link rel="stylesheet" href="/zim/assets/main.css">
+  <script type="module" src="/zim/assets/newtab.js"></script>
+</head>
+<body>
+  <main class="page page-newtab">
+    <zim-recovery-notice></zim-recovery-notice>
+
+    <section class="hero" aria-labelledby="greeting">
+      <h1 id="greeting">ZIM</h1>
+      <p class="hero-sub" id="hero-sub">Zamin Instances Manager</p>
+    </section>
+
+    <section class="card card-status" aria-label="Engine status">
+      <h2 class="card-title">Engine</h2>
+      <dl class="status-grid">
+        <div class="status-item">
+          <dt>API</dt>
+          <dd><span id="engine-status" class="pill pill-unknown">checking…</span></dd>
+        </div>
+        <div class="status-item">
+          <dt>Signed in as</dt>
+          <dd><span id="who" class="pill pill-unknown">checking…</span></dd>
+        </div>
+        <div class="status-item">
+          <dt>Servers</dt>
+          <dd><span id="server-count" class="pill pill-unknown">—</span></dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="card card-login" id="login-card" aria-label="Sign in" hidden>
+      <h2 class="card-title">Sign in to ZIM</h2>
+      <zim-login-form id="login"></zim-login-form>
+    </section>
+
+    <section class="card" aria-label="Quick links">
+      <h2 class="card-title">Quick links</h2>
+      <nav class="quicklinks">
+        <a class="quicklink" href="/zim/servers" id="ql-servers">
+          <span class="quicklink-icon" aria-hidden="true">▤</span>
+          <span class="quicklink-label">Servers</span>
+        </a>
+        <a class="quicklink" href="/zim/servers" id="ql-console" hidden>
+          <span class="quicklink-icon" aria-hidden="true">&gt;_</span>
+          <span class="quicklink-label">Last server console</span>
+        </a>
+      </nav>
+    </section>
+  </main>
+</body>
+</html>

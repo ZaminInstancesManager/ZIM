@@ -100,6 +100,13 @@ impl TestEngine {
             Arc::clone(&transfers),
             Arc::clone(&installs),
             Arc::clone(&scheduler),
+            // M11: the frontend loader (fresh temp dir = the bundled
+            // default package).
+            Arc::new(zim_engine_frontend_loader::FrontendService::new(
+                std::env::temp_dir().join(format!("zim-api-surface-{}", uuid::Uuid::new_v4())),
+                semver::Version::new(0, 0, 1),
+                "v1.0.0",
+            )),
             config,
         ));
         let router = zim_engine_api::router(Arc::clone(&state));

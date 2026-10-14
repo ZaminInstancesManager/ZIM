@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ZIM — Frontend smoke test</title>
+  <link rel="stylesheet" href="/zim/assets/main.css">
+  <script type="module" src="/zim/assets/api.js"></script>
+  <script type="module" src="/zim/assets/smoke.js"></script>
+</head>
+<body>
+  <main class="page page-smoke">
+    <h1>Frontend smoke test</h1>
+    <p>This page exercises the engine API exactly once:</p>
+    <ol>
+      <li>load the API client (<code>assets/api.js</code>),</li>
+      <li>call <code>GET /api/v1/users/me</code>,</li>
+      <li>render the structured result below.</li>
+    </ol>
+    <section class="card" aria-label="Result">
+      <p id="smoke-result" class="mono">running…</p>
+    </section>
+  </main>
+</body>
+</html>

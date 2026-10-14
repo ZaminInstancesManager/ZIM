@@ -46,6 +46,10 @@ zim_engine_migrate_pterodactyl = { workspace = true }
 tokio = { workspace = true }
 # OS entropy for the generated bootstrap password.
 rand_core = { workspace = true }
+# M11: parsing the engine version for the frontend gate.
+semver = { workspace = true }
+# M11: recovery-notice audit metadata.
+serde_json = { workspace = true }
 
 [dev-dependencies]
 # TLS-enabled client for the end-to-end engine smoke test.

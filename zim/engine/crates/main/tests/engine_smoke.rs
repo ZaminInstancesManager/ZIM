@@ -73,6 +73,37 @@ async fn engine_boots_bootstraps_and_serves_https() {
     let body: serde_json::Value = response.json().await.unwrap();
     assert_eq!(body["root_admin"], true);
 
+    // The frontend loader serves the bundled default package's
+    // surfaces (M11): the newtab page under the §3.8 CSP.
+    let pages_base = format!("https://127.0.0.1:{}/zim", engine.local_addr.port());
+    let response = client
+        .get(format!("{pages_base}/newtab"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.headers()["content-type"],
+        "text/html; charset=utf-8"
+    );
+    assert!(response.headers()["content-security-policy"]
+        .to_str()
+        .unwrap()
+        .contains("default-src 'none'"));
+    assert!(response.text().await.unwrap().contains("ZIM"));
+
+    // The active-frontend info reports the bundled default.
+    let response = client
+        .get(format!("{base}/frontend/active"))
+        .header("Cookie", format!("zim_session={cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["id"], "org.zaminmc.frontend.default");
+    assert_eq!(body["is_default"], true);
+
     // The data dir holds the database and the TLS PEM files.
     assert!(std::path::Path::new(&data_dir).join("engine.db").exists());
     assert!(std::path::Path::new(&data_dir)
@@ -80,6 +111,12 @@ async fn engine_boots_bootstraps_and_serves_https() {
         .exists());
     assert!(std::path::Path::new(&data_dir)
         .join("loopback-key.pem")
+        .exists());
+    // The frontend state (the active.json record) lives under
+    // the loader's data subdir.
+    assert!(std::path::Path::new(&data_dir)
+        .join("frontend")
+        .join("active.json")
         .exists());
 
     // Clean shutdown, then remove the scratch dir (best-effort).

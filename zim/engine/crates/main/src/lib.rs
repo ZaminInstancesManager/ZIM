@@ -1,15 +1,17 @@
 //! Engine composition root (library half).
 //!
 //! `run()` wires the concrete adapters — SQLite persistence, the
-//! in-memory session/API-key managers, the M5 API server, and the
-//! M6 supervision module over the Docker runtime — into the engine
-//! process: it opens (and migrates) the database, bootstraps the
-//! first root administrator and the default local node, connects the
-//! container runtime (falling back to the null runtime in degraded
-//! API-only mode when no Docker is reachable), reconciles persisted
-//! vs. observed instance state (lifecycle invariants 1 and 10),
-//! loads or generates the loopback TLS certificate, and serves the
-//! HTTPS API until shutdown.
+//! in-memory session/API-key managers, the M5 API server, the M6
+//! supervision module over the Docker runtime, and the M11 frontend
+//! loader — into the engine process: it opens (and migrates) the
+//! database, bootstraps the first root administrator and the default
+//! local node, connects the container runtime (falling back to the
+//! null runtime in degraded API-only mode when no Docker is
+//! reachable), reconciles persisted vs. observed instance state
+//! (lifecycle invariants 1 and 10), loads the active frontend package
+//! (reverting to the bundled default when the recorded one fails its
+//! re-verification — invariant 16), loads or generates the loopback
+//! TLS certificate, and serves the HTTPS API until shutdown.
 //!
 //! The binary half (`main.rs`) parses arguments/environment and calls
 //! [`run`] — except the offline `migrate` subcommand (M10), which
@@ -95,6 +97,36 @@ impl EngineOptions {
 const DB_FILE: &str = "engine.db";
 const TLS_CERT_FILE: &str = "loopback-cert.pem";
 const TLS_KEY_FILE: &str = "loopback-key.pem";
+
+/// The API generation string the frontend loader gates packages
+/// against (kept in lockstep with `ApiConfig::default().api_version`).
+fn state_api_version() -> String {
+    ApiConfig::default().api_version.to_owned()
+}
+
+/// Record the §3.6 recovery event in the audit log (actor `system`).
+fn record_recovery_audit(
+    persistence: &Arc<dyn Persistence>,
+    notice: &zim_engine_frontend_loader::RecoveryNotice,
+) {
+    let record = zim_engine_domain::AuditRecord {
+        id: 0,
+        timestamp: notice.at,
+        actor: zim_engine_domain::AuditActor::System,
+        actor_id: None,
+        action: "frontend.recovery".to_owned(),
+        instance_id: None,
+        metadata: serde_json::json!({
+            "reason": notice.reason,
+            "from": notice.from,
+        }),
+        ip_address: None,
+        user_agent: None,
+    };
+    if let Err(e) = persistence.append_audit(&record) {
+        eprintln!("zim_engine: frontend-recovery audit append failed: {e}");
+    }
+}
 
 /// A booted engine: the bound loopback address plus the handles to
 /// stop serving, supervision, and the job executor.
@@ -262,7 +294,40 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
     // Per-tab capability tokens for the WebSocket stream (M7).
     let tab_tokens = Arc::new(TabTokenManager::new(Default::default()));
 
-    // ── API server ────────────────────────────────────────────────
+    // ── Frontend loader (M11) ────────────────────────────────
+    // Loads the recorded active package — the bundled default on a
+    // fresh data dir — running the full §3.5 gate on a custom one
+    // and reverting to the default (with a recovery notice, §3.6)
+    // when it fails. Page serving and the §10.14 endpoints hang off
+    // this through AppState.
+    let frontend = Arc::new(zim_engine_frontend_loader::FrontendService::new(
+        options.data_dir.clone(),
+        semver::Version::parse(env!("CARGO_PKG_VERSION"))
+            .expect("the workspace version is valid semver"),
+        state_api_version(),
+    ));
+    let frontend_info = frontend.active_info();
+    if let Some(notice) = frontend.take_recovery() {
+        record_recovery_audit(&persistence, &notice);
+        eprintln!(
+            "zim_engine: frontend recovery — reverted to the default frontend package \
+             ({}); see the audit log",
+            notice.reason
+        );
+    }
+    eprintln!(
+        "zim_engine: frontend active — {} {} ({}), {} surface(s)",
+        frontend_info.id,
+        frontend_info.version,
+        if frontend_info.is_default {
+            "bundled"
+        } else {
+            "data-dir"
+        },
+        frontend_info.page_surfaces.len(),
+    );
+
+    // ── API server ──────────────────────────────────────────────────
     let state = Arc::new(AppState::new(
         Arc::clone(&persistence),
         Arc::clone(&supervisor),
@@ -274,6 +339,7 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         Arc::clone(&transfers),
         Arc::clone(&installs),
         Arc::clone(&scheduler),
+        Arc::clone(&frontend),
         ApiConfig::default(),
     ));
     let router = zim_engine_api::router(Arc::clone(&state));
@@ -289,7 +355,8 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
     .map_err(|e| e.to_string())?;
 
     eprintln!(
-        "zim_engine: serving https://127.0.0.1:{} (API prefix /api/v1, data dir {})",
+        "zim_engine: serving https://127.0.0.1:{} (API prefix /api/v1, frontend at /zim/, \
+         data dir {})",
         server.local_addr.port(),
         options.data_dir.display()
     );

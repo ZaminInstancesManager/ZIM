@@ -197,6 +197,22 @@ bollard = { version = "0.21", default-features = false, features = [
 # POSIX shell-style word splitting for the startup command template
 # (the same job shlex does for Wings's startup commands).
 shlex = "2"
+# ── M11: frontend loader + default frontend (§M11) ──────────────────
+# SemVer range parsing/checking for frontend-package `engines.zim`
+# compatibility (the same parser Cargo itself uses).
+semver = "1"
+# Ed25519 signature verification for frontend-package manifests
+# (docs/api/FRONTEND_EXTENSION_SPEC.md §3.4; pure Rust, no C toolchain).
+ed25519-dalek = { version = "2", default-features = false, features = [
+    "std",
+    "rand_core",
+] }
+# ZIP archive reading for frontend-package uploads (§10.14
+# `POST /frontend/upload`; deflate only — the engine neither needs
+# nor enables the AES/other default feature tree).
+zip = { version = "2", default-features = false, features = [
+    "deflate",
+] }
 
 [profile.release]
 opt-level = 3

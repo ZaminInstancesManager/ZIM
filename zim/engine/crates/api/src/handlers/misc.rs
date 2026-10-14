@@ -183,16 +183,6 @@ pub async fn extension_install_stub() -> Result<Response, ApiError> {
     })
 }
 
-// ── Frontend packages (§10.14) ────────────────────────────────────
-
-/// The frontend-package family — M11.
-pub async fn frontend_stub() -> Result<Response, ApiError> {
-    Err(ApiError::NotImplemented {
-        feature: "frontend package management (active, upload, smoke-test, reset)",
-        milestone: "M11 (frontend loader + default frontend)",
-    })
-}
-
 // ── Workload integrations (§10.16) ────────────────────────────────
 
 /// The workload-integration admin surface — M16.

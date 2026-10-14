@@ -33,6 +33,9 @@ zim_engine_installs = { workspace = true }
 # scheduler (the §10.6 run-now endpoint + AppState wiring).
 zim_engine_eggs = { workspace = true }
 zim_engine_scheduler = { workspace = true }
+# M11: the frontend loader — the §10.14 package endpoints and the
+# `/zim/` page-serving surface over the active package.
+zim_engine_frontend_loader = { workspace = true }
 # Async runtime (listener, middleware, spawn_blocking bridge).
 tokio = { workspace = true }
 # HTTP framework: router, extractors, `from_fn` middleware, and
@@ -70,6 +73,11 @@ sha2 = { workspace = true }
 futures-util = { workspace = true }
 
 [dev-dependencies]
+# M11: engine-version fixtures for the frontend loader in test engines.
+semver = { workspace = true }
+# M11: assembling frontend-package upload archives in the
+# frontend/pages integration tests.
+zip = { workspace = true }
 # In-memory persistence adapter for integration tests.
 zim_engine_persistence_sqlite = { workspace = true }
 # The transfer service (M8.2) + install service (M8.3) assembled
