@@ -1078,6 +1078,11 @@ async fn console_pump_publishes_to_hub_through_supervisor() {
 /// more than the retention window keeps the hub's console lane
 /// bounded (10k events / 1 MB defaults), evicting from the front and
 /// keeping the newest tail.
+///
+/// The workload paces its 40k lines over several seconds (the attach
+/// must land while output is still flowing — a one-shot emitter can
+/// exit before the pump attaches) and ends with a distinctive marker
+/// line, which doubles as the drain-complete signal.
 #[tokio::test]
 async fn console_retention_bounds_under_load() {
     let Some(docker) = docker_or_skip().await else {
@@ -1088,9 +1093,18 @@ async fn console_retention_bounds_under_load() {
     let store = seed_store();
     let user = seed_user(store.as_ref());
     let node = seed_node(store.as_ref());
-    // 40k lines (~7 bytes each: well over the 10k-event bound, well
-    // under the 1 MB byte bound, so the event cap is the binding one).
-    let instance = seed_instance(store.as_ref(), &node, &user, 46122, "seq 1 40000");
+    // 200 bursts × 400 lines = 80k lines (each ~4-6 bytes on the
+    // TTY: far over the 10k-event bound, well under the 1 MB byte
+    // bound, so the event cap is the binding one), paced over ~10s —
+    // the attach lands within the first second or two, so even a
+    // slow runner captures several times the retention window.
+    let instance = seed_instance(
+        store.as_ref(),
+        &node,
+        &user,
+        46122,
+        "sh -c \"for i in $(seq 1 200); do seq 1 400; sleep 0.05; done; echo FINAL-ZIM-MARKER\"",
+    );
     remove_quietly(&docker, &instance.uuid).await;
     // A one-shot workload: disable crash detection so the exit does
     // not auto-restart (and re-emit) the whole sequence.
@@ -1123,39 +1137,30 @@ async fn console_retention_bounds_under_load() {
         .await
         .expect("start accepted");
 
-    // Wait for the workload to finish and the pump to drain: the
-    // observed state settles Offline and the lane's generation stops
-    // advancing.
-    assert!(
-        soon(|| async {
-            supervisor
-                .observed(&instance.id)
-                .await
-                .map(|s| matches!(s.observed, ObservedState::Offline { .. }))
-                .unwrap_or(false)
-        })
-        .await
-    );
-    // Wait for the lane to settle: no new generation for ~600 ms
-    // after the last event (the pump has drained the whole stream).
-    let settle_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    let mut last_generation = supervisor.stream().last_generation(instance.id);
-    let mut settled_since: Option<tokio::time::Instant> = None;
+    // The marker line is the stream's last event: its arrival in the
+    // retained lane means the workload finished AND the pump drained
+    // everything it captured.
+    let marker_deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
         assert!(
-            tokio::time::Instant::now() < settle_deadline,
-            "the console lane settles after the workload exits"
+            tokio::time::Instant::now() < marker_deadline,
+            "the workload's marker line reaches the console lane"
         );
-        let generation = supervisor.stream().last_generation(instance.id);
-        if generation == last_generation {
-            if settled_since.is_some_and(|t| t.elapsed() >= Duration::from_millis(600)) {
-                break;
-            }
-        } else {
-            last_generation = generation;
-            settled_since = Some(tokio::time::Instant::now());
+        let last_is_marker = supervisor
+            .stream()
+            .console_buffer(instance.id)
+            .last()
+            .is_some_and(|event| {
+                matches!(
+                    &event.data,
+                    zim_engine_streaming::EventData::ConsoleOutput { line }
+                        if line.contains("FINAL-ZIM-MARKER")
+                )
+            });
+        if last_is_marker {
+            break;
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
 
     let buffer = supervisor.stream().console_buffer(instance.id);
@@ -1165,6 +1170,11 @@ async fn console_retention_bounds_under_load() {
         "retention keeps at most {} events, got {}",
         policy.console_retention_events,
         buffer.len()
+    );
+    assert_eq!(
+        buffer.len(),
+        policy.console_retention_events,
+        "80k lines over-fill the window: eviction engaged and the lane sits at the cap"
     );
     let bytes: usize = buffer
         .iter()
@@ -1179,34 +1189,34 @@ async fn console_retention_bounds_under_load() {
         policy.console_retention_bytes,
         bytes
     );
-    // The newest tail survived: the last retained line is from the
-    // end of the sequence, and eviction happened from the front.
-    let last_line = match &buffer.last().expect("a retained tail").data {
-        zim_engine_streaming::EventData::ConsoleOutput { line } => line.clone(),
-        other => panic!("console lane carries console events only, got {other:?}"),
-    };
-    let last_number: u64 = last_line
-        .trim_end()
-        .trim_end_matches('\r')
-        .parse()
-        .expect("seq lines are numbers");
+    // The newest tail survived: the marker (the stream's very last
+    // line) is the newest retained event.
     assert!(
-        last_number >= 39_900,
-        "the newest lines are retained (got {last_number})"
+        buffer.last().is_some_and(|event| {
+            matches!(
+                &event.data,
+                zim_engine_streaming::EventData::ConsoleOutput { line }
+                    if line.contains("FINAL-ZIM-MARKER")
+            )
+        }),
+        "the newest line (the marker) is retained"
     );
-    assert!(
-        buffer.len() < 40_000,
-        "eviction engaged: the full 40k lines are not retained"
-    );
-    // Generations on the lane are strictly increasing (order).
+    // Generations on the lane are unique and strictly ordered (the
+    // §11.2 ordering witness; also proves eviction did not duplicate
+    // or re-order retained events).
     let generations: Vec<u64> = buffer.iter().map(|e| e.generation).collect();
-    let sorted = {
-        let mut g = generations.clone();
-        g.sort_unstable();
-        g
-    };
+    let mut sorted = generations.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
     assert_eq!(
-        generations, sorted,
+        generations.len(),
+        sorted.len(),
+        "no duplicate generations: {generations:?}"
+    );
+    let mut ordered = generations.clone();
+    ordered.sort_unstable();
+    assert_eq!(
+        generations, ordered,
         "retained events are in generation order"
     );
 
