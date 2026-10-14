@@ -61,6 +61,17 @@ fn test_settings() -> DockerSettings {
     }
 }
 
+/// Test settings whose containers run as root: the M8.1 backup test
+/// has the container write into its bind-mounted data directory,
+/// which the engine created host-side (owned by the test user — not
+/// writable by the wings-parity 988:988 container user).
+fn root_user_settings() -> DockerSettings {
+    DockerSettings {
+        container_user: "root".to_owned(),
+        ..test_settings()
+    }
+}
+
 /// A minimal busybox-sleep instance config.
 fn busybox_config(
     name: &str,
@@ -1272,7 +1283,7 @@ async fn backup_and_restore_of_container_data() {
         crash_detection_enabled: false,
     };
     let factory = Arc::new(
-        DockerRuntimeFactory::connect(test_settings())
+        DockerRuntimeFactory::connect(root_user_settings())
             .await
             .expect("factory"),
     );
@@ -1295,7 +1306,12 @@ async fn backup_and_restore_of_container_data() {
         ..Default::default()
     };
     let out = runtime.exec(&write_world).await.expect("write world");
-    assert_eq!(out.exit_code, Some(0), "world write failed");
+    assert_eq!(
+        out.exit_code,
+        Some(0),
+        "world write failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(
         soon(|| async { data_dir.join("world/data.txt").exists() }).await,
         "the container's write must reach the host-side bind mount"
@@ -1351,7 +1367,12 @@ async fn backup_and_restore_of_container_data() {
         ..Default::default()
     };
     let out = runtime.exec(&clobber).await.expect("clobber");
-    assert_eq!(out.exit_code, Some(0));
+    assert_eq!(
+        out.exit_code,
+        Some(0),
+        "clobber failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(
         soon(|| async {
             std::fs::read_to_string(data_dir.join("server.properties"))
