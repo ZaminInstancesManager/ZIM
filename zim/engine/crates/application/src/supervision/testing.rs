@@ -424,3 +424,170 @@ impl RuntimeFactory for MockRuntimeFactory {
         }
     }
 }
+
+// ── Install runner mock (M8.3) ────────────────────────────────────
+
+use super::{
+    InstallCancelledFn, InstallProgressFn, InstallRunError, InstallRunOutcome, InstallRunner,
+    InstallScriptSpec,
+};
+
+/// What one scripted install run does.
+#[derive(Debug, Clone)]
+pub enum MockInstallRun {
+    /// The script "runs" for `run_for` and then exits with
+    /// `exit_code`, having produced `output`.
+    Run {
+        /// How long the script takes.
+        run_for: Duration,
+        /// The exit status it exits with.
+        exit_code: i32,
+        /// The output it produces (the failure tail).
+        output: String,
+    },
+    /// The runner itself fails (backend error).
+    Fail(RuntimeError),
+    /// The script never completes on its own (cancellation tests:
+    /// only the cooperative hook can end it).
+    Stall,
+}
+
+/// Shared inner state of the install mock.
+#[derive(Default)]
+struct MockInstallCore {
+    script: VecDeque<MockInstallRun>,
+    specs: Vec<InstallScriptSpec>,
+    ran: usize,
+}
+
+/// A scriptable in-memory [`InstallRunner`]: starts consume a
+/// per-run behavior, every spec is recorded (the assertion
+/// surface: image, env, bind, timeout), and stalled runs honor
+/// the cancellation hook exactly like the Docker adapter (the
+/// "container" is killed the moment the hook flips).
+#[derive(Clone)]
+pub struct MockInstallRunner {
+    core: Arc<Mutex<MockInstallCore>>,
+    /// Latency applied before each scripted run *starts* (the
+    /// pull-phase window).
+    pull_latency: Duration,
+}
+
+impl MockInstallRunner {
+    /// A mock whose next `script.len()` runs behave as scripted
+    /// (subsequent runs succeed with exit 0).
+    pub fn scripted(script: Vec<MockInstallRun>) -> Self {
+        Self {
+            core: Arc::new(Mutex::new(MockInstallCore {
+                script: script.into(),
+                specs: Vec::new(),
+                ran: 0,
+            })),
+            pull_latency: Duration::ZERO,
+        }
+    }
+
+    /// A mock whose every run succeeds (exit 0).
+    pub fn always_succeeds() -> Self {
+        Self::scripted(vec![MockInstallRun::Run {
+            run_for: Duration::ZERO,
+            exit_code: 0,
+            output: "installed\n".to_owned(),
+        }])
+    }
+
+    /// Simulate the image-pull window (progress + cancellation
+    /// checks happen before the script starts).
+    pub fn with_pull_latency(mut self, latency: Duration) -> Self {
+        self.pull_latency = latency;
+        self
+    }
+
+    /// The specs every run received, in order.
+    pub fn specs(&self) -> Vec<InstallScriptSpec> {
+        self.core.lock().expect("mock poisoned").specs.clone()
+    }
+
+    /// How many runs completed (reached an outcome; cancelled runs
+    /// do not count).
+    pub fn ran(&self) -> usize {
+        self.core.lock().expect("mock poisoned").ran
+    }
+
+    fn next_behavior(&self) -> Option<MockInstallRun> {
+        self.core.lock().expect("mock poisoned").script.pop_front()
+    }
+
+    fn record_spec(&self, spec: &InstallScriptSpec) {
+        self.core
+            .lock()
+            .expect("mock poisoned")
+            .specs
+            .push(spec.clone());
+    }
+
+    fn record_ran(&self) {
+        self.core.lock().expect("mock poisoned").ran += 1;
+    }
+}
+
+#[async_trait]
+impl InstallRunner for MockInstallRunner {
+    async fn run_install_script(
+        &self,
+        spec: &InstallScriptSpec,
+        progress: InstallProgressFn,
+        is_cancelled: InstallCancelledFn,
+    ) -> Result<InstallRunOutcome, InstallRunError> {
+        self.record_spec(spec);
+        // The pull phase: wait out the pull latency, polling the
+        // cancellation hook like the adapter polls between daemon
+        // round-trips.
+        progress("pulling_image", 0.0);
+        let pull_deadline = tokio::time::Instant::now() + self.pull_latency;
+        while tokio::time::Instant::now() < pull_deadline {
+            if is_cancelled() {
+                return Ok(InstallRunOutcome::Cancelled);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        if is_cancelled() {
+            return Ok(InstallRunOutcome::Cancelled);
+        }
+        progress("pulling_image", 1.0);
+
+        progress("running_install_script", 0.0);
+        let behavior = self.next_behavior().unwrap_or(MockInstallRun::Run {
+            run_for: Duration::ZERO,
+            exit_code: 0,
+            output: String::new(),
+        });
+        match behavior {
+            MockInstallRun::Fail(e) => Err(InstallRunError::Runtime(e)),
+            MockInstallRun::Stall => {
+                // Only the cancellation hook ends a stall.
+                loop {
+                    if is_cancelled() {
+                        return Ok(InstallRunOutcome::Cancelled);
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            }
+            MockInstallRun::Run {
+                run_for,
+                exit_code,
+                output,
+            } => {
+                tokio::time::sleep(run_for).await;
+                if is_cancelled() {
+                    return Ok(InstallRunOutcome::Cancelled);
+                }
+                self.record_ran();
+                Ok(InstallRunOutcome::Completed {
+                    exit_code: Some(exit_code),
+                    tail: output,
+                })
+            }
+        }
+    }
+}

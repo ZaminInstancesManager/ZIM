@@ -686,6 +686,30 @@ through the `Backup` row's `job_id`, the companion-entity
 pattern). Transfers (M8.2) and install jobs (M8.3) register their
 own handlers on the same executor.
 
+**Implementation status (M8.3, issue #8):** the install pipeline
+is live. The `InstallRunner` port (application layer) abstracts
+one-shot constrained containers — distinct from the per-instance
+`Runtime` handle, because an install script is an arbitrary
+untrusted egg script running in the egg's own installer image,
+not the workload. The Docker adapter (`DockerInstallRunner`)
+creates a container per run with the workload posture (cap-drop,
+`no-new-privileges`, read-only rootfs, unprivileged user) plus
+the install-specific relaxations (network egress, the data-dir
+bind as the only writable path), reports byte-level pull
+progress, honors the cooperative cancellation hook, enforces the
+deadline, collects a bounded output tail, and force-removes the
+container on every exit path. `zim_engine_installs` contributes
+the `InstallService` (validation + the install-in-flight guard +
+job creation) and the `InstallJobHandler` (stop-then-run-then-
+stamp; `JobKind::Update` selects the egg's update script with
+the install fallback). A failed script fails the job with the
+exit code + tail and `cleanup_pending = false` — partial
+downloads are retry state, not cleaner garbage (invariant 11's
+"partial state" is job-owned state; an install's partial output
+is instance-owned). The §10.3 `POST /instances/{id}/install`
+endpoint is live (the 501 retired); the degraded engine binds
+the `NullInstallRunner` so installs fail fast there.
+
 - **Backup job:** `Pending → InProgress(stage=Archive, progress)
   → Succeeded` or `Failed`. The archive is written to the
   configured backup storage; the `Backups` row's `sha256_hash` and

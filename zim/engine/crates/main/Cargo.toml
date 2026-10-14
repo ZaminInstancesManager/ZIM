@@ -28,6 +28,9 @@ zim_engine_jobs = { workspace = true }
 # M8: the backup service + its job handler, composed here.
 zim_engine_backups = { workspace = true }
 zim_engine_transfers = { workspace = true }
+# M8.3: the install service (the §10.3 install mutation + the
+# constrained-container install job handler).
+zim_engine_installs = { workspace = true }
 zim_engine_auth = { workspace = true }
 zim_engine_authz = { workspace = true }
 zim_engine_audit = { workspace = true }

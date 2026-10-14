@@ -450,7 +450,30 @@ whose job already ended as stale, so the instance is never
 permanently untransferable). Engine-local execution this
 milestone: both halves of the transfer tree live under the
 engine's data root (the node-runtime contract later replaces the
-local ship step). M8.3 (install jobs) follows.
+local ship step). M8.3 (issue #8) delivered — the install
+pipeline: the `zim_engine_installs` crate (the `InstallService`
+validation + install-in-flight guard over the §10.3
+`POST /instances/{id}/install` mutation, and the
+`InstallJobHandler` running the egg's verbatim install script —
+or its update script, with the install fallback, for
+`JobKind::Update` — through the new `InstallRunner` port in the
+application layer), the `DockerInstallRunner` adapter (a
+constrained one-shot container per run: capabilities dropped,
+`no-new-privileges`, read-only root filesystem, the unprivileged
+container user, no published ports, network egress on the
+instance network, the instance data directory as the only
+writable bind; pulled with byte-level progress; killed and
+removed on every exit path including timeout and cancellation),
+the stop-then-run-then-stamp pipeline (a running workload is
+stopped through the power queue first; `installed_at` is stamped
+on success; the workload stays stopped — Pterodactyl reinstall
+semantics), and the failure semantics (a failed script fails the
+job with the exit code + output tail and `cleanup_pending =
+false`: partial downloads in the data directory are retry state
+for the next install, not cleaner garbage). The degraded
+API-only engine binds the `NullInstallRunner` (installs fail
+fast with a structured error); tests bind the scriptable
+`MockInstallRunner`. M8 is complete.
 
 **Deliverables:**
 - `zim_engine_jobs` crate with the `Job` state machine and

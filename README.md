@@ -57,19 +57,24 @@ subsequent implementation work will follow.
   (M5), the runtime abstraction + Docker runtime (M6 — instance
   lifecycle with power-queue serialization, crash-loop protection,
   engine-restart reconciliation, and Wings-parity container
-  management over `pterodactyl0`), and streaming (M7 — the
+  management over `pterodactyl0`), streaming (M7 — the
   `zim_engine_streaming` fan-out hub with per-instance event
   generations, replay-from-checkpoint, drop-oldest backpressure,
   the `/api/v1/stream` WebSocket endpoint with per-tab capability
   token auth, supervision-published `instance.state_change` and
   `instance.resource_usage` events, and the console/metrics read
-  endpoints) are delivered; jobs (M8) and later milestones remain,
-  as does the M7 follow-up of the Docker runtime's console attach
-  pump (runtime-side stdout streaming and stdin attach — the
-  engine-side plumbing is in place and answers `501
-  not_implemented` until the runtime ships it). Operations that
-  need those milestones answer `501 not_implemented` per the API
-  spec's transitional vocabulary.
+  endpoints), and the full durable-jobs milestone (M8 — the
+  `zim_engine_jobs` executor, the `zim_engine_backups`
+  create/restore pipeline, the `zim_engine_transfers`
+  two-phase-commit node move, and the `zim_engine_installs`
+  constrained-container install pipeline over the `InstallRunner`
+  port), plus the egg importer and per-instance cron scheduler
+  (M9 — `zim_engine_eggs` and `zim_engine_scheduler`). Remaining:
+  the Pterodactyl migration importer (M10), the frontend loader +
+  default frontend (M11), the Chromium import (M12), and the
+  integration milestones. Operations that need those milestones
+  answer `501 not_implemented` per the API spec's transitional
+  vocabulary.
 - A re-skinned Pterodactyl. The Panel's PHP/Laravel backend and Wings's Go
   daemon are preserved in `upstream/` as audit references and behavioral
   contracts; they are not part of ZIM's runtime architecture.

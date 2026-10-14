@@ -73,6 +73,18 @@ impl TestEngine {
             data_root.clone(),
         );
         transfers.register().await;
+        // M8.3: the install service (the §10.3 install mutation)
+        // over the mock install runner (no Docker dependency).
+        let installs = zim_engine_installs::InstallService::new(
+            Arc::clone(&persistence),
+            Arc::clone(&jobs),
+            Arc::clone(&supervisor),
+            Arc::new(
+                zim_engine_application::supervision::testing::MockInstallRunner::always_succeeds(),
+            ),
+            data_root.clone(),
+        );
+        installs.register().await;
         jobs.start();
         // M9: the cron scheduler (schedule firing + run-now).
         let scheduler =
@@ -86,6 +98,7 @@ impl TestEngine {
             Arc::clone(&jobs),
             Arc::clone(&backups),
             Arc::clone(&transfers),
+            Arc::clone(&installs),
             Arc::clone(&scheduler),
             config,
         ));
@@ -2227,4 +2240,150 @@ async fn eggs_import_list_get_and_delete() {
         .await
         .unwrap();
     assert_eq!(response.status(), 404);
+}
+
+#[tokio::test]
+async fn install_endpoint_runs_the_script_and_stamps_installed_at() {
+    // M8.3: the §10.3 install mutation is live (the 501 retired).
+    // Import an egg with an install script, create an instance on
+    // it, POST /install → 202 + job id, the job runs the script
+    // through the mock install runner to Succeeded, and the
+    // instance row carries installed_at afterwards.
+    let engine = TestEngine::start().await;
+    engine.seed_user("admin@zim.local", "admin pass", true);
+    let admin_cookie = login(&engine, "admin@zim.local", "admin pass")
+        .await
+        .expect("admin login");
+
+    // 1. Import an egg whose install script exists.
+    let legacy = json!({
+        "meta": { "version": "PTDL_v1", "update_url": null },
+        "name": "Installable Egg",
+        "author": "admin@zim.local",
+        "docker_images": { "Java 21": "eclipse-temurin:21-jre" },
+        "startup": "java -jar {{SERVER_JARFILE}}",
+        "scripts": {
+            "installation": {
+                "script": "cd /home/container && echo installing",
+                "container": "ghcr.io/parkervcp/installers:alpine",
+                "entrypoint": "bash"
+            }
+        },
+        "variables": [{
+            "name": "Jar",
+            "env_variable": "SERVER_JARFILE",
+            "default_value": "server.jar",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": ["required"]
+        }]
+    });
+    let response = engine
+        .client
+        .post(engine.url("/eggs"))
+        .header("cookie", format!("zim_session={admin_cookie}"))
+        .json(&legacy)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201);
+    let body: Value = response.json().await.unwrap();
+    let egg_id = body["egg"]["id"].as_str().unwrap().to_owned();
+
+    // 2. Create an instance on that egg.
+    let (node, _allocations) = seed_node_with_allocations(&engine, &admin_cookie).await;
+    let response = engine
+        .client
+        .post(engine.url("/instances"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .json(&json!({
+            "name": "install-flow",
+            "node_id": node["id"].as_str().unwrap(),
+            "egg_id": egg_id,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201);
+    let instance: Value = response.json().await.unwrap();
+    let instance_id = instance["id"].as_str().unwrap().to_owned();
+    assert!(instance["installed_at"].is_null());
+
+    // 3. Install (no body — Pterodactyl's reinstall takes none).
+    let response = engine
+        .client
+        .post(engine.url(&format!("/instances/{instance_id}/install")))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let created: Value = response.json().await.unwrap();
+    assert_eq!(created["instance_id"].as_str().unwrap(), instance_id);
+    let job_id = created["job_id"].as_str().unwrap().to_owned();
+    assert!(!job_id.is_empty());
+
+    // 4. The job runs the script to Succeeded.
+    let job = wait_for_terminal_job(&engine, &admin_cookie, &job_id).await;
+    assert_eq!(job["state"].as_str().unwrap(), "succeeded");
+    assert_eq!(job["kind"].as_str().unwrap(), "install");
+
+    // 5. The instance row carries the stamp.
+    let response = engine
+        .client
+        .get(engine.url(&format!("/instances/{instance_id}")))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let updated: Value = response.json().await.unwrap();
+    assert!(updated["installed_at"].is_string());
+
+    // 6. A body-carrying reinstall also lands (the skip hatch over
+    // a fresh job).
+    let response = engine
+        .client
+        .post(engine.url(&format!("/instances/{instance_id}/install")))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .json(&json!({ "skip_egg_scripts": true }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let created: Value = response.json().await.unwrap();
+    let job_id = created["job_id"].as_str().unwrap().to_owned();
+    let job = wait_for_terminal_job(&engine, &admin_cookie, &job_id).await;
+    assert_eq!(job["state"].as_str().unwrap(), "succeeded");
+
+    // 7. An instance whose egg does not exist (created egg-less)
+    // answers the structured internal error, not a 501.
+    let response = engine
+        .client
+        .post(engine.url("/instances"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .json(&json!({
+            "name": "egg-less",
+            "node_id": node["id"].as_str().unwrap(),
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201);
+    let eggless: Value = response.json().await.unwrap();
+    let eggless_id = eggless["id"].as_str().unwrap().to_owned();
+    let response = engine
+        .client
+        .post(engine.url(&format!("/instances/{eggless_id}/install")))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 500);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "internal_error");
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("not found"));
 }

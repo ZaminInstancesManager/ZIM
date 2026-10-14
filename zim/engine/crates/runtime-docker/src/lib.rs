@@ -37,6 +37,7 @@
 mod attach;
 mod container;
 mod exec;
+mod install;
 mod network;
 mod stats;
 
@@ -54,6 +55,7 @@ use zim_engine_application::supervision::{
 use zim_engine_application::supervision::{Runtime, RuntimeFactory};
 
 pub use container::DOCKER_CAP_DROP;
+pub use install::DockerInstallRunner;
 
 /// Remove an instance's container (force, with volumes); missing
 /// containers are fine. Cleanup path for tests and the future
@@ -184,6 +186,13 @@ impl DockerRuntimeFactory {
     /// The effective settings.
     pub fn settings(&self) -> &DockerSettings {
         &self.settings
+    }
+
+    /// The instance network's IPv4 gateway (shared with the
+    /// install runner so installer containers get the same
+    /// SERVER_IP rewrite).
+    pub fn network_gateway(&self) -> Option<std::net::Ipv4Addr> {
+        self.network_gateway
     }
 }
 

@@ -1,0 +1,36 @@
+[package]
+name = "zim_engine_installs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+
+[lib]
+name = "zim_engine_installs"
+path = "src/lib.rs"
+
+[dependencies]
+zim_engine_application = { workspace = true }
+zim_engine_domain = { workspace = true }
+zim_engine_jobs = { workspace = true }
+# Object-safe async trait methods (the JobHandler contract).
+async-trait = { workspace = true }
+# The handler bridges sync persistence work onto the blocking pool
+# and polls observed state on async timers.
+tokio = { workspace = true }
+# The install error surface + `installed_at` stamping.
+thiserror = { workspace = true }
+chrono = { workspace = true }
+# The install job's payload (skip-scripts flag).
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# In-memory store for the service/handler tests.
+zim_engine_persistence_sqlite = { workspace = true }
+# The mock runtime + mock install runner (no Docker dependency).
+zim_engine_application = { workspace = true, features = ["test-util"] }

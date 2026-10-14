@@ -86,6 +86,18 @@ impl StreamEngine {
             std::env::temp_dir().join("zim-stream-test"),
         );
         transfers.register().await;
+        // M8.3: the install service (the §10.3 install mutation)
+        // over the mock install runner — parity with production.
+        let installs = zim_engine_installs::InstallService::new(
+            Arc::clone(&persistence),
+            Arc::clone(&jobs),
+            Arc::clone(&supervisor),
+            Arc::new(
+                zim_engine_application::supervision::testing::MockInstallRunner::always_succeeds(),
+            ),
+            std::env::temp_dir().join("zim-stream-test"),
+        );
+        installs.register().await;
         jobs.start();
         // M9: the cron scheduler (parity with the production
         // assembly; the loop is not started in these tests).
@@ -100,6 +112,7 @@ impl StreamEngine {
             Arc::clone(&jobs),
             Arc::clone(&backups),
             Arc::clone(&transfers),
+            Arc::clone(&installs),
             Arc::clone(&scheduler),
             ApiConfig::default(),
         ));

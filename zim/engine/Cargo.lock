@@ -2350,6 +2350,7 @@ name = "zim_engine_api"
 version = "0.0.1"
 dependencies = [
  "axum",
+ "axum-core",
  "base64 0.22.1",
  "chrono",
  "futures-util",
@@ -2375,6 +2376,7 @@ dependencies = [
  "zim_engine_backups",
  "zim_engine_domain",
  "zim_engine_eggs",
+ "zim_engine_installs",
  "zim_engine_jobs",
  "zim_engine_persistence_sqlite",
  "zim_engine_scheduler",
@@ -2497,6 +2499,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "zim_engine_installs"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "zim_engine_application",
+ "zim_engine_domain",
+ "zim_engine_jobs",
+ "zim_engine_persistence_sqlite",
+]
+
+[[package]]
 name = "zim_engine_jobs"
 version = "0.0.1"
 dependencies = [
@@ -2527,6 +2545,7 @@ dependencies = [
  "zim_engine_backups",
  "zim_engine_domain",
  "zim_engine_frontend_loader",
+ "zim_engine_installs",
  "zim_engine_jobs",
  "zim_engine_metrics",
  "zim_engine_persistence_sqlite",

@@ -27,6 +27,8 @@ zim_engine_jobs = { workspace = true }
 zim_engine_backups = { workspace = true }
 # M8.2: the transfer service (the §10.9 transfer mutation family).
 zim_engine_transfers = { workspace = true }
+# M8.3: the install service (the §10.3 install mutation).
+zim_engine_installs = { workspace = true }
 # M9: the egg importer (the §10.11 import endpoint) and the cron
 # scheduler (the §10.6 run-now endpoint + AppState wiring).
 zim_engine_eggs = { workspace = true }
@@ -36,6 +38,7 @@ tokio = { workspace = true }
 # HTTP framework: router, extractors, `from_fn` middleware, and
 # (M7) the `/api/v1/stream` WebSocket upgrade.
 axum = { workspace = true, features = ["ws"] }
+axum-core = { workspace = true }
 # `ServiceExt::oneshot` for handler-level tests.
 tower = { workspace = true }
 # Connection serving under the manual TLS accept loop.
@@ -69,8 +72,10 @@ futures-util = { workspace = true }
 [dev-dependencies]
 # In-memory persistence adapter for integration tests.
 zim_engine_persistence_sqlite = { workspace = true }
-# The transfer service (M8.2) assembled by the test engines.
+# The transfer service (M8.2) + install service (M8.3) assembled
+# by the test engines.
 zim_engine_transfers = { workspace = true }
+zim_engine_installs = { workspace = true }
 # The streaming hub's types for the WebSocket tests.
 zim_engine_streaming = { workspace = true }
 # The scripted mock runtime for the lifecycle endpoint tests

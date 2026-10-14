@@ -31,9 +31,11 @@ use crate::state::AppState;
 ///   restore / download / lock).
 /// - Implemented in M8.2: the §10.9 transfer mutation family
 ///   (initiate / cancel) over the two-phase-commit job.
+/// - Implemented in M8.3: the §10.3 install mutation
+///   (`POST /instances/{id}/install`) over the constrained-container
+///   install job.
 /// - Declared but 501 `not_implemented`: files (M6 filesystem
-///   capability), install (M8.3 + M9 egg importer), schedules run
-///   (M9), eggs (M9), frontend packages (M11), workload
+///   capability), frontend packages (M11), workload
 ///   integrations (M16), OAuth (post-M5).
 /// - `/api/v1/workloads` aliases the instance handlers per the
 ///   AD-19 back-compat rules (§10.17).
@@ -77,7 +79,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/instances/{id}/stop", post(instances::stop))
         .route("/instances/{id}/restart", post(instances::restart))
         .route("/instances/{id}/kill", post(instances::kill))
-        .route("/instances/{id}/install", post(instances::install_stub))
+        .route("/instances/{id}/install", post(instances::initiate_install))
         .route("/instances/{id}/suspend", post(instances::suspend))
         .route(
             "/instances/{id}/transfer",
@@ -166,7 +168,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/workloads/{id}/stop", post(instances::stop))
         .route("/workloads/{id}/restart", post(instances::restart))
         .route("/workloads/{id}/kill", post(instances::kill))
-        .route("/workloads/{id}/install", post(instances::install_stub))
+        .route("/workloads/{id}/install", post(instances::initiate_install))
         .route(
             "/workloads/{id}/migrate",
             post(instances::workload_kind_stub),

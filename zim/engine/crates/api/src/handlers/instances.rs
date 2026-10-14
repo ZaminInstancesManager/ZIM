@@ -1417,14 +1417,84 @@ pub async fn suspend(
     Ok(response)
 }
 
-// ── 501 stubs (later milestones) ──────────────────────────────────
+// ── Installs (M8.3: the §10.3 install mutation) ─────────────────
 
-/// `POST /instances/{id}/install` — M8 (jobs).
-pub async fn install_stub() -> Result<Response, ApiError> {
-    Err(ApiError::NotImplemented {
-        feature: "instance install/reinstall",
-        milestone: "M8 (jobs) + M9 (egg importer)",
-    })
+/// Map a [`zim_engine_installs::InstallError`] onto the §6.1 error
+/// vocabulary.
+fn install_error(e: zim_engine_installs::InstallError) -> ApiError {
+    use zim_engine_installs::InstallError as E;
+    match e {
+        E::InstanceNotFound(id) => ApiError::not_found("instance", id),
+        E::EggNotFound(..) => ApiError::internal(e.to_string()),
+        E::InstallInFlight(_) => ApiError::Conflict(e.to_string()),
+        E::NoInstallInFlight(_) => ApiError::not_found("install", "none in progress"),
+        E::Persistence(pe) => ApiError::from(pe),
+    }
+}
+
+/// Install request body (spec §10.3): everything optional — the
+/// egg, image, and startup come from the instance's egg; the body
+/// only carries the operator's knobs.
+#[derive(Debug, Default, Deserialize)]
+pub struct InstallBody {
+    /// Skip the egg's install script and just mark the instance
+    /// installed (the "pre-installed data" hatch; defaults to the
+    /// instance row's `skip_egg_scripts` flag).
+    pub skip_egg_scripts: Option<bool>,
+}
+
+/// `POST /api/v1/instances/{id}/install` — install / reinstall
+/// (spec §10.3): validates the instance and its egg exist and no
+/// other install is in flight, creates the `Pending` install job,
+/// enqueues it on the executor, and answers `200` with the job id
+/// (the backup/transfer family's job-creation convention). The job
+/// stops a running workload, pulls the egg's installer
+/// image, runs the verbatim script in a constrained container
+/// bound to the instance's data directory, and stamps
+/// `installed_at` on success; the workload stays stopped when it
+/// finishes (Pterodactyl reinstall semantics — the operator
+/// starts it). Poll the job endpoints or watch `job.progress`
+/// events. Requires the `install` grant.
+pub async fn initiate_install(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<String>,
+    body: Option<ApiJson<InstallBody>>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
+    let (_instance, ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
+    check_grants(&ctx, &[PermissionGrant::Install])?;
+
+    // The body is optional (Pterodactyl's reinstall takes none):
+    // an absent body means "the row's flags decide".
+    let body = body.map(|ApiJson(body)| body).unwrap_or_default();
+    let job = state
+        .installs
+        .initiate(
+            instance_id,
+            zim_engine_installs::InstallOptions {
+                skip_egg_scripts: body.skip_egg_scripts,
+            },
+        )
+        .await
+        .map_err(install_error)?;
+
+    audit(
+        &state,
+        Some(ctx.user_id.to_string()),
+        "instance.install",
+        Some(instance_id),
+        serde_json::json!({
+            "job_id": job.id,
+            "skip_egg_scripts": body.skip_egg_scripts,
+        }),
+    )
+    .await;
+    Ok(Json(serde_json::json!({
+        "job_id": job.id,
+        "instance_id": instance_id,
+        "state": job.state,
+    })))
 }
 
 // ── Transfers (M8.2: initiate / cancel) ──────────────────────────

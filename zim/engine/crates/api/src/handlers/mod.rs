@@ -392,6 +392,39 @@ where
     }
 }
 
+/// The optional form (`body: Option<ApiJson<T>>`, axum-core's
+/// `OptionalFromRequest`): a request with *no* content-type (and
+/// therefore no body) extracts as `None`; a request that does carry
+/// a body extracts through the structured rejection above. This is
+/// what lets endpoints with optional bodies (the §10.3 install
+/// mutation, Pterodactyl's own reinstall takes none) stay strict
+/// about malformed payloads while tolerating their absence.
+impl<T, S> axum_core::extract::OptionalFromRequest<S> for ApiJson<T>
+where
+    T: serde::de::DeserializeOwned,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request(
+        req: axum::extract::Request,
+        state: &S,
+    ) -> Result<Option<Self>, Self::Rejection> {
+        // No content-type header at all: no body, no extraction.
+        if !req.headers().contains_key(axum::http::header::CONTENT_TYPE) {
+            return Ok(None);
+        }
+        // A content-type (of any kind) means a body was sent: run
+        // the strict extraction — wrong types surface `415`/`422`
+        // exactly as they would for the required form. (The
+        // fully-qualified call disambiguates from this trait's own
+        // same-named method.)
+        <Self as axum::extract::FromRequest<S>>::from_request(req, state)
+            .await
+            .map(Some)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -29,6 +29,7 @@ use zim_engine_application::supervision::{
 use zim_engine_auth::{ApiKeyManager, SessionManager, TabTokenManager};
 use zim_engine_backups::BackupService;
 use zim_engine_domain::{Node, NodeCapabilities, NodeDeployment, NodeState, User};
+use zim_engine_installs::InstallService;
 use zim_engine_jobs::{JobPolicy, JobSystem};
 
 /// Process-wide engine options (CLI + environment).
@@ -140,22 +141,33 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
     // Probe Docker; a missing/unreachable daemon degrades the engine
     // to API-only mode (metadata management works; lifecycle calls
     // answer 503 runtime_unavailable) rather than refusing to boot.
+    // The install runner follows the same probe: the Docker adapter
+    // (M8.3) when a daemon answered, the null runner in the degraded
+    // engine — installs then fail fast with a structured error
+    // instead of queueing work no runtime can execute.
     let docker_settings = zim_engine_runtime_docker::DockerSettings {
         data_root: options.data_dir.clone(),
         ..zim_engine_runtime_docker::DockerSettings::default()
     };
-    let runtime_factory: Arc<dyn RuntimeFactory> =
+    use zim_engine_application::supervision::InstallRunner;
+    let (runtime_factory, install_runner): (Arc<dyn RuntimeFactory>, Arc<dyn InstallRunner>) =
         match zim_engine_runtime_docker::DockerRuntimeFactory::connect(docker_settings).await {
             Ok(factory) => {
                 eprintln!("zim_engine: container runtime connected (Docker, pterodactyl0)");
-                Arc::new(factory)
+                let runner = Arc::new(
+                    zim_engine_runtime_docker::DockerInstallRunner::from_factory(&factory),
+                );
+                (Arc::new(factory), runner)
             }
             Err(e) => {
                 eprintln!(
                     "zim_engine: no container runtime available ({e}); \
-                     lifecycle operations will answer 503 until one is"
+                 lifecycle operations will answer 503 until one is"
                 );
-                Arc::new(NullRuntimeFactory)
+                (
+                    Arc::new(NullRuntimeFactory),
+                    Arc::new(zim_engine_application::supervision::NullInstallRunner),
+                )
             }
         };
 
@@ -219,6 +231,19 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         options.data_dir.clone(),
     );
     transfers.register().await;
+    // M8.3: the install service — the §10.3 install mutation over
+    // the same executor. The runner is the Docker adapter when a
+    // daemon answered at boot; the null runner in the degraded
+    // API-only engine (installs then fail fast with a structured
+    // error instead of queueing work no runtime can execute).
+    let installs = InstallService::new(
+        Arc::clone(&persistence),
+        Arc::clone(&jobs),
+        Arc::clone(&supervisor),
+        install_runner,
+        options.data_dir.clone(),
+    );
+    installs.register().await;
     jobs.start();
 
     // ── Cron scheduler (M9) ─────────────────────────────────────
@@ -245,6 +270,7 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         Arc::clone(&jobs),
         Arc::clone(&backups),
         Arc::clone(&transfers),
+        Arc::clone(&installs),
         Arc::clone(&scheduler),
         ApiConfig::default(),
     ));

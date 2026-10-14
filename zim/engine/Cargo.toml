@@ -12,6 +12,7 @@ members = [
     "crates/jobs",
     "crates/backups",
     "crates/transfers",
+    "crates/installs",
     "crates/files",
     "crates/eggs",
     "crates/extensions",
@@ -63,6 +64,7 @@ zim_engine_scheduler = { path = "crates/scheduler" }
 zim_engine_jobs = { path = "crates/jobs" }
 zim_engine_backups = { path = "crates/backups" }
 zim_engine_transfers = { path = "crates/transfers" }
+zim_engine_installs = { path = "crates/installs" }
 zim_engine_files = { path = "crates/files" }
 zim_engine_eggs = { path = "crates/eggs" }
 zim_engine_extensions = { path = "crates/extensions" }
@@ -126,6 +128,9 @@ tokio = { version = "1", features = [
 # tokio/hyper/tower-stack framework implied by the engine docs' async
 # model (tokio process management, spawn_blocking bridging).
 axum = "0.8"
+# The core extract/response types behind axum (OptionalFromRequest for
+# ApiJson's optional-body form).
+axum-core = "0.5"
 # Service utilities (ServiceExt::oneshot for handler tests).
 tower = { version = "0.5", features = ["util"] }
 # HTTP/1+H2 connection serving under the manual TLS accept loop.

@@ -47,6 +47,7 @@
 //! runtime's actual state).
 
 mod crash;
+mod install;
 mod instance;
 mod null;
 mod runtime;
@@ -54,6 +55,10 @@ mod state;
 mod supervisor;
 
 pub use crash::{CrashLoopPolicy, CrashState};
+pub use install::{
+    InstallCancelledFn, InstallProgressFn, InstallRunError, InstallRunOutcome, InstallRunner,
+    InstallScriptSpec, NullInstallRunner,
+};
 pub use instance::{
     build_instance_config, instance_data_dir, ObservedSnapshot, PowerAction, PowerError,
     SupervisedInstance, SupervisionPolicy,
