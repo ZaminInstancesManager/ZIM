@@ -2917,6 +2917,12 @@ dependencies = [
  "zim_engine_scheduler",
  "zim_engine_streaming",
  "zim_engine_transfers",
+ "zim_engine_workloads_database",
+ "zim_engine_workloads_dev_process",
+ "zim_engine_workloads_generic_container",
+ "zim_engine_workloads_minecraft",
+ "zim_engine_workloads_sdk",
+ "zim_engine_workloads_website",
 ]
 
 [[package]]
@@ -3031,6 +3037,69 @@ dependencies = [
  "zim_engine_domain",
  "zim_engine_jobs",
  "zim_engine_persistence_sqlite",
+]
+
+[[package]]
+name = "zim_engine_workloads_database"
+version = "0.0.1"
+dependencies = [
+ "zim_engine_domain",
+ "zim_engine_workloads_sdk",
+]
+
+[[package]]
+name = "zim_engine_workloads_dev_process"
+version = "0.0.1"
+dependencies = [
+ "zim_engine_domain",
+ "zim_engine_workloads_sdk",
+]
+
+[[package]]
+name = "zim_engine_workloads_generic_container"
+version = "0.0.1"
+dependencies = [
+ "zim_engine_domain",
+ "zim_engine_workloads_sdk",
+]
+
+[[package]]
+name = "zim_engine_workloads_macros"
+version = "0.0.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "zim_engine_workloads_minecraft"
+version = "0.0.1"
+dependencies = [
+ "zim_engine_domain",
+ "zim_engine_workloads_sdk",
+]
+
+[[package]]
+name = "zim_engine_workloads_sdk"
+version = "0.0.1"
+dependencies = [
+ "chrono",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "toml",
+ "zim_engine_domain",
+ "zim_engine_workloads_macros",
+]
+
+[[package]]
+name = "zim_engine_workloads_website"
+version = "0.0.1"
+dependencies = [
+ "zim_engine_domain",
+ "zim_engine_workloads_sdk",
 ]
 
 [[package]]

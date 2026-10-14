@@ -542,6 +542,45 @@ async fn wait_for_shutdown() {
 /// The canonical crate name (the binary uses it in banners).
 pub const CRATE_NAME: &str = "zim_engine_main";
 
+/// The five first-party workload integrations, linked into the
+/// engine build by the `workloads-all` feature (M16, AD-15's
+/// feature-gated inclusion path).
+///
+/// The engine's kind registry consumes them in M17+; until then
+/// this module proves the feature actually links all five (an
+/// optional dependency nothing references would not).
+#[cfg(feature = "workloads-all")]
+pub mod linked_integrations {
+    use zim_engine_workloads_sdk::WorkloadIntegration;
+
+    /// The linked integrations' manifest ids.
+    #[allow(dead_code)]
+    pub fn linked_ids() -> [&'static str; 5] {
+        [
+            zim_engine_workloads_minecraft::MinecraftIntegration
+                .manifest()
+                .id
+                .as_str(),
+            zim_engine_workloads_database::DatabaseIntegration
+                .manifest()
+                .id
+                .as_str(),
+            zim_engine_workloads_website::WebsiteIntegration
+                .manifest()
+                .id
+                .as_str(),
+            zim_engine_workloads_dev_process::DevProcessIntegration
+                .manifest()
+                .id
+                .as_str(),
+            zim_engine_workloads_generic_container::GenericContainerIntegration
+                .manifest()
+                .id
+                .as_str(),
+        ]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -549,6 +588,17 @@ mod tests {
     #[test]
     fn crate_name_is_set() {
         assert_eq!(CRATE_NAME, "zim_engine_main");
+    }
+
+    #[cfg(feature = "workloads-all")]
+    #[test]
+    fn the_five_integrations_link_under_the_feature() {
+        let ids = linked_integrations::linked_ids();
+        assert_eq!(ids[0], "org.zaminmc.workload.minecraft");
+        assert_eq!(ids[1], "org.zaminmc.workload.database");
+        assert_eq!(ids[2], "org.zaminmc.workload.website");
+        assert_eq!(ids[3], "org.zaminmc.workload.dev_process");
+        assert_eq!(ids[4], "org.zaminmc.workload.generic_container");
     }
 
     #[test]

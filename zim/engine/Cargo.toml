@@ -23,6 +23,13 @@ members = [
     "crates/platform",
     "crates/frontend-loader",
     "crates/migrate-pterodactyl",
+    "crates/workloads/sdk",
+    "crates/workloads/macros",
+    "crates/workloads/minecraft",
+    "crates/workloads/database",
+    "crates/workloads/website",
+    "crates/workloads/dev_process",
+    "crates/workloads/generic_container",
     "crates/main",
 ]
 # Deferred / TBD crates — present in the architecture doc
@@ -30,15 +37,9 @@ members = [
 #   crates/persistence-postgres   (multi-node authoritative storage; deferred)
 #   crates/runtime-host           (opt-in non-container runtime; TBD)
 #   crates/telemetry              (opt-in telemetry ingestion; TBD)
-#   crates/workloads/sdk          (M16: workload integration SDK)
-#   crates/workloads/minecraft    (M16/M17)
-#   crates/workloads/database     (M16/M18)
-#   crates/workloads/website      (M16/M19)
-#   crates/workloads/dev_process  (M16/M19)
-#   crates/workloads/generic_container (M16/M19)
 # These will be added to `members` in their corresponding implementation
-# milestones. The M2 milestone (docs/architecture/IMPLEMENTATION_ROADMAP.md
-# §M2) ships the 22 base crates below as skeletons.
+# milestones. The M16 workload crates ARE members (M16, issue #11);
+# the engine consumes them behind the `workloads-all` feature.
 
 [workspace.package]
 version = "0.0.1"
@@ -75,6 +76,14 @@ zim_engine_metrics = { path = "crates/metrics" }
 zim_engine_platform = { path = "crates/platform" }
 zim_engine_frontend_loader = { path = "crates/frontend-loader" }
 zim_engine_migrate_pterodactyl = { path = "crates/migrate-pterodactyl" }
+# ── M16: the workload integration SDK + first-party skeletons ────
+zim_engine_workloads_sdk = { path = "crates/workloads/sdk" }
+zim_engine_workloads_macros = { path = "crates/workloads/macros" }
+zim_engine_workloads_minecraft = { path = "crates/workloads/minecraft" }
+zim_engine_workloads_database = { path = "crates/workloads/database" }
+zim_engine_workloads_website = { path = "crates/workloads/website" }
+zim_engine_workloads_dev_process = { path = "crates/workloads/dev_process" }
+zim_engine_workloads_generic_container = { path = "crates/workloads/generic_container" }
 # ── M10: the Panel-database migration importer ─────────────────────
 # The MySQL client for the importer's live Panel adapter. Only the
 # `mysql` feature of zim_engine_migrate_pterodactyl compiles it
@@ -213,6 +222,10 @@ ed25519-dalek = { version = "2", default-features = false, features = [
 zip = { version = "2", default-features = false, features = [
     "deflate",
 ] }
+# ── M16: the #[workload_integration] proc macro's toolchain ──────
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
 
 [profile.release]
 opt-level = 3

@@ -1,0 +1,30 @@
+[package]
+name = "zim_engine_workloads_sdk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+
+[lib]
+name = "zim_engine_workloads_sdk"
+path = "src/lib.rs"
+
+[dependencies]
+# The workload-kind discriminator (§3) the integrations register.
+zim_engine_domain = { workspace = true }
+# The #[workload_integration] declaration macro (re-exported so
+# integration crates depend on the SDK alone).
+zim_engine_workloads_macros = { workspace = true }
+# Manifest (zim.toml) parsing + serde.
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+# Manifest version compatibility checks (the same parser Cargo
+# uses; mirrors the frontend-package gate's rigor).
+semver = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }

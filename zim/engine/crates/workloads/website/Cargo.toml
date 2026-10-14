@@ -1,0 +1,21 @@
+[package]
+name = "zim_engine_workloads_website"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+
+[lib]
+name = "zim_engine_workloads_website"
+path = "src/lib.rs"
+
+[dependencies]
+# The workload-kind discriminator this integration registers.
+zim_engine_domain = { workspace = true }
+# The integration SDK (trait + manifest + the declaration macro,
+# re-exported).
+zim_engine_workloads_sdk = { workspace = true }

@@ -63,6 +63,12 @@ jobs:
       - name: cargo test
         run: cargo test --workspace --all-targets
 
+      - name: cargo build --features workloads-all
+        # M16: the five first-party workload integrations are
+        # feature-gated into the engine (AD-15's build-time inclusion
+        # path); gate the feature in CI too.
+        run: cargo build -p zim_engine_main --features workloads-all
+
       - name: Upload engine binary (debug)
         if: always()
         uses: actions/upload-artifact@v4

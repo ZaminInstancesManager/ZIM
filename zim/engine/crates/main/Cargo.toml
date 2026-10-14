@@ -50,6 +50,31 @@ rand_core = { workspace = true }
 semver = { workspace = true }
 # M11: recovery-notice audit metadata.
 serde_json = { workspace = true }
+# ── M16: the first-party workload integrations (optional) ─────────
+# The engine does not consume the integrations until their
+# implementation milestones (M17+) register them in the kind
+# registry; `workloads-all` builds them alongside the engine so the
+# feature-gated inclusion path (RUST_ENGINE.md §12.4, AD-15) is
+# exercised from day one.
+zim_engine_workloads_minecraft = { workspace = true, optional = true }
+zim_engine_workloads_database = { workspace = true, optional = true }
+zim_engine_workloads_website = { workspace = true, optional = true }
+zim_engine_workloads_dev_process = { workspace = true, optional = true }
+zim_engine_workloads_generic_container = { workspace = true, optional = true }
+# The trait whose methods the linkage module calls.
+zim_engine_workloads_sdk = { workspace = true, optional = true }
+
+[features]
+# Builds all five first-party workload integrations with the engine
+# (roadmap §M16 deliverable).
+workloads-all = [
+    "dep:zim_engine_workloads_sdk",
+    "dep:zim_engine_workloads_minecraft",
+    "dep:zim_engine_workloads_database",
+    "dep:zim_engine_workloads_website",
+    "dep:zim_engine_workloads_dev_process",
+    "dep:zim_engine_workloads_generic_container",
+]
 
 [dev-dependencies]
 # TLS-enabled client for the end-to-end engine smoke test.
