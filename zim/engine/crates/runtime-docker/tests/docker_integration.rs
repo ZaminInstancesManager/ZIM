@@ -1223,3 +1223,183 @@ async fn console_retention_bounds_under_load() {
     supervisor.shutdown().await;
     remove_quietly(&docker, &instance.uuid).await;
 }
+
+// ── M8.1: backup + restore of a real container's data ────────────
+
+/// The full backup pipeline over the real runtime: a container
+/// writes files into its bind-mounted data directory, a backup job
+/// (through the durable-job executor and the real archive engine)
+/// seals them into a sha256-verified archive, and a restore job
+/// swaps the live data back to the backup point.
+#[tokio::test]
+async fn backup_and_restore_of_container_data() {
+    let Some(docker) = docker_or_skip().await else {
+        return;
+    };
+    ensure_busybox(&docker).await;
+
+    let store = seed_store();
+    let user = seed_user(store.as_ref());
+    let node = seed_node(store.as_ref());
+    let instance = seed_instance(store.as_ref(), &node, &user, 46118, "sleep 600");
+    remove_quietly(&docker, &instance.uuid).await;
+
+    let factory = Arc::new(
+        DockerRuntimeFactory::connect(test_settings())
+            .await
+            .expect("factory"),
+    );
+    let supervisor = Supervisor::new(
+        Arc::clone(&store),
+        factory,
+        SupervisionPolicy::default(),
+        test_settings().data_root,
+    );
+    supervisor.load_local().await.expect("load");
+
+    supervisor
+        .request_power(&instance.id, PowerAction::Start)
+        .await
+        .expect("start accepted");
+    assert!(
+        soon(|| async {
+            supervisor
+                .observed(&instance.id)
+                .await
+                .map(|s| s.observed.is_running())
+                .unwrap_or(false)
+        })
+        .await
+    );
+
+    // The container writes its "world" into the bind mount (the
+    // engine-side data directory the backup will archive) through
+    // the M7.1 console-input path — exactly how a managed server's
+    // console behaves.
+    supervisor
+        .send_console_input(
+            &instance.id,
+            b"mkdir -p /home/container/world && echo dragon-egg > /home/container/world/data.txt && echo motd=live > /home/container/server.properties",
+        )
+        .await
+        .expect("console world write");
+    let data_dir = zim_engine_application::supervision::instance_data_dir(
+        &test_settings().data_root,
+        &instance.uuid_short,
+    );
+    assert!(
+        soon(|| async { data_dir.join("world/data.txt").exists() }).await,
+        "the container's write must reach the host-side bind mount"
+    );
+
+    // The durable-job executor + backup service over the same data
+    // root the runtime bind-mounted.
+    let jobs = zim_engine_jobs::JobSystem::new(
+        Arc::clone(&store),
+        None,
+        zim_engine_jobs::JobPolicy {
+            poll_interval: Duration::from_millis(20),
+            cleaner_interval: Duration::from_millis(50),
+            max_concurrent: 2,
+            shutdown_grace: Duration::from_secs(10),
+        },
+    );
+    let backups = zim_engine_backups::BackupService::new(
+        Arc::clone(&store),
+        Arc::clone(&jobs),
+        test_settings().data_root,
+    );
+    backups.register().await;
+    jobs.start();
+
+    // 1. Backup: seal the container's data into a verified archive.
+    let (job, backup) = backups.create_backup(instance.id).await.expect("backup");
+    let job = wait_for_job_state(
+        store.as_ref(),
+        job.id,
+        zim_engine_domain::status::JobState::Succeeded,
+    )
+    .await;
+    assert!(job.completed_at.is_some());
+    let sealed = store.get_backup(&backup.id).unwrap().unwrap();
+    let sha256 = sealed.sha256_hash.as_deref().expect("sha256 recorded");
+    assert_eq!(sha256.len(), 64);
+    assert!(sealed.bytes > 0);
+    let archive = backups
+        .archive_path_for(instance.id, backup.id)
+        .await
+        .expect("archive path");
+    assert!(archive.exists());
+    zim_engine_backups::verify_archive(&archive, sha256).expect("archive verifies");
+
+    // 2. The container keeps playing: new data lands in the live
+    //    tree (which the restore will roll back).
+    supervisor
+        .send_console_input(
+            &instance.id,
+            b"echo clobbered > /home/container/server.properties",
+        )
+        .await
+        .expect("console clobber");
+    assert!(
+        soon(|| async {
+            std::fs::read_to_string(data_dir.join("server.properties"))
+                .map(|c| c.contains("clobbered"))
+                .unwrap_or(false)
+        })
+        .await,
+        "the clobber must land before the restore"
+    );
+
+    // 3. Restore: the swap returns the backup-point contents.
+    let (job, _backup) = backups
+        .restore_backup(instance.id, backup.id)
+        .await
+        .expect("restore");
+    wait_for_job_state(
+        store.as_ref(),
+        job.id,
+        zim_engine_domain::status::JobState::Succeeded,
+    )
+    .await;
+
+    assert_eq!(
+        std::fs::read_to_string(data_dir.join("server.properties")).unwrap(),
+        "motd=live\n",
+        "the restore must return the backup-point contents"
+    );
+    assert_eq!(
+        std::fs::read_to_string(data_dir.join("world/data.txt")).unwrap(),
+        "dragon-egg\n"
+    );
+
+    // The container is still running throughout (invariant 12's
+    // spirit: job activity does not disturb the source).
+    let snapshot = supervisor.observed(&instance.id).await.unwrap();
+    assert_eq!(snapshot.status, InstanceStatus::Running);
+
+    supervisor.shutdown().await;
+    jobs.shutdown().await;
+    remove_quietly(&docker, &instance.uuid).await;
+}
+
+/// Poll the store until the job reaches the wanted state.
+async fn wait_for_job_state(
+    store: &dyn Persistence,
+    id: zim_engine_domain::JobId,
+    want: zim_engine_domain::status::JobState,
+) -> zim_engine_domain::job::Job {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let job = store.get_job(&id).unwrap().unwrap();
+        if job.state == want {
+            return job;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "job {id} never reached {want:?}; last seen {:?}",
+            job.state
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}

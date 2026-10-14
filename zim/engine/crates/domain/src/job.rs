@@ -63,6 +63,13 @@ pub struct Job {
     /// (events carrying an older generation than the persisted job
     /// are dropped per the streaming spec).
     pub generation: u64,
+    /// Kind-specific job target, as opaque JSON text (M8): e.g. a
+    /// restore job names the backup id it restores. `None` for jobs
+    /// whose companion entity row already carries the linkage (a
+    /// backup-create job links through the `Backup` row's
+    /// `job_id`).
+    #[serde(default)]
+    pub payload: Option<String>,
 }
 
 impl Job {
@@ -139,6 +146,7 @@ mod tests {
             last_error: None,
             cleanup_pending: false,
             generation: 7,
+            payload: None,
         }
     }
 

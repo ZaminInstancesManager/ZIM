@@ -96,6 +96,14 @@ argon2 = "0.5"
 rand_core = { version = "0.6", features = ["getrandom"] }
 # SHA-256 for token-at-rest hashing (sessions, API keys).
 sha2 = "0.10"
+# ── M8: durable jobs + backups (docs/architecture/IMPLEMENTATION_ROADMAP.md §M8) ──
+# Archive assembly for backup/restore (tar entries, paths, modes).
+tar = "0.4"
+# gzip (deflate) compression for backup archives — the pure-Rust
+# miniz_oxide backend; no C toolchain needed on build hosts.
+flate2 = { version = "1", default-features = false, features = [
+    "rust_backend",
+] }
 # ── M5: API surface (docs/architecture/IMPLEMENTATION_ROADMAP.md §M5) ──
 # Async runtime for the HTTPS listener and the middleware stack. The
 # sync Persistence port is bridged with spawn_blocking (see the M3
@@ -107,6 +115,7 @@ tokio = { version = "1", features = [
     "time",
     "signal",
     "sync",
+    "fs",
 ] }
 # HTTP framework (router, extractors, middleware). Axum is the
 # tokio/hyper/tower-stack framework implied by the engine docs' async
@@ -141,7 +150,7 @@ http-body-util = "0.1"
 # Opaque pagination-cursor encoding (base64url, per ZIM_API_SPEC.md §15).
 base64 = "0.22"
 # Graceful connection draining (TaskTracker + CancellationToken).
-tokio-util = { version = "0.7", features = ["rt"] }
+tokio-util = { version = "0.7", features = ["rt", "io"] }
 # ── M6: runtime abstraction + Docker runtime (§M6) ──────────────────
 # Object-safe async trait methods (`Box<dyn Runtime>` /
 # `Arc<dyn RuntimeFactory>`): Rust's native async-fn-in-trait is not

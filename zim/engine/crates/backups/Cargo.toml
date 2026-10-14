@@ -17,3 +17,24 @@ path = "src/lib.rs"
 zim_engine_application = { workspace = true }
 zim_engine_domain = { workspace = true }
 zim_engine_jobs = { workspace = true }
+# Object-safe async trait methods (the JobHandler contract).
+async-trait = { workspace = true }
+# Timestamps on sealed backup rows.
+chrono = { workspace = true }
+# The executor's spawn_blocking bridge + the archive engine runs on
+# the blocking pool.
+tokio = { workspace = true }
+# Backup archive identity (uuid file names) and sha256 recording.
+uuid = { workspace = true }
+sha2 = { workspace = true }
+# tar + gzip (pure-Rust backend) archive assembly and extraction.
+tar = { workspace = true }
+flate2 = { workspace = true }
+# The archive + service error surfaces.
+thiserror = { workspace = true }
+# The restore job's payload (target backup id).
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# In-memory store for the service/handler tests.
+zim_engine_persistence_sqlite = { workspace = true }

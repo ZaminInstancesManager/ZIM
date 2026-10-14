@@ -1,42 +1,64 @@
 //! Durable jobs (backup / transfer / install / update).
 //!
-//! Each job is a state machine (Pending → InProgress → Succeeded/Failed)
-//! with an identity (JobId), resumable semantics, and a background cleaner
-//! for `cleanup_pending` jobs. Survives engine restart per
-//! docs/architecture/ZIM_ARCHITECTURE.md §4 invariant 11.
+//! # What lives here
+//!
+//! The *executor* half of `docs/architecture/RUST_ENGINE.md` §8: the
+//! [`JobSystem`] claims `Pending` job rows, runs the registered
+//! [`JobHandler`] for each job's kind under per-instance
+//! serialization and a global concurrency cap, persists every state
+//! transition, publishes `job.progress` / `job.completed` events
+//! onto the streaming hub, reconciles jobs orphaned by an engine
+//! crash at boot, and runs the background cleaner that removes the
+//! partial on-disk state of `CleanupPending` jobs.
+//!
+//! The *executable* halves — what a backup, a transfer, or an
+//! install actually do — live in their own crates
+//! (`zim_engine_backups`, `zim_engine_transfers`) and register
+//! themselves with the executor at composition time.
+//!
+//! # State machine
+//!
+//! ```text
+//!            enqueue                 claim (persisted)
+//!  (caller) ─────────▶ Pending ─────────────────────▶ InProgress
+//!                        │                               │
+//!      cancel (Pending)  │                               │ handler outcome
+//!                        ▼                               ▼
+//!                   Cancelled            Succeeded / Cancelled / Failed
+//!                        │                               │
+//!                        │                    Failed{cleanup_pending}
+//!                        │                               │
+//!                        │                               ▼
+//!                        └──────────── terminal ◀── CleanupPending
+//!                                          (cleaner ran
+//!                                           handler.cleanup)
+//! ```
+//!
+//! `Pending` and `InProgress` rows survive an engine restart:
+//! `Pending` was never claimed (the queue picks it up again);
+//! `InProgress` belongs to the dead process, so
+//! [`JobSystem::reconcile_orphans`] moves it to `CleanupPending`
+//! and the cleaner finishes the story (invariant 11 in
+//! `docs/architecture/ZIM_ARCHITECTURE.md` §4).
+//!
+//! # Architecture boundary
+//!
+//! This crate sits beside the application layer's supervision module
+//! (both orchestrate long-running work) and, like it, depends on the
+//! domain + streaming layers. The permitted dependency direction is
+//! enforced at compile time by the workspace crate graph
+//! (`docs/architecture/RUST_ENGINE.md` §2); concrete job handlers
+//! register from their own crates, so this crate never depends on
+//! `zim_engine_backups` or `zim_engine_transfers`.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
-#![doc = ""]
 
-//! # Architecture boundary
-//!
-//! This crate's role, dependencies, and permitted callers are documented
-//! in `docs/architecture/RUST_ENGINE.md` (and the expanded-scope
-//! `docs/architecture/WORKLOAD_ABSTRACTION.md` where applicable).
-//! The permitted dependency direction is enforced at compile time by
-//! the workspace crate graph.
+mod executor;
+mod handler;
 
-#![allow(dead_code)]
+pub use executor::{CancelStatus, JobPolicy, JobSystem, JobsError};
+pub use handler::{CancelToken, JobContext, JobHandler, JobOutcome, ProgressFn};
 
-/// Stub symbol so the crate compiles and links in M2.
-///
-/// Real types and implementations are introduced in milestone M3+
-/// per docs/architecture/IMPLEMENTATION_ROADMAP.md.
+/// The canonical crate name.
 pub const CRATE_NAME: &str = "zim_engine_jobs";
-
-#[cfg(test)]
-mod tests {
-    //! Stub unit test so `cargo test --workspace` has something to run.
-    //!
-    //! Real tests are added in their corresponding implementation
-    //! milestones per docs/architecture/TEST_STRATEGY.md.
-
-    use super::CRATE_NAME;
-
-    #[test]
-    fn crate_name_is_set() {
-        assert!(!CRATE_NAME.is_empty());
-        assert_eq!(CRATE_NAME, "zim_engine_jobs");
-    }
-}

@@ -21,6 +21,10 @@ zim_engine_authz = { workspace = true }
 # The M7 streaming hub (supervision publishes; the stream endpoint
 # subscribes).
 zim_engine_streaming = { workspace = true }
+# M8: the durable-job executor (job creation/cancellation handlers)
+# and the backup service (the §10.5 backup mutation family).
+zim_engine_jobs = { workspace = true }
+zim_engine_backups = { workspace = true }
 # Async runtime (listener, middleware, spawn_blocking bridge).
 tokio = { workspace = true }
 # HTTP framework: router, extractors, `from_fn` middleware, and

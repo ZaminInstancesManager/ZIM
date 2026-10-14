@@ -124,6 +124,7 @@ fn sample_job(instance: &Instance) -> Job {
         last_error: None,
         cleanup_pending: false,
         generation: 7,
+        payload: None,
     }
 }
 
@@ -688,7 +689,8 @@ fn port_trait_object_dispatch_works() {
     let node = sample_node("via-trait");
     port.put_node(&node).unwrap();
     assert_eq!(port.get_node(&node.id).unwrap().unwrap(), node);
-    assert_eq!(port.schema_version().unwrap(), 1);
+    // Migration 0002 (jobs.payload) is the current head.
+    assert_eq!(port.schema_version().unwrap(), 2);
 }
 
 #[test]

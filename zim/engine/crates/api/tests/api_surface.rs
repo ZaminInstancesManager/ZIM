@@ -44,12 +44,35 @@ impl TestEngine {
         // The M6 lifecycle endpoints need a supervisor; the tests use
         // the scripted mock runtime (no Docker dependency).
         let supervisor = Self::supervisor_over(Arc::clone(&persistence)).await;
+        // M8: the durable-job executor + backup service, over a
+        // fast test policy so endpoint tests observe terminal job
+        // states quickly.
+        let data_root = std::env::temp_dir().join("zim-api-test");
+        let jobs = zim_engine_jobs::JobSystem::new(
+            Arc::clone(&persistence),
+            None,
+            zim_engine_jobs::JobPolicy {
+                poll_interval: std::time::Duration::from_millis(20),
+                cleaner_interval: std::time::Duration::from_millis(50),
+                max_concurrent: 2,
+                shutdown_grace: std::time::Duration::from_secs(5),
+            },
+        );
+        let backups = zim_engine_backups::BackupService::new(
+            Arc::clone(&persistence),
+            Arc::clone(&jobs),
+            data_root.clone(),
+        );
+        backups.register().await;
+        jobs.start();
         let state = Arc::new(AppState::new(
             Arc::clone(&persistence),
             supervisor,
             Arc::new(SessionManager::new(Default::default())),
             Arc::new(ApiKeyManager::new()),
             Arc::new(zim_engine_auth::TabTokenManager::new(Default::default())),
+            Arc::clone(&jobs),
+            Arc::clone(&backups),
             config,
         ));
         let router = zim_engine_api::router(Arc::clone(&state));
@@ -1686,11 +1709,28 @@ async fn extensions_and_jobs_listings() {
     let body: Value = response.json().await.unwrap();
     assert_eq!(body["data"].as_array().map(Vec::len), Some(0));
 
-    // Jobs listing is instance-scoped in M5; the filter is required.
+    // Jobs listing: M8's global listing — admins see every job
+    // (empty here), members without an instance filter still get
+    // a validation error.
     let response = engine
         .client
         .get(engine.url("/jobs"))
         .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["data"].as_array().map(Vec::len), Some(0));
+
+    engine.seed_user("member@zim.local", "member pass", false);
+    let member_cookie = login(&engine, "member@zim.local", "member pass")
+        .await
+        .expect("member login");
+    let response = engine
+        .client
+        .get(engine.url("/jobs"))
+        .header("Cookie", format!("zim_session={member_cookie}"))
         .send()
         .await
         .unwrap();
@@ -1810,4 +1850,213 @@ async fn allocations_duplicate_and_primary_rules() {
         .await
         .unwrap();
     assert_eq!(response.status(), 204);
+}
+
+// ── Backups (M8) ──────────────────────────────────────────────────
+
+/// Poll `GET /jobs/{id}` until the state is terminal; return the
+/// final JSON body.
+async fn wait_for_terminal_job(engine: &TestEngine, cookie: &str, job_id: &str) -> Value {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let response = engine
+            .client
+            .get(engine.url(&format!("/jobs/{job_id}")))
+            .header("Cookie", format!("zim_session={cookie}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let job: Value = response.json().await.unwrap();
+        let state = job["state"].as_str().unwrap_or_default().to_owned();
+        if matches!(
+            state.as_str(),
+            "succeeded" | "failed" | "cancelled" | "cleanup_pending"
+        ) {
+            // cleanup_pending resolves through the cleaner shortly;
+            // keep waiting for the terminal Failed if we see it.
+            if state != "cleanup_pending" {
+                return job;
+            }
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "job {job_id} never reached a terminal state (last: {state})"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+}
+
+#[tokio::test]
+async fn backup_create_list_download_restore_lock_delete_flow() {
+    let engine = TestEngine::start().await;
+    engine.seed_user("admin@zim.local", "admin pass", true);
+    let admin_cookie = login(&engine, "admin@zim.local", "admin pass")
+        .await
+        .expect("admin login");
+
+    let (node, _allocations) = seed_node_with_allocations(&engine, &admin_cookie).await;
+    let response = engine
+        .client
+        .post(engine.url("/instances"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .json(&json!({
+            "name": "backup-flow",
+            "node_id": node["id"].as_str().unwrap(),
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201);
+    let instance: Value = response.json().await.unwrap();
+    let instance_id = instance["id"].as_str().unwrap().to_owned();
+    let uuid_short = instance["uuid_short"].as_str().unwrap().to_owned();
+
+    // Seed the instance's data directory (the archive source).
+    let data_dir = std::env::temp_dir()
+        .join("zim-api-test")
+        .join("instances")
+        .join(&uuid_short);
+    std::fs::create_dir_all(data_dir.join("world")).unwrap();
+    std::fs::write(data_dir.join("server.properties"), "motd=api-flow\n").unwrap();
+    std::fs::write(data_dir.join("world/level.dat"), "0123456789").unwrap();
+
+    // 1. Create a backup: the API answers with both ids.
+    let response = engine
+        .client
+        .post(engine.url(&format!("/instances/{instance_id}/backups")))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let created: Value = response.json().await.unwrap();
+    let job_id = created["job_id"].as_str().unwrap().to_owned();
+    let backup_id = created["backup_id"].as_str().unwrap().to_owned();
+    assert!(!job_id.is_empty());
+    assert!(!backup_id.is_empty());
+
+    // 2. The job runs to Succeeded.
+    let job = wait_for_terminal_job(&engine, &admin_cookie, &job_id).await;
+    assert_eq!(job["state"].as_str().unwrap(), "succeeded");
+
+    // 3. The backup listing shows the sealed row (sha256 + bytes).
+    let response = engine
+        .client
+        .get(engine.url(&format!("/instances/{instance_id}/backups")))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let listed: Value = response.json().await.unwrap();
+    let data = listed["data"].as_array().unwrap();
+    assert_eq!(data.len(), 1);
+    assert_eq!(data[0]["id"].as_str().unwrap(), backup_id);
+    let sha256 = data[0]["sha256_hash"].as_str().unwrap().to_owned();
+    assert_eq!(sha256.len(), 64);
+    assert!(data[0]["bytes"].as_u64().unwrap() > 0);
+
+    // 4. Download: the bytes verify against the recorded digest.
+    let response = engine
+        .client
+        .get(engine.url(&format!(
+            "/instances/{instance_id}/backups/{backup_id}/download"
+        )))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let bytes = response.bytes().await.unwrap().to_vec();
+    use sha2::Digest;
+    let digest = hex_lower(&sha2::Sha256::digest(&bytes));
+    assert_eq!(
+        digest, sha256,
+        "downloaded bytes must match the recorded sha256"
+    );
+
+    // 5. Mutate the live data, then restore: the swap brings the
+    //    original content back.
+    std::fs::write(data_dir.join("server.properties"), "motd=CLOBBERED\n").unwrap();
+    std::fs::write(data_dir.join("post-backup.txt"), "transient").unwrap();
+    let response = engine
+        .client
+        .post(engine.url(&format!(
+            "/instances/{instance_id}/backups/{backup_id}/restore"
+        )))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let restore: Value = response.json().await.unwrap();
+    let restore_job = restore["job_id"].as_str().unwrap().to_owned();
+    let job = wait_for_terminal_job(&engine, &admin_cookie, &restore_job).await;
+    assert_eq!(job["state"].as_str().unwrap(), "succeeded");
+    assert_eq!(
+        std::fs::read_to_string(data_dir.join("server.properties")).unwrap(),
+        "motd=api-flow\n"
+    );
+    assert!(!data_dir.join("post-backup.txt").exists());
+
+    // 6. Lock: deletion refuses with 409.
+    let response = engine
+        .client
+        .post(engine.url(&format!(
+            "/instances/{instance_id}/backups/{backup_id}/lock"
+        )))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let locked: Value = response.json().await.unwrap();
+    assert!(locked["locked"].as_bool().unwrap());
+    let response = engine
+        .client
+        .delete(engine.url(&format!("/instances/{instance_id}/backups/{backup_id}")))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 409);
+
+    // 7. Unlock: deletion succeeds and the listing empties.
+    let response = engine
+        .client
+        .delete(engine.url(&format!(
+            "/instances/{instance_id}/backups/{backup_id}/lock"
+        )))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let response = engine
+        .client
+        .delete(engine.url(&format!("/instances/{instance_id}/backups/{backup_id}")))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 204);
+    let response = engine
+        .client
+        .get(engine.url(&format!("/instances/{instance_id}/backups")))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    let listed: Value = response.json().await.unwrap();
+    assert_eq!(listed["data"].as_array().unwrap().len(), 0);
+}
+
+/// Lowercase hex for a digest (test sugar).
+fn hex_lower(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push_str(&format!("{b:02x}"));
+    }
+    out
 }

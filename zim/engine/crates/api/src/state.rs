@@ -7,7 +7,9 @@ use std::time::Duration;
 use zim_engine_application::ports::{Persistence, PersistenceError};
 use zim_engine_application::supervision::Supervisor;
 use zim_engine_auth::{ApiKeyManager, SessionManager, TabTokenManager};
+use zim_engine_backups::BackupService;
 use zim_engine_domain::User;
+use zim_engine_jobs::JobSystem;
 
 use crate::config::ApiConfig;
 use crate::error::ApiError;
@@ -92,6 +94,12 @@ pub struct AppState {
     /// Per-tab capability tokens (M7; spec §3's third credential
     /// kind, validated on the WebSocket stream).
     pub tab_tokens: Arc<TabTokenManager>,
+    /// The durable-job executor (M8): job creation and cancellation
+    /// flow through here; job *reads* go straight to persistence.
+    pub jobs: Arc<JobSystem>,
+    /// The backup service (M8): backup create/restore/delete/lock
+    /// and archive downloads.
+    pub backups: Arc<BackupService>,
     /// Server configuration.
     pub config: ApiConfig,
 }
@@ -99,12 +107,18 @@ pub struct AppState {
 impl AppState {
     /// Assemble the state from its parts. The two limiters are
     /// constructed from `config`'s budgets.
+    ///
+    /// (Eight parts is the honest composition surface — a builder
+    /// would hide which two halves are optional; nothing here is.)
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         persistence: Arc<dyn Persistence>,
         supervisor: Arc<Supervisor>,
         sessions: Arc<SessionManager>,
         api_keys: Arc<ApiKeyManager>,
         tab_tokens: Arc<TabTokenManager>,
+        jobs: Arc<JobSystem>,
+        backups: Arc<BackupService>,
         config: ApiConfig,
     ) -> Self {
         Self {
@@ -119,6 +133,8 @@ impl AppState {
             login_limiter: SlidingWindowLimiter::new(config.login_rate_limit, config.login_window),
             idempotency: IdempotencyStore::new(config.idempotency_retention),
             tab_tokens,
+            jobs,
+            backups,
             config,
         }
     }

@@ -592,8 +592,8 @@ impl Persistence for crate::SqlitePersistence {
             conn.execute(
                 "INSERT INTO jobs (
                     id, kind, instance_id, state, created_at, updated_at, started_at,
-                    completed_at, last_error, cleanup_pending, generation
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                    completed_at, last_error, cleanup_pending, generation, payload
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                 ON CONFLICT (id) DO UPDATE SET
                     kind = excluded.kind,
                     instance_id = excluded.instance_id,
@@ -604,7 +604,8 @@ impl Persistence for crate::SqlitePersistence {
                     completed_at = excluded.completed_at,
                     last_error = excluded.last_error,
                     cleanup_pending = excluded.cleanup_pending,
-                    generation = excluded.generation",
+                    generation = excluded.generation,
+                    payload = excluded.payload",
                 params![
                     uuid_to_text(job.id),
                     enum_str(&job.kind)?,
@@ -617,6 +618,7 @@ impl Persistence for crate::SqlitePersistence {
                     job.last_error,
                     job.cleanup_pending,
                     job.generation as i64,
+                    job.payload,
                 ],
             )
             .map(|_| ())
@@ -629,7 +631,7 @@ impl Persistence for crate::SqlitePersistence {
             let mut stmt = conn
                 .prepare(
                     "SELECT id, kind, instance_id, state, created_at, updated_at, started_at,
-                            completed_at, last_error, cleanup_pending, generation
+                            completed_at, last_error, cleanup_pending, generation, payload
                      FROM jobs WHERE id = ?1",
                 )
                 .map_err(db_err)?;
@@ -654,7 +656,7 @@ impl Persistence for crate::SqlitePersistence {
             let mut stmt = conn
                 .prepare(
                     "SELECT id, kind, instance_id, state, created_at, updated_at, started_at,
-                            completed_at, last_error, cleanup_pending, generation
+                            completed_at, last_error, cleanup_pending, generation, payload
                      FROM jobs WHERE instance_id = ?1 ORDER BY created_at",
                 )
                 .map_err(db_err)?;
@@ -670,7 +672,7 @@ impl Persistence for crate::SqlitePersistence {
             let mut stmt = conn
                 .prepare(
                     "SELECT id, kind, instance_id, state, created_at, updated_at, started_at,
-                            completed_at, last_error, cleanup_pending, generation
+                            completed_at, last_error, cleanup_pending, generation, payload
                      FROM jobs WHERE state = ?1 ORDER BY created_at",
                 )
                 .map_err(db_err)?;
@@ -1217,6 +1219,7 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> Result<Job, PersistenceError> {
         last_error: row.get(8).map_err(db_err)?,
         cleanup_pending: row.get(9).map_err(db_err)?,
         generation: row.get::<_, i64>(10).map_err(db_err)?.max(0) as u64,
+        payload: row.get(11).map_err(db_err)?,
     })
 }
 

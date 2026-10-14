@@ -46,6 +46,10 @@ zim_engine_application = { workspace = true, features = ["test-util"] }
 # streaming crate's EventData vocabulary) — test-only; the library's
 # dependency direction stays as RUST_ENGINE.md §2 documents.
 zim_engine_streaming = { workspace = true }
+# M8.1 backup tests drive the durable-job executor + the real
+# archive engine over the bind-mounted instance data.
+zim_engine_jobs = { workspace = true }
+zim_engine_backups = { workspace = true }
 # In-memory store for the supervision-over-Docker tests.
 zim_engine_persistence_sqlite = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }

@@ -58,12 +58,34 @@ impl StreamEngine {
 
         let supervisor = supervisor_over(Arc::clone(&persistence)).await;
         let tab_tokens = Arc::new(TabTokenManager::new(Default::default()));
+        // M8: the durable-job executor + backup service (a fast test
+        // policy; the hub-less executor keeps these stream tests
+        // focused on supervision events).
+        let jobs = zim_engine_jobs::JobSystem::new(
+            Arc::clone(&persistence),
+            None,
+            zim_engine_jobs::JobPolicy {
+                poll_interval: Duration::from_millis(20),
+                cleaner_interval: Duration::from_millis(50),
+                max_concurrent: 2,
+                shutdown_grace: Duration::from_secs(5),
+            },
+        );
+        let backups = zim_engine_backups::BackupService::new(
+            Arc::clone(&persistence),
+            Arc::clone(&jobs),
+            std::env::temp_dir().join("zim-stream-test"),
+        );
+        backups.register().await;
+        jobs.start();
         let state = Arc::new(AppState::new(
             Arc::clone(&persistence),
             supervisor,
             Arc::new(SessionManager::new(Default::default())),
             Arc::new(ApiKeyManager::new()),
             Arc::clone(&tab_tokens),
+            Arc::clone(&jobs),
+            Arc::clone(&backups),
             ApiConfig::default(),
         ));
         let router =

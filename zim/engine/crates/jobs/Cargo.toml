@@ -16,3 +16,23 @@ path = "src/lib.rs"
 [dependencies]
 zim_engine_application = { workspace = true }
 zim_engine_domain = { workspace = true }
+# M8: the streaming hub — the executor publishes job.progress /
+# job.completed events onto it (same direction as the application
+# layer's own dependency, RUST_ENGINE.md §2).
+zim_engine_streaming = { workspace = true }
+# Object-safe async trait methods (the Runtime trait's pattern).
+async-trait = { workspace = true }
+# Timestamps on job-row transitions.
+chrono = { workspace = true }
+# The executor's loops, cooperative cancellation, and the
+# spawn_blocking bridge over the sync persistence port.
+tokio = { workspace = true }
+# catch_unwind over handler futures (a panicking handler becomes a
+# cleanup-pending failure, never an executor crash).
+futures-util = { workspace = true }
+# Executor error surface.
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# In-memory store for the executor's state-machine tests.
+zim_engine_persistence_sqlite = { workspace = true }

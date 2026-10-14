@@ -1582,12 +1582,260 @@ pub async fn files_stub() -> Result<Response, ApiError> {
     })
 }
 
-/// Backup mutation family — M8 (job-driven).
-pub async fn backup_write_stub() -> Result<Response, ApiError> {
-    Err(ApiError::NotImplemented {
-        feature: "backup creation / restore / deletion / locking",
-        milestone: "M8 (jobs + backup archive handling)",
-    })
+// ── Backups (M8: create / delete / restore / download / lock) ────
+
+/// Map a [`zim_engine_backups::BackupError`] onto the §6.1 error
+/// vocabulary.
+fn backup_error(e: zim_engine_backups::BackupError) -> ApiError {
+    use zim_engine_backups::BackupError as E;
+    match e {
+        E::InstanceNotFound(id) => ApiError::not_found("instance", id),
+        E::BackupNotFound(id) => ApiError::not_found("backup", id),
+        E::LimitReached { .. } => ApiError::Conflict(e.to_string()),
+        E::Locked(_) => ApiError::Conflict(e.to_string()),
+        E::NotCompleted(_) => ApiError::StateConflict(e.to_string()),
+        E::MissingArchive { .. } => ApiError::not_found("backup archive", e.to_string()),
+        E::Persistence(pe) => ApiError::from(pe),
+    }
+}
+
+/// `POST /api/v1/instances/{id}/backups` — create a backup (spec
+/// §10.5): creates the in-progress `Backup` row plus its durable
+/// `Job`, enqueues it on the executor, and answers `202` with both
+/// ids. The row completes (sha256 + bytes) when the job does; poll
+/// `GET /instances/{id}/jobs/{job_id}` or watch the
+/// `job.progress` / `job.completed` stream events. Requires
+/// `backup.create`.
+pub async fn create_backup(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
+    let (_instance, ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
+    check_grants(&ctx, &[PermissionGrant::BackupCreate])?;
+
+    let (job, backup) = state
+        .backups
+        .create_backup(instance_id)
+        .await
+        .map_err(backup_error)?;
+
+    audit(
+        &state,
+        Some(ctx.user_id.to_string()),
+        "instance.backup.create",
+        Some(instance_id),
+        serde_json::json!({ "job_id": job.id, "backup_id": backup.id, "uuid": backup.uuid }),
+    )
+    .await;
+    Ok(Json(serde_json::json!({
+        "job_id": job.id,
+        "backup_id": backup.id,
+        "uuid": backup.uuid,
+        "state": job.state,
+    })))
+}
+
+/// `DELETE /api/v1/instances/{id}/backups/{bid}` — delete a backup
+/// (spec §10.5). Locked backups answer `409 conflict`; the archive
+/// file and its row disappear together. Requires `backup.delete`.
+pub async fn delete_backup(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path((id, bid)): Path<(String, String)>,
+) -> Result<StatusCode, ApiError> {
+    let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
+    let backup_id = parse_uuid::<zim_engine_domain::BackupId>(&bid, "bid")?;
+    let (_instance, ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
+    check_grants(&ctx, &[PermissionGrant::BackupDelete])?;
+
+    state
+        .backups
+        .delete_backup(instance_id, backup_id)
+        .await
+        .map_err(backup_error)?;
+
+    audit(
+        &state,
+        Some(ctx.user_id.to_string()),
+        "instance.backup.delete",
+        Some(instance_id),
+        serde_json::json!({ "backup_id": backup_id }),
+    )
+    .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /api/v1/instances/{id}/backups/{bid}/restore` — restore a
+/// backup (spec §10.5): enqueues a restore job (same
+/// `JobKind::Backup` — the handler discriminates on the linked
+/// row's recorded sha256). The extraction lands in a staging
+/// directory and swaps into place, so a failed restore never
+/// corrupts the live data. Requires `backup.restore`.
+pub async fn restore_backup(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path((id, bid)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
+    let backup_id = parse_uuid::<zim_engine_domain::BackupId>(&bid, "bid")?;
+    let (_instance, ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
+    check_grants(&ctx, &[PermissionGrant::BackupRestore])?;
+
+    let (job, backup) = state
+        .backups
+        .restore_backup(instance_id, backup_id)
+        .await
+        .map_err(backup_error)?;
+
+    audit(
+        &state,
+        Some(ctx.user_id.to_string()),
+        "instance.backup.restore",
+        Some(instance_id),
+        serde_json::json!({ "job_id": job.id, "backup_id": backup_id }),
+    )
+    .await;
+    Ok(Json(serde_json::json!({
+        "job_id": job.id,
+        "backup_id": backup.id,
+        "state": job.state,
+    })))
+}
+
+/// `GET /api/v1/instances/{id}/backups/{bid}/download` — the backup
+/// archive's bytes (spec §10.5), streamed from the store with
+/// `application/gzip`. Requires `backup.download`.
+pub async fn download_backup(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path((id, bid)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    use axum::body::Body;
+
+    let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
+    let backup_id = parse_uuid::<zim_engine_domain::BackupId>(&bid, "bid")?;
+    let (_instance, ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
+    check_grants(&ctx, &[PermissionGrant::BackupDownload])?;
+
+    let backup = db_or_500(&state, move |p| p.get_backup(&backup_id))
+        .await?
+        .ok_or_else(|| ApiError::not_found("backup", bid.clone()))?;
+    if backup.instance_id != instance_id {
+        return Err(ApiError::not_found("backup", bid));
+    }
+    if backup.sha256_hash.is_none() {
+        return Err(ApiError::StateConflict(format!(
+            "backup {bid} is not completed yet"
+        )));
+    }
+
+    // Resolve the archive path through the service (the store
+    // layout keys on the instance's short UUID).
+    let archive = state
+        .backups
+        .archive_path_for(instance_id, backup.id)
+        .await
+        .map_err(backup_error)?;
+    if !archive.exists() {
+        return Err(ApiError::not_found(
+            "backup archive",
+            backup.file_name.clone(),
+        ));
+    }
+
+    let file = tokio::fs::File::open(&archive)
+        .await
+        .map_err(|e| ApiError::internal(format!("cannot open {}: {e}", archive.display())))?;
+    let bytes = file
+        .metadata()
+        .await
+        .map_err(|e| ApiError::internal(format!("cannot stat archive: {e}")))?
+        .len();
+    let stream = tokio_util::io::ReaderStream::with_capacity(file, 256 * 1024);
+
+    audit(
+        &state,
+        Some(ctx.user_id.to_string()),
+        "instance.backup.download",
+        Some(instance_id),
+        serde_json::json!({ "backup_id": backup.id, "bytes": bytes }),
+    )
+    .await;
+
+    let mut response = Response::new(Body::from_stream(stream));
+    *response.status_mut() = StatusCode::OK;
+    let headers = response.headers_mut();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("application/gzip"),
+    );
+    if let Ok(disposition) =
+        axum::http::HeaderValue::from_str(&format!("attachment; filename=\"{}\"", backup.file_name))
+    {
+        headers.insert(axum::http::header::CONTENT_DISPOSITION, disposition);
+    }
+    if let Ok(length) = axum::http::HeaderValue::from_str(&bytes.to_string()) {
+        headers.insert(axum::http::header::CONTENT_LENGTH, length);
+    }
+    Ok(response)
+}
+
+/// `POST /api/v1/instances/{id}/backups/{bid}/lock` (and `DELETE`
+/// for unlock) — toggle the deletion lock (spec §10.5). Requires
+/// `backup.update`.
+async fn set_backup_lock(
+    state: &Arc<AppState>,
+    caller: Caller,
+    id: String,
+    bid: String,
+    locked: bool,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
+    let backup_id = parse_uuid::<zim_engine_domain::BackupId>(&bid, "bid")?;
+    let (_instance, ctx) = load_instance_for_caller(state, &caller, &instance_id).await?;
+    check_grants(&ctx, &[PermissionGrant::BackupUpdate])?;
+
+    let backup = state
+        .backups
+        .set_locked(instance_id, backup_id, locked)
+        .await
+        .map_err(backup_error)?;
+
+    audit(
+        state,
+        Some(ctx.user_id.to_string()),
+        if locked {
+            "instance.backup.lock"
+        } else {
+            "instance.backup.unlock"
+        },
+        Some(instance_id),
+        serde_json::json!({ "backup_id": backup_id }),
+    )
+    .await;
+    Ok(Json(serde_json::to_value(&backup).unwrap_or_default()))
+}
+
+/// `POST /instances/{id}/backups/{bid}/lock` — see
+/// [`set_backup_lock`].
+pub async fn lock_backup(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path((id, bid)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    set_backup_lock(&state, caller, id, bid, true).await
+}
+
+/// `DELETE /instances/{id}/backups/{bid}/lock` — see
+/// [`set_backup_lock`].
+pub async fn unlock_backup(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path((id, bid)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    set_backup_lock(&state, caller, id, bid, false).await
 }
 
 /// `POST /instances/{id}/schedules/{sid}/run` — M9 (scheduler).

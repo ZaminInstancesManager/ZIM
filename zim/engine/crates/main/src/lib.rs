@@ -27,7 +27,9 @@ use zim_engine_application::supervision::{
     NullRuntimeFactory, RuntimeFactory, SupervisionPolicy, Supervisor,
 };
 use zim_engine_auth::{ApiKeyManager, SessionManager, TabTokenManager};
+use zim_engine_backups::BackupService;
 use zim_engine_domain::{Node, NodeCapabilities, NodeDeployment, NodeState, User};
+use zim_engine_jobs::{JobPolicy, JobSystem};
 
 /// Process-wide engine options (CLI + environment).
 #[derive(Debug, Clone)]
@@ -92,7 +94,7 @@ const TLS_CERT_FILE: &str = "loopback-cert.pem";
 const TLS_KEY_FILE: &str = "loopback-key.pem";
 
 /// A booted engine: the bound loopback address plus the handles to
-/// stop serving and supervision.
+/// stop serving, supervision, and the job executor.
 pub struct RunningEngine {
     /// The address the HTTPS listener is bound to.
     pub local_addr: std::net::SocketAddr,
@@ -100,14 +102,16 @@ pub struct RunningEngine {
     pub reconciled: zim_engine_application::supervision::ReconcileReport,
     server: zim_engine_api::tls::RunningServer,
     supervisor: Arc<Supervisor>,
+    jobs: Arc<JobSystem>,
 }
 
 impl RunningEngine {
-    /// Stop accepting connections, drain in-flight requests, and
-    /// stop the supervision workers (running containers are left
-    /// running by design — the next boot's reconciliation re-adopts
-    /// them).
+    /// Stop accepting connections, drain in-flight requests, stop
+    /// the supervision workers, and wait (up to the job policy's
+    /// grace) for running jobs (running containers are left running
+    /// by design — the next boot's reconciliation re-adopts them).
     pub async fn shutdown(self) {
+        self.jobs.shutdown().await;
         self.supervisor.shutdown().await;
         self.server.shutdown().await;
     }
@@ -175,6 +179,36 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         reconciled.unknown
     );
 
+    // ── Durable jobs + backups (M8) ───────────────────────────────
+    // The executor claims Pending jobs, runs the registered
+    // handlers (backups today; transfers and installs in later M8
+    // sub-milestones), and cleans up partial state after crashes.
+    // Orphan reconciliation runs BEFORE start() so a dead process's
+    // InProgress rows are already cleanup-pending when the queue
+    // wakes up.
+    let jobs = JobSystem::new(
+        Arc::clone(&persistence),
+        Some(supervisor.stream().clone()),
+        JobPolicy::default(),
+    );
+    let orphaned = jobs
+        .reconcile_orphans()
+        .await
+        .map_err(|e| format!("job reconciliation failed: {e}"))?;
+    if orphaned > 0 {
+        eprintln!(
+            "zim_engine: reconciled {orphaned} orphaned job(s) from a previous run; \
+             partial state will be cleaned up"
+        );
+    }
+    let backups = BackupService::new(
+        Arc::clone(&persistence),
+        Arc::clone(&jobs),
+        options.data_dir.clone(),
+    );
+    backups.register().await;
+    jobs.start();
+
     // ── Credential managers (in-memory by design; see auth crate) ─
     let sessions = Arc::new(SessionManager::new(Default::default()));
     let api_keys = Arc::new(ApiKeyManager::new());
@@ -188,6 +222,8 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         Arc::clone(&sessions),
         Arc::clone(&api_keys),
         Arc::clone(&tab_tokens),
+        Arc::clone(&jobs),
+        Arc::clone(&backups),
         ApiConfig::default(),
     ));
     let router = zim_engine_api::router(Arc::clone(&state));
@@ -213,6 +249,7 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         reconciled,
         server,
         supervisor,
+        jobs,
     })
 }
 

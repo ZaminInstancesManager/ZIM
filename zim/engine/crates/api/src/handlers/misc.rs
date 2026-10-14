@@ -32,14 +32,15 @@ pub async fn health() -> Json<serde_json::Value> {
 /// Query shape for `GET /jobs`.
 #[derive(Debug, Default, Deserialize)]
 struct JobsQuery {
-    /// Instance filter — job listing is instance-scoped in M5 (the
-    /// global listing arrives with the job system in M8, when jobs
-    /// exist outside tests).
+    /// Instance filter — optional since M8: without it, admins get
+    /// the global listing and members get a `validation_failed`
+    /// (visibility would require a per-user fan-out the §10.8
+    /// pagination story covers in the frontend milestone).
     instance_id: Option<String>,
 }
 
-/// `GET /api/v1/jobs?instance_id={id}` — admin, or a caller with any
-/// grant on the instance.
+/// `GET /api/v1/jobs[?instance_id={id}]` — admin, or a caller with
+/// any grant on the instance.
 pub async fn list_jobs(
     State(state): State<Arc<AppState>>,
     Extension(caller): Extension<Caller>,
@@ -48,25 +49,51 @@ pub async fn list_jobs(
     let user = require_user(&caller)?;
     let q: JobsQuery = query_params(query.as_deref().unwrap_or(""))?;
     let instance_id = match q.instance_id.as_deref() {
-        None => {
-            return Err(ApiError::validation(
-                "job listing requires an instance_id filter in M5 (global listing arrives with \
-                 the job system in M8)",
-                "instance_id",
-            ));
-        }
-        Some(raw) => parse_uuid::<zim_engine_domain::InstanceId>(raw, "instance_id")?,
+        Some(raw) => Some(parse_uuid::<zim_engine_domain::InstanceId>(
+            raw,
+            "instance_id",
+        )?),
+        None => None,
     };
-    // Access model mirrors instance reads: admins see the instance's
-    // jobs; members need any grant on it.
-    let (_instance, _ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
-    let _ = user;
-    let jobs = db_or_500(&state, {
-        let id = instance_id;
-        move |p| p.list_jobs_by_instance(&id)
-    })
-    .await?;
-    Ok(Json(serde_json::json!({ "data": jobs })))
+    match instance_id {
+        Some(instance_id) => {
+            // Access model mirrors instance reads: admins see the
+            // instance's jobs; members need any grant on it.
+            let (_instance, _ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
+            let jobs = db_or_500(&state, {
+                let id = instance_id;
+                move |p| p.list_jobs_by_instance(&id)
+            })
+            .await?;
+            Ok(Json(serde_json::json!({ "data": jobs })))
+        }
+        None => {
+            // The global listing (M8): admins only. Persistence has
+            // no list-all-jobs port; the §10.8 pagination envelope
+            // lands with the frontend milestone, so this walks the
+            // states that matter.
+            if !(user.root_admin || user.is_admin) {
+                return Err(ApiError::validation(
+                    "global job listing requires an instance_id filter for non-admins",
+                    "instance_id",
+                ));
+            }
+            let mut jobs = Vec::new();
+            for job_state in [
+                zim_engine_domain::status::JobState::Pending,
+                zim_engine_domain::status::JobState::InProgress,
+                zim_engine_domain::status::JobState::CleanupPending,
+                zim_engine_domain::status::JobState::Succeeded,
+                zim_engine_domain::status::JobState::Failed,
+                zim_engine_domain::status::JobState::Cancelled,
+            ] {
+                let batch = db_or_500(&state, move |p| p.list_jobs_by_state(job_state)).await?;
+                jobs.extend(batch);
+            }
+            jobs.sort_by_key(|job| job.created_at);
+            Ok(Json(serde_json::json!({ "data": jobs })))
+        }
+    }
 }
 
 /// `GET /api/v1/jobs/{id}` — admin or instance-grant holder.
@@ -87,12 +114,52 @@ pub async fn get_job(
     Ok(Json(serde_json::to_value(&job).unwrap_or_default()))
 }
 
-/// `POST /api/v1/jobs/{id}/cancel` — M8 (job execution).
-pub async fn cancel_job_stub() -> Result<Response, ApiError> {
-    Err(ApiError::NotImplemented {
-        feature: "job cancellation",
-        milestone: "M8 (job execution state machine)",
-    })
+/// `POST /api/v1/jobs/{id}/cancel` — cancel a durable job (M8).
+///
+/// `Pending` jobs cancel immediately; `InProgress` jobs get the
+/// cooperative signal and finish on the handler's own terms (poll
+/// `GET /jobs/{id}` for the terminal state). Terminal and
+/// cleaner-owned jobs answer `409 conflict`. Admins, or callers
+/// with any grant on the job's instance.
+pub async fn cancel_job(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let user = require_user(&caller)?;
+    let job_id = parse_uuid::<JobId>(&id, "id")?;
+    let job = db_or_500(&state, move |p| p.get_job(&job_id))
+        .await?
+        .ok_or_else(|| ApiError::not_found("job", id.clone()))?;
+    // Admins pass; members need visibility on the owning instance.
+    if !(user.root_admin || user.is_admin) {
+        load_instance_for_caller(&state, &caller, &job.instance_id).await?;
+    }
+
+    use zim_engine_jobs::{CancelStatus, JobsError};
+    let status = state.jobs.cancel(job.id).await.map_err(|e| match e {
+        JobsError::NotFound(id) => ApiError::not_found("job", id),
+        JobsError::Uncancellable(id, _) => {
+            ApiError::Conflict(format!("job {id} is already in a terminal state"))
+        }
+        other => ApiError::internal(format!("cannot cancel job: {other}")),
+    })?;
+
+    crate::handlers::audit(
+        &state,
+        Some(user.id.to_string()),
+        "job.cancel",
+        Some(job.instance_id),
+        serde_json::json!({ "job_id": job.id, "status": format!("{status:?}").to_lowercase() }),
+    )
+    .await;
+    Ok(Json(serde_json::json!({
+        "job_id": job.id,
+        "status": match status {
+            CancelStatus::Cancelled => "cancelled",
+            CancelStatus::Cancelling => "cancelling",
+        },
+    })))
 }
 
 // ── Extensions (§10.12) ───────────────────────────────────────────

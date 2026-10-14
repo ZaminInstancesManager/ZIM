@@ -660,6 +660,30 @@ The jobs module (`zim_engine_jobs`) owns long-running operations:
 backup, transfer, install, update. Each is a durable job with an
 identity (`JobId`), a state machine, and resumable semantics.
 
+**Implementation status (M8.1, issue #5):** the executor and the
+backup pipeline are live. `JobSystem` claims `Pending` rows by
+persisting `InProgress` before any side effect, runs the
+registered `JobHandler` for the job's kind (per-instance
+serialization, a global concurrency cap, cooperative
+cancellation, panic containment via `catch_unwind`), persists the
+terminal transition, and publishes `job.progress` /
+`job.completed` events onto the hub. Failure semantics follow
+invariant 11: a handler answering `Failed { cleanup_pending }`
+lands the job in the non-terminal `CleanupPending` state, and the
+background cleaner invokes the handler's kind-specific `cleanup`
+before the row settles in terminal `Failed`. On boot,
+`reconcile_orphans` moves jobs orphaned mid-run by an engine crash
+to `CleanupPending` precisely so that cleanup runs. Backups
+(`zim_engine_backups`) archive the instance data directory as
+tar+gzip with a streaming sha256 and an atomic `.part` → rename
+finalize; restores verify the digest, reject escaping or
+non-regular entries, extract into a staging directory, and swap
+it into place with rollback. A restore job names its target
+through the migration-0002 `jobs.payload` column (create jobs link
+through the `Backup` row's `job_id`, the companion-entity
+pattern). Transfers (M8.2) and install jobs (M8.3) register their
+own handlers on the same executor.
+
 - **Backup job:** `Pending → InProgress(stage=Archive, progress)
   → Succeeded` or `Failed`. The archive is written to the
   configured backup storage; the `Backups` row's `sha256_hash` and

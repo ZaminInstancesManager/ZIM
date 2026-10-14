@@ -55,8 +55,8 @@ mod supervisor;
 
 pub use crash::{CrashLoopPolicy, CrashState};
 pub use instance::{
-    build_instance_config, ObservedSnapshot, PowerAction, PowerError, SupervisedInstance,
-    SupervisionPolicy,
+    build_instance_config, instance_data_dir, ObservedSnapshot, PowerAction, PowerError,
+    SupervisedInstance, SupervisionPolicy,
 };
 pub use null::NullRuntimeFactory;
 pub use runtime::{Runtime, RuntimeFactory};

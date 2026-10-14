@@ -410,6 +410,25 @@ retryable `409 state_conflict`).
 **Goal:** Implement the durable jobs module for backups,
 transfers, and installs.
 
+**Status:** M8.1 (issue #5) delivered — the durable-job engine
+and the backup pipeline: the `zim_engine_jobs` executor
+(claim-then-run with per-instance serialization and a global
+concurrency cap, cooperative cancellation, the
+`CleanupPending` → cleaner → `Failed` failure path per invariant
+11, boot-time orphan reconciliation, `job.progress` /
+`job.completed` hub events, panic containment) and the
+`zim_engine_backups` crate (tar+gzip archives with streaming
+sha256 and atomic `.part` → rename finalization, digest-verified
+escape-safe restore with a staging-directory swap, the
+`JobKind::Backup` handler covering both directions, the
+`BackupService` row lifecycle incl. limits and locks, and the
+migration 0002 `jobs.payload` column that carries a restore
+job's target). The §10.5 backup mutation family and
+`POST /jobs/{id}/cancel` are live (the 501s retired), and the
+global admin job listing replaced M5's instance-scoped-only one.
+M8.2 (transfers, two-phase commit) and M8.3 (install jobs)
+follow.
+
 **Deliverables:**
 - `zim_engine_jobs` crate with the `Job` state machine and
   resumable semantics.

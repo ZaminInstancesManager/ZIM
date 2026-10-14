@@ -133,23 +133,23 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route(
             "/instances/{id}/backups",
-            get(instances::list_backups).post(instances::backup_write_stub),
+            get(instances::list_backups).post(instances::create_backup),
         )
         .route(
             "/instances/{id}/backups/{bid}",
-            get(instances::get_backup).delete(instances::backup_write_stub),
+            get(instances::get_backup).delete(instances::delete_backup),
         )
         .route(
             "/instances/{id}/backups/{bid}/restore",
-            post(instances::backup_write_stub),
+            post(instances::restore_backup),
         )
         .route(
             "/instances/{id}/backups/{bid}/download",
-            get(instances::backup_write_stub),
+            get(instances::download_backup),
         )
         .route(
             "/instances/{id}/backups/{bid}/lock",
-            post(instances::backup_write_stub).delete(instances::backup_write_stub),
+            post(instances::lock_backup).delete(instances::unlock_backup),
         )
         // ── Workloads canonical surface (§10.15) — alias of §10.3 ─
         .route("/workloads", get(instances::list).post(instances::create))
@@ -207,7 +207,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         // ── Jobs (§10.8) ──────────────────────────────────────────
         .route("/jobs", get(misc::list_jobs))
         .route("/jobs/{id}", get(misc::get_job))
-        .route("/jobs/{id}/cancel", post(misc::cancel_job_stub))
+        .route("/jobs/{id}/cancel", post(misc::cancel_job))
         // ── Eggs (§10.11) ─────────────────────────────────────────
         .route("/eggs", get(misc::egg_stub).post(misc::egg_stub))
         .route(

@@ -27,11 +27,18 @@ pub struct Migration {
 }
 
 /// The full migration register, in ascending version order.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "initial_schema",
-    sql: include_str!("../migrations/0001_initial_schema.sql"),
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "initial_schema",
+        sql: include_str!("../migrations/0001_initial_schema.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "jobs_payload",
+        sql: include_str!("../migrations/0002_jobs_payload.sql"),
+    },
+];
 
 /// The highest version this binary knows how to apply.
 pub fn max_known_version() -> u64 {
