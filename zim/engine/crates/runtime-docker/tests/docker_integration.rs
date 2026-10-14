@@ -1298,7 +1298,8 @@ async fn backup_and_restore_of_container_data() {
             "-c".into(),
             "mkdir -p /home/container/world && \
              echo dragon-egg > /home/container/world/data.txt && \
-             echo motd=live > /home/container/server.properties"
+             echo motd=live > /home/container/server.properties && \
+             chmod -R a+rwX /home/container"
                 .into(),
         ],
         ..Default::default()
@@ -1360,7 +1361,7 @@ async fn backup_and_restore_of_container_data() {
         cmd: vec![
             "sh".into(),
             "-c".into(),
-            "echo clobbered > /home/container/server.properties".into(),
+            "echo clobbered > /home/container/server.properties && chmod a+rw /home/container/server.properties".into(),
         ],
         ..Default::default()
     };
