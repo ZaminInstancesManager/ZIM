@@ -55,7 +55,7 @@ pub mod traits;
 pub use capabilities::{Capability, CapabilitySet};
 pub use errors::{IntegrationError, SpecError};
 pub use manifest::{IntegrationManifest, ManifestError, RuntimeKindRef, MANIFEST_VERSION};
-pub use traits::{Health, Readiness, WorkloadIntegration};
+pub use traits::{ArchiveFormat, ArchiveRef, Health, Readiness, WorkloadIntegration};
 
 /// The crate name (banners and diagnostics).
 pub const CRATE_NAME: &str = "zim_engine_workloads_sdk";

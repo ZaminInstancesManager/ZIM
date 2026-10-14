@@ -219,7 +219,34 @@ pub trait HealthCheckCapable: Send + Sync {
     fn health(&self) -> Result<Health, IntegrationError>;
 }
 
+/// The formats the file surface's archive operation writes (the
+/// Wings file-API vocabulary: its compressor emits `.tar.gz`; its
+/// decompressor additionally reads `.tar` and `.zip`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArchiveFormat {
+    /// Uncompressed tar.
+    Tar,
+    /// gzip-compressed tar (the Wings default).
+    TarGz,
+    /// Zip (deflate).
+    Zip,
+}
+
+/// A reference to one produced archive (root-relative).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArchiveRef {
+    /// The archive's path inside the workload's file root.
+    pub path: String,
+    /// The archive's size in bytes.
+    pub bytes: u64,
+}
+
 /// The workload's filesystem (§4).
+///
+/// The list/read/write/delete surface is M16's; the archive/extract
+/// pair completes the original Wings file API (M17: "list, read,
+/// write, delete, archive, extract — the original Wings file API
+/// reproduced").
 pub trait FilesystemCapable: Send + Sync {
     /// List one directory's entries.
     fn list_dir(&self, path: &str) -> Result<Vec<String>, IntegrationError>;
@@ -232,6 +259,20 @@ pub trait FilesystemCapable: Send + Sync {
 
     /// Delete one file or directory.
     fn delete(&self, path: &str) -> Result<(), IntegrationError>;
+
+    /// Archive an allow-list of paths into one archive at `dest`
+    /// (root-relative), in the requested format.
+    fn archive(
+        &self,
+        dest: &str,
+        paths: &[&str],
+        format: ArchiveFormat,
+    ) -> Result<ArchiveRef, IntegrationError>;
+
+    /// Extract an archive (root-relative) under a destination
+    /// directory (root-relative), with the implementation's
+    /// extraction limits (§2.7).
+    fn extract(&self, archive_path: &str, dest: &str) -> Result<(), IntegrationError>;
 }
 
 /// Multiple network endpoints (§4).

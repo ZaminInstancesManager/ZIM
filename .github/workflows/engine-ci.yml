@@ -52,7 +52,16 @@ jobs:
           prefix-key: engine-ci
 
       - name: cargo fmt --check
-        run: cargo fmt --check
+        # On drift, print the full diff before failing so a remote
+        # iteration can replicate the exact `cargo fmt` fix without
+        # a local toolchain.
+        run: |
+          if ! cargo fmt --check; then
+            echo "::error::formatting drift — the full diff follows (apply with 'cargo fmt')"
+            cargo fmt
+            git --no-pager diff -- .
+            exit 1
+          fi
 
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
@@ -84,7 +93,13 @@ jobs:
     # Wings-parity container spec. The tests self-skip when no daemon
     # answers, so this job's job is to provide the daemon (GitHub's
     # ubuntu runners ship Docker).
-    name: Docker integration (runtime-docker)
+    #
+    # M17: the Minecraft integration's parity suite runs here too —
+    # the fakemc console-convention container, the file capability
+    # over the bind mount, exec/metrics, backup create/restore, and
+    # the migration quiesce/relaunch family (all self-skipping the
+    # same way without a daemon).
+    name: Docker integration (runtime-docker + minecraft)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -113,6 +128,18 @@ jobs:
 
       - name: cargo test -p zim_engine_runtime_docker
         run: cargo test -p zim_engine_runtime_docker --all-targets
+
+      - name: cargo test -p zim_engine_workloads_minecraft
+        # The parity suite builds its fakemc image in-test (busybox
+        # base + the Minecraft console-contract script); busybox is
+        # already local after the runtime suite's own pull.
+        run: cargo test -p zim_engine_workloads_minecraft --all-targets
+
+      - name: cargo test -p zim_engine_files
+        # The file API's §2.6/§2.7 attack suite is pure host-filesystem
+        # (no daemon); running it here too keeps the docker job the
+        # one place the whole M17 surface is exercised together.
+        run: cargo test -p zim_engine_files --all-targets
 
   build-matrix:
     # Smoke-build the workspace on each target platform to catch

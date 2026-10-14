@@ -24,10 +24,11 @@ pub enum SpecError {
 
 /// A workload-integration operation failed.
 ///
-/// The M16 skeletons produce only the [`Unsupported`][Self::Unsupported]
-/// form — behavioral hooks arrive with the real integrations (M17+);
-/// the error shape ships now so the engine-side call sites compile
-/// against a stable vocabulary.
+/// The M16 skeletons produced only the [`Unsupported`][Self::Unsupported]
+/// form; the M17 integrations add the file-surface, runtime-bridge,
+/// limit, and state-gated forms the capability implementations
+/// report. The vocabulary stays stable for the engine-side call
+/// sites either way.
 #[derive(Debug, thiserror::Error)]
 #[allow(missing_docs)]
 pub enum IntegrationError {
@@ -49,6 +50,30 @@ pub enum IntegrationError {
     /// A spec failed validation.
     #[error("{0}")]
     Spec(#[from] SpecError),
+    /// A file-surface operation failed (path validation rejected the
+    /// request, or the underlying IO errored). Arrives with the M17
+    /// integrations' [`FilesystemCapable`][crate::traits::FilesystemCapable]
+    /// implementations.
+    #[error("file operation failed: {0}")]
+    File(String),
+    /// The runtime bridging this call failed (the §4 runtime error
+    /// vocabulary stringified — the integration surface flattens
+    /// the runtime's typed errors).
+    #[error("runtime error: {0}")]
+    Runtime(String),
+    /// The operation exceeded a configured limit (the §2.7 archive
+    /// caps, console retention bounds, ...).
+    #[error("limit exceeded: {0}")]
+    Limit(String),
+    /// The workload is not in a state the operation requires (e.g.
+    /// console input to a stopped workload).
+    #[error("workload state does not allow {operation}: {reason}")]
+    NotRunning {
+        /// The operation's name.
+        operation: &'static str,
+        /// Why the current state blocks it.
+        reason: String,
+    },
 }
 
 impl IntegrationError {

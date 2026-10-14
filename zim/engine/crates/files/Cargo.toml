@@ -14,5 +14,24 @@ name = "zim_engine_files"
 path = "src/lib.rs"
 
 [dependencies]
-zim_engine_application = { workspace = true }
-zim_engine_domain = { workspace = true }
+# tar + gzip (pure-Rust backend) archive assembly and extraction
+# (shared with the M8 backup engine; the file API's allow-list
+# compression and user-driven extraction are separate surfaces).
+tar = { workspace = true }
+flate2 = { workspace = true }
+# Zip archive support (Wings decompresses `.zip` alongside
+# `.tar`/`.tar.gz`).
+zip = { workspace = true }
+# The error surface.
+thiserror = { workspace = true }
+# Entry timestamps on listings and archive headers.
+chrono = { workspace = true }
+
+[dev-dependencies]
+# Unique temp directories per test run.
+uuid = { workspace = true }
+# The malicious-archive fixtures are hand-built through the same
+# libraries the implementation uses (raw tar headers and zip
+# entries with hostile names — the attack surface itself).
+tar = { workspace = true }
+zip = { workspace = true }

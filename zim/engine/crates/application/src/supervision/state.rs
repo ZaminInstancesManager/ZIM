@@ -253,6 +253,13 @@ pub struct ResourceUsage {
     pub memory_limit_bytes: Option<u64>,
     /// Current pid count inside the container, when reported.
     pub pids_current: Option<u64>,
+    /// Cumulative network bytes received across the container's
+    /// interfaces, when reported (M17: the workload integrations'
+    /// §4 `ResourceUsage.network_bytes` is derived from these).
+    pub network_rx_bytes: Option<u64>,
+    /// Cumulative network bytes transmitted across the container's
+    /// interfaces, when reported.
+    pub network_tx_bytes: Option<u64>,
 }
 
 /// A live console attachment (M7.1): the decoded output-line stream

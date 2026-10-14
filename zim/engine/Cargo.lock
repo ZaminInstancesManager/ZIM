@@ -2837,8 +2837,12 @@ dependencies = [
 name = "zim_engine_files"
 version = "0.0.1"
 dependencies = [
- "zim_engine_application",
- "zim_engine_domain",
+ "chrono",
+ "flate2",
+ "tar",
+ "thiserror",
+ "uuid",
+ "zip",
 ]
 
 [[package]]
@@ -3076,7 +3080,23 @@ dependencies = [
 name = "zim_engine_workloads_minecraft"
 version = "0.0.1"
 dependencies = [
+ "bollard",
+ "bytes",
+ "chrono",
+ "futures-util",
+ "regex",
+ "serde",
+ "serde_json",
+ "tar",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "zim_engine_application",
+ "zim_engine_backups",
  "zim_engine_domain",
+ "zim_engine_eggs",
+ "zim_engine_files",
+ "zim_engine_runtime_docker",
  "zim_engine_workloads_sdk",
 ]
 

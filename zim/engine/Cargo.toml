@@ -132,6 +132,13 @@ tar = "0.4"
 flate2 = { version = "1", default-features = false, features = [
     "rust_backend",
 ] }
+# ── M17: the Minecraft workload integration ─────────────────────
+# The integration's startup-done detection and the legacy egg
+# `file` parser's find/replace rules are regex-shaped
+# (Wings uses Go regexp; the Rust `regex` crate is the
+# well-tested equivalent per THREAT_MODEL.md §2.7's "well-tested
+# archive libraries" logic).
+regex = "1"
 # ── M5: API surface (docs/architecture/IMPLEMENTATION_ROADMAP.md §M5) ──
 # Async runtime for the HTTPS listener and the middleware stack. The
 # sync Persistence port is bridged with spawn_blocking (see the M3
