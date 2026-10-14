@@ -1404,11 +1404,23 @@ async fn backup_and_restore_of_container_data() {
     );
 
     // The container is still running throughout (invariant 12's
-    // spirit: job activity does not disturb the source).
+    // spirit: job activity does not disturb the source) — and, the
+    // point of the in-place swap, it SEES the restored data through
+    // its bind mount immediately.
     let state = runtime.state().await.expect("runtime state");
     assert!(
         state.is_running(),
         "the workload must survive the backup and restore"
+    );
+    let read_back = ExecCommand {
+        cmd: vec!["cat".into(), "/home/container/server.properties".into()],
+        ..Default::default()
+    };
+    let out = runtime.exec(&read_back).await.expect("read through bind");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "motd=live\n",
+        "the live bind mount must carry the restored contents"
     );
 
     runtime.stop(Duration::from_secs(10)).await.expect("stop");

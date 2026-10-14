@@ -419,7 +419,10 @@ concurrency cap, cooperative cancellation, the
 `job.completed` hub events, panic containment) and the
 `zim_engine_backups` crate (tar+gzip archives with streaming
 sha256 and atomic `.part` → rename finalization, digest-verified
-escape-safe restore with a staging-directory swap, the
+escape-safe restore with an in-place content swap (the live
+directory itself is never renamed — a running container's bind
+mount pins it, so the workload sees the restored data
+immediately), the
 `JobKind::Backup` handler covering both directions, the
 `BackupService` row lifecycle incl. limits and locks, and the
 migration 0002 `jobs.payload` column that carries a restore

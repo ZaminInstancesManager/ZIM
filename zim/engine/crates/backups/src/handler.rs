@@ -10,12 +10,14 @@
 //!   `completed_at` on the row.
 //! - `sha256_hash == Some(_)` → **restore**: verify the recorded
 //!   digest, extract into a staging directory beside the instance
-//!   data, then swap (old data aside → staging in → old deleted).
+//!   data, then replace the live directory's *contents* in place
+//!   (the directory itself is never renamed — a live container's
+//!   bind mount pins it).
 //!
 //! Failure semantics (roadmap M8 acceptance): a failed or cancelled
 //! create leaves the `.part` file and answers
 //! [`JobOutcome::Failed`] with `cleanup_pending = true`; a failed
-//! restore leaves the staging (or set-aside) directory the same
+//! restore leaves the staging directory the same
 //! way. [`JobHandler::cleanup`] removes both — including for jobs
 //! orphaned by an engine crash, which boot reconciliation moves to
 //! `CleanupPending` precisely so this runs.
@@ -141,7 +143,7 @@ impl JobHandler for BackupJobHandler {
     async fn cleanup(&self, job: &Job) -> Result<(), String> {
         // Everything this handler can leave behind is derived from
         // the instance row + the linked backup row: the `.part` file
-        // (create direction) and the job-tagged staging / set-aside
+        // (create direction) and the job-tagged staging
         // directories (restore direction).
         let instance = tokio::task::spawn_blocking({
             let persistence = Arc::clone(&self.persistence);
@@ -180,14 +182,10 @@ impl JobHandler for BackupJobHandler {
 
         // Restore-direction leftovers (job-tagged, so they are
         // derivable without the backup row).
-        for dir in [
-            self.staging_dir(&short, &job.id.to_string()),
-            self.set_aside_dir(&short, &job.id.to_string()),
-        ] {
-            if dir.exists() {
-                std::fs::remove_dir_all(&dir)
-                    .map_err(|e| format!("cannot remove {}: {e}", dir.display()))?;
-            }
+        let staging = self.staging_dir(&short, &job.id.to_string());
+        if staging.exists() {
+            std::fs::remove_dir_all(&staging)
+                .map_err(|e| format!("cannot remove {}: {e}", staging.display()))?;
         }
         Ok(())
     }
@@ -200,14 +198,6 @@ impl BackupJobHandler {
         self.data_root
             .join("instances")
             .join(format!(".{instance_short}.restoring.{tag}"))
-    }
-
-    /// Where the current data goes while the staging directory moves
-    /// in (rollback insurance for the swap).
-    fn set_aside_dir(&self, instance_short: &str, tag: &str) -> PathBuf {
-        self.data_root
-            .join("instances")
-            .join(format!(".{instance_short}.old.{tag}"))
     }
 
     /// The create direction (see the module docs).
@@ -281,7 +271,6 @@ impl BackupJobHandler {
         let archive = self.store.archive_path(&instance.uuid_short, backup);
         let sha256 = backup.sha256_hash.clone().unwrap_or_default();
         let staging = self.staging_dir(&instance.uuid_short, &job.id.to_string());
-        let set_aside = self.set_aside_dir(&instance.uuid_short, &job.id.to_string());
         let live_dir = instance_data_dir(&self.data_root, &instance.uuid_short);
 
         // 1. Verify + extract into the staging directory.
@@ -313,10 +302,11 @@ impl BackupJobHandler {
             Ok(()) => {}
         }
 
-        // 2. Swap: live → set-aside, staging → live, then delete the
-        //    set-aside copy. Each step rolls back on failure.
+        // 2. Swap the restored tree into the live directory in place
+        //    (the directory itself is never renamed: a live bind
+        //    mount pins it — see perform_in_place_swap).
         ctx.progress("swapping", 1.0);
-        let swap = tokio::task::spawn_blocking(move || perform_swap(live_dir, staging, set_aside))
+        let swap = tokio::task::spawn_blocking(move || perform_in_place_swap(live_dir, staging))
             .await
             .expect("swap task panicked");
         match swap {
@@ -330,33 +320,67 @@ impl BackupJobHandler {
     }
 }
 
-/// The swap: `live → aside`, `staging → live`, `aside` deleted.
-/// On a mid-swap failure the live directory is restored from the
-/// aside copy (the original data survives a failed restore).
-fn perform_swap(live: PathBuf, staging: PathBuf, aside: PathBuf) -> Result<(), ArchiveError> {
+/// Replace `live`'s *contents* with `staging`'s, in place.
+///
+/// The live directory itself is never renamed or removed: a running
+/// container's bind mount pins that directory (rename leaves the
+/// mount attached to the old inode — the container would keep
+/// seeing the superseded data, and deleting the set-aside original
+/// fails with EBUSY). Clearing the children and moving the restored
+/// tree in keeps the mount valid, so the workload sees the restored
+/// data immediately. A crash between the clear and the move-in
+/// leaves a partially restored live tree — the archive is the
+/// safety net; the job answers `cleanup_pending` and a retry
+/// finishes the story.
+fn perform_in_place_swap(live: PathBuf, staging: PathBuf) -> Result<(), ArchiveError> {
     let io = |context: &str, e: std::io::Error| ArchiveError::Io {
         context: context.to_owned(),
         source: e,
     };
 
+    // 1. Clear the live contents (the directory itself stays).
     if live.exists() {
-        std::fs::rename(&live, &aside).map_err(|e| io("cannot set current data aside", e))?;
-    }
-    match std::fs::rename(&staging, &live) {
-        Ok(()) => {}
-        Err(e) => {
-            // Roll back: the original data returns before failing.
-            if aside.exists() {
-                let _ = std::fs::rename(&aside, &live);
-            }
-            return Err(ArchiveError::Io {
-                context: "cannot move the restored data into place (rolled back)".to_owned(),
-                source: e,
-            });
+        for entry in std::fs::read_dir(&live).map_err(|e| io("cannot read the live data dir", e))? {
+            let entry = entry.map_err(|e| io("cannot read the live data dir", e))?;
+            let path = entry.path();
+            let meta =
+                std::fs::symlink_metadata(&path).map_err(|e| io("cannot stat live data", e))?;
+            let removed = if meta.is_dir() {
+                std::fs::remove_dir_all(&path)
+            } else {
+                std::fs::remove_file(&path)
+            };
+            removed.map_err(|e| io("cannot clear the live data", e))?;
         }
+    } else {
+        std::fs::create_dir_all(&live).map_err(|e| io("cannot create the live data dir", e))?;
     }
-    if aside.exists() {
-        std::fs::remove_dir_all(&aside).map_err(|e| io("cannot delete the superseded data", e))?;
+
+    // 2. Move the restored tree in, entry by entry (same parent
+    //    filesystem: renames are cheap and atomic per entry).
+    for entry in
+        std::fs::read_dir(&staging).map_err(|e| io("cannot read the restored staging dir", e))?
+    {
+        let entry = entry.map_err(|e| io("cannot read the restored staging dir", e))?;
+        let name = entry.file_name();
+        let dest = live.join(&name);
+        if dest.exists() {
+            // The clear above should have removed it; a concurrent
+            // writer lost the race — the restore wins.
+            let meta = std::fs::symlink_metadata(&dest)
+                .map_err(|e| io("cannot stat colliding entry", e))?;
+            if meta.is_dir() {
+                std::fs::remove_dir_all(&dest)
+            } else {
+                std::fs::remove_file(&dest)
+            }
+            .map_err(|e| io("cannot clear colliding entry", e))?;
+        }
+        std::fs::rename(entry.path(), &dest)
+            .map_err(|e| io("cannot move the restored data into place", e))?;
     }
+
+    // 3. The staging directory is now empty.
+    std::fs::remove_dir(&staging).map_err(|e| io("cannot remove the staging dir", e))?;
     Ok(())
 }

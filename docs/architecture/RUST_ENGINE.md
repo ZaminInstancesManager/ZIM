@@ -677,8 +677,10 @@ to `CleanupPending` precisely so that cleanup runs. Backups
 (`zim_engine_backups`) archive the instance data directory as
 tar+gzip with a streaming sha256 and an atomic `.part` → rename
 finalize; restores verify the digest, reject escaping or
-non-regular entries, extract into a staging directory, and swap
-it into place with rollback. A restore job names its target
+non-regular entries, extract into a staging directory, and then
+replace the live directory's contents in place (the directory
+itself is never renamed: a running container's bind mount pins
+it, so the workload sees the restored data immediately). A restore job names its target
 through the migration-0002 `jobs.payload` column (create jobs link
 through the `Backup` row's `job_id`, the companion-entity
 pattern). Transfers (M8.2) and install jobs (M8.3) register their

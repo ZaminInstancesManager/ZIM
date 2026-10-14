@@ -464,12 +464,11 @@ async fn restore_returns_live_data_to_the_backup_point() {
     );
     // The post-backup file is gone (the whole tree was swapped).
     assert!(!live.join("new-file.txt").exists());
-    // No staging / set-aside leftovers.
+    // No staging leftovers.
     let instances_dir = bed.data_root.join("instances");
     for entry in std::fs::read_dir(&instances_dir).unwrap() {
         let name = entry.unwrap().file_name().to_string_lossy().to_string();
         assert!(!name.contains(".restoring."), "leftover staging: {name}");
-        assert!(!name.contains(".old."), "leftover set-aside: {name}");
     }
 }
 
