@@ -75,6 +75,18 @@ zim_engine_metrics = { path = "crates/metrics" }
 zim_engine_platform = { path = "crates/platform" }
 zim_engine_frontend_loader = { path = "crates/frontend-loader" }
 zim_engine_migrate_pterodactyl = { path = "crates/migrate-pterodactyl" }
+# ── M10: the Panel-database migration importer ─────────────────────
+# The MySQL client for the importer's live Panel adapter. Only the
+# `mysql` feature of zim_engine_migrate_pterodactyl compiles it
+# (the default build — and CI — stay free of the MySQL dependency
+# tree). `minimal-rust` selects the pure-Rust TLS/deflate stack so
+# no C client library is needed on build hosts; `chrono` maps the
+# Panel's DATETIME columns onto the same chrono the engine already
+# uses.
+mysql = { version = "28", default-features = false, features = [
+    "minimal-rust",
+    "chrono",
+] }
 
 # External crates shared across multiple engine members. Each member
 # that needs one of these depends on it via `<name> = { workspace = true }`.

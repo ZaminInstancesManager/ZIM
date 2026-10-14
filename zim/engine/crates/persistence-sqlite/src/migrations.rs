@@ -43,6 +43,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "eggs",
         sql: include_str!("../migrations/0003_eggs.sql"),
     },
+    Migration {
+        version: 4,
+        name: "instance_variables",
+        sql: include_str!("../migrations/0004_instance_variables.sql"),
+    },
 ];
 
 /// The highest version this binary knows how to apply.
@@ -230,6 +235,7 @@ mod tests {
             "allocations",
             "instances",
             "permissions",
+            "instance_variables",
             "jobs",
             "backups",
             "transfers",

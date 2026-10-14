@@ -17,8 +17,8 @@ use zim_engine_application::ports::{Persistence, PersistenceError};
 use zim_engine_domain::{
     Allocation, AllocationId, AuditRecord, Backup, BackupId, CommandTemplate, Egg, EggId,
     EggVariable, ExtensionId, ExtensionRegistration, ExtensionSignature, Instance, InstanceId,
-    InstanceStatus, Job, JobId, JobState, Node, NodeId, Permission, PermissionSet, Schedule,
-    ScheduleId, Transfer, TransferId, User, UserId,
+    InstanceStatus, InstanceVariable, Job, JobId, JobState, Node, NodeId, Permission,
+    PermissionSet, Schedule, ScheduleId, Transfer, TransferId, User, UserId,
 };
 
 // ─── Error & conversion helpers ───────────────────────────────────────────
@@ -226,6 +226,84 @@ impl Persistence for crate::SqlitePersistence {
             )
             .map(|_| ())
             .map_err(db_err)
+        })
+    }
+
+    // ── Instance variables (M10) ─────────────────────────────
+
+    fn put_instance_variables(
+        &self,
+        instance: &InstanceId,
+        variables: &[InstanceVariable],
+    ) -> Result<(), PersistenceError> {
+        self.with_conn(|conn| {
+            for variable in variables {
+                conn.execute(
+                    "INSERT INTO instance_variables (instance_id, env_name, value)
+                     VALUES (?1, ?2, ?3)
+                     ON CONFLICT (instance_id, env_name) DO UPDATE SET
+                        value = excluded.value",
+                    params![uuid_to_text(instance), variable.env_name, variable.value],
+                )
+                .map_err(db_err)?;
+            }
+            Ok(())
+        })
+    }
+
+    fn list_instance_variables(
+        &self,
+        instance: &InstanceId,
+    ) -> Result<Vec<InstanceVariable>, PersistenceError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT env_name, value FROM instance_variables
+                     WHERE instance_id = ?1 ORDER BY env_name",
+                )
+                .map_err(db_err)?;
+            let mut rows = stmt
+                .query(params![uuid_to_text(instance)])
+                .map_err(db_err)?;
+            collect_rows(&mut rows, |row| {
+                Ok(InstanceVariable {
+                    env_name: row.get(0).map_err(db_err)?,
+                    value: row.get(1).map_err(db_err)?,
+                })
+            })
+        })
+    }
+
+    // ── Bulk import batching (M10) ───────────────────────────
+
+    fn begin_batch(&self) -> Result<(), PersistenceError> {
+        self.with_conn(|conn| {
+            conn.execute_batch("BEGIN")
+                .map(|_| ())
+                .map_err(|e| PersistenceError::backend(format!("begin batch: {e}")))
+        })
+    }
+
+    fn commit_batch(&self) -> Result<(), PersistenceError> {
+        self.with_conn(|conn| {
+            conn.execute_batch("COMMIT")
+                .map(|_| ())
+                .map_err(|e| PersistenceError::backend(format!("commit batch: {e}")))
+        })
+    }
+
+    fn rollback_batch(&self) -> Result<(), PersistenceError> {
+        self.with_conn(|conn| {
+            conn.execute_batch("ROLLBACK")
+                .map(|_| ())
+                .map_err(|e| PersistenceError::backend(format!("rollback batch: {e}")))
+        })
+    }
+
+    fn set_import_foreign_keys(&self, enabled: bool) -> Result<(), PersistenceError> {
+        self.with_conn(|conn| {
+            conn.pragma_update(None, "foreign_keys", if enabled { "on" } else { "off" })
+                .map_err(|e| PersistenceError::backend(format!("set foreign_keys pragma: {e}")))
         })
     }
 
@@ -737,6 +815,23 @@ impl Persistence for crate::SqlitePersistence {
                 )
                 .map_err(db_err)?;
             let mut rows = stmt.query(params![uuid_to_text(id)]).map_err(db_err)?;
+            match rows.next().map_err(db_err)? {
+                Some(row) => Ok(Some(row_to_backup(row)?)),
+                None => Ok(None),
+            }
+        })
+    }
+
+    fn get_backup_by_uuid(&self, uuid: &str) -> Result<Option<Backup>, PersistenceError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, instance_id, job_id, uuid, file_name, bytes, sha256_hash, locked,
+                            completed_at
+                     FROM backups WHERE uuid = ?1",
+                )
+                .map_err(db_err)?;
+            let mut rows = stmt.query(params![uuid]).map_err(db_err)?;
             match rows.next().map_err(db_err)? {
                 Some(row) => Ok(Some(row_to_backup(row)?)),
                 None => Ok(None),

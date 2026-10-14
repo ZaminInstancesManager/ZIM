@@ -38,6 +38,10 @@ zim_engine_metrics = { workspace = true }
 zim_engine_platform = { workspace = true }
 zim_engine_frontend_loader = { workspace = true }
 zim_engine_domain = { workspace = true }
+# M10: the Pterodactyl Panel migration importer (the offline
+# `migrate` subcommand; the engine never links it into the serving
+# path — it runs and exits before the async runtime boots).
+zim_engine_migrate_pterodactyl = { workspace = true }
 # Async runtime + signal handling for the engine process.
 tokio = { workspace = true }
 # OS entropy for the generated bootstrap password.

@@ -81,7 +81,7 @@ pub use id::{
     AllocationId, BackupId, EggId, EggVariableId, ExtensionId, InstanceId, JobId, LocationId,
     NodeId, ScheduleId, TransferId, UserId, WorkloadId,
 };
-pub use instance::{Instance, ResourceLimits};
+pub use instance::{Instance, InstanceVariable, ResourceLimits};
 pub use job::{Backup, Job, JobKind, Transfer};
 pub use node::{Allocation, Node, NodeCapabilities, NodeDeployment, NodeState};
 pub use permission::{PermissionGrant, PermissionSet};

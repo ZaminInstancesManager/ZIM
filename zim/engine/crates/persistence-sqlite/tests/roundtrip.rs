@@ -689,8 +689,8 @@ fn port_trait_object_dispatch_works() {
     let node = sample_node("via-trait");
     port.put_node(&node).unwrap();
     assert_eq!(port.get_node(&node.id).unwrap().unwrap(), node);
-    // Migration 0003 (eggs) is the current head.
-    assert_eq!(port.schema_version().unwrap(), 3);
+    // Migration 0004 (instance_variables) is the current head.
+    assert_eq!(port.schema_version().unwrap(), 4);
 }
 
 #[test]
@@ -841,4 +841,89 @@ fn egg_round_trips_with_variables_and_satellite_payloads() {
     let blockers = store.list_instances_by_egg(&egg.id).unwrap();
     assert_eq!(blockers.len(), 1);
     assert!(store.delete_egg(&egg.id).is_err());
+}
+
+#[test]
+fn instance_variables_upsert_and_round_trip() {
+    // M10: per-instance variable overrides — upserts by env name,
+    // ordered reads, and the delete cascade rides the instance's
+    // ON DELETE CASCADE (verified in the importer's E2E suite).
+    let store = migrated_store();
+    let node = sample_node("overrides");
+    store.put_node(&node).unwrap();
+    let user = sample_user("override-owner");
+    store.put_user(&user).unwrap();
+    let allocation = sample_allocation(&node, 24565);
+    store.put_allocation(&allocation).unwrap();
+    let instance = sample_instance(&node, &user, &allocation);
+    store.put_instance(&instance).unwrap();
+
+    // Empty writes are no-ops.
+    store.put_instance_variables(&instance.id, &[]).unwrap();
+    assert!(store
+        .list_instance_variables(&instance.id)
+        .unwrap()
+        .is_empty());
+
+    // Upsert per env name, in arbitrary order.
+    store
+        .put_instance_variables(
+            &instance.id,
+            &[
+                zim_engine_domain::InstanceVariable {
+                    env_name: "SERVER_JARFILE".to_owned(),
+                    value: "paper.jar".to_owned(),
+                },
+                zim_engine_domain::InstanceVariable {
+                    env_name: "MINECRAFT_VERSION".to_owned(),
+                    value: "1.20.1".to_owned(),
+                },
+            ],
+        )
+        .unwrap();
+    // The same name again: the value is replaced, not duplicated.
+    store
+        .put_instance_variables(
+            &instance.id,
+            &[zim_engine_domain::InstanceVariable {
+                env_name: "SERVER_JARFILE".to_owned(),
+                value: "paper-2.jar".to_owned(),
+            }],
+        )
+        .unwrap();
+
+    // Reads come back ordered by env name.
+    assert_eq!(
+        store.list_instance_variables(&instance.id).unwrap(),
+        vec![
+            zim_engine_domain::InstanceVariable {
+                env_name: "MINECRAFT_VERSION".to_owned(),
+                value: "1.20.1".to_owned(),
+            },
+            zim_engine_domain::InstanceVariable {
+                env_name: "SERVER_JARFILE".to_owned(),
+                value: "paper-2.jar".to_owned(),
+            },
+        ]
+    );
+
+    // Another instance's overrides are invisible.
+    let other_allocation = sample_allocation(&node, 24566);
+    store.put_allocation(&other_allocation).unwrap();
+    let mut other = sample_instance(&node, &user, &other_allocation);
+    other.external_id = None;
+    store.put_instance(&other).unwrap();
+    store
+        .put_instance_variables(
+            &other.id,
+            &[zim_engine_domain::InstanceVariable {
+                env_name: "SERVER_JARFILE".to_owned(),
+                value: "other.jar".to_owned(),
+            }],
+        )
+        .unwrap();
+    let overrides = store.list_instance_variables(&instance.id).unwrap();
+    assert!(overrides
+        .iter()
+        .all(|variable| variable.value != "other.jar"));
 }

@@ -13,6 +13,29 @@ documentation.workspace = true
 name = "zim_engine_migrate_pterodactyl"
 path = "src/lib.rs"
 
+[features]
+# The live Panel MySQL adapter (`MysqlPanelSource`). Off by default:
+# the default build (and CI) exercises the fixture source; a
+# deployment that imports straight from MySQL builds with
+# `--features mysql` (see the workspace manifest's pinned `mysql`
+# entry for the pure-Rust feature rationale).
+mysql = ["dep:mysql"]
+
 [dependencies]
 zim_engine_application = { workspace = true }
 zim_engine_domain = { workspace = true }
+# M9: eggs are reconstructed through the legacy importer (the
+# Panel DB row → synthesized legacy JSON → `import_legacy_json`).
+zim_engine_eggs = { workspace = true }
+# The importer composes the SQLite adapter directly: it is offline
+# tooling over the same store the engine uses, and the write path
+# is still the `Persistence` port (the adapter supplies the
+# file-backed and in-memory sinks, including the dry-run rehearsal
+# store).
+zim_engine_persistence_sqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+mysql = { workspace = true, optional = true }

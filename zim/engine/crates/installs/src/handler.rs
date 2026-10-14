@@ -221,6 +221,18 @@ impl InstallJobHandler {
         for variable in &egg.variables {
             env.push((variable.env_name.clone(), variable.default_value.clone()));
         }
+        // Per-instance overrides (M10): the migration importer's
+        // `server_variables` land here and win over the defaults.
+        // An override whose env name the egg no longer declares is
+        // ignored — an orphaned override must not leak into the
+        // environment (the instance-variables module docs).
+        if let Ok(overrides) = persistence.list_instance_variables(&instance.id) {
+            for variable in overrides {
+                if let Some(slot) = env.iter_mut().find(|(name, _)| *name == variable.env_name) {
+                    slot.1 = variable.value;
+                }
+            }
+        }
         env
     }
 

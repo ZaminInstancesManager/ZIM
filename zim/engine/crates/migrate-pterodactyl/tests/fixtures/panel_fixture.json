@@ -1,0 +1,396 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "external_id": null,
+      "uuid": "0c47e1f6-8b1a-4a2f-9e7d-6f3d21a3e211",
+      "username": "zamin",
+      "email": "admin@panel.example",
+      "password": "$2y$10$abcdefghijklmnopqrstuv012345678901234567890123456789012",
+      "root_admin": 1
+    },
+    {
+      "id": 2,
+      "external_id": "billing-77",
+      "uuid": "3b9f2c8d-7e6a-4d5b-8c1a-9d0e1f2a3b22",
+      "username": "nova",
+      "email": "Nova@Example.com",
+      "password": "$2y$10$0123456789abcdefghijklmnopqrstuv0123456789012345678901234",
+      "root_admin": 0
+    }
+  ],
+  "locations": [
+    { "id": 1, "short": "eu-central", "long": "Frankfurt, Germany" }
+  ],
+  "nodes": [
+    {
+      "id": 1,
+      "uuid": "5f1d3a7e-2c4b-4d8e-9f0a-1b2c3d4e5f01",
+      "name": "wings-fra-1",
+      "location_id": 1,
+      "fqdn": "fra-1.panel.example",
+      "scheme": "https",
+      "daemonListen": 8443
+    },
+    {
+      "id": 2,
+      "uuid": null,
+      "name": "wings-fra-2",
+      "location_id": 1,
+      "fqdn": "fra-2.panel.example",
+      "scheme": "http",
+      "daemonListen": 8080
+    }
+  ],
+  "nests": [
+    { "name": "Minecraft" }
+  ],
+  "eggs": [
+    {
+      "id": 5,
+      "uuid": "d6b5f3a2-7e8f-4c9d-a0b1-c2d3e4f5a605",
+      "author": "parkervcp",
+      "name": "Paper",
+      "description": "High performance PaperMC server",
+      "features": ["eula"],
+      "docker_image": null,
+      "docker_images": { "Java 21": "ghcr.io/parkervcp/yolks:java_21" },
+      "config_files": "{\"server.properties\":{\"parser\":\"properties\",\"replace\":[{\"match\":\"server-port\",\"value\":\"{{SERVER_PORT}}\"}]}}",
+      "config_startup": "{\"done\":\"Done\"}",
+      "config_stop": "{\"type\":\"command\",\"send\":\"stop\"}",
+      "startup": "java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}}",
+      "script_is_privileged": false,
+      "script_install": "cd /home/container && curl -o server.jar https://example.com/paper.jar",
+      "script_entry": "bash",
+      "script_container": "debian:12-slim",
+      "created_at": "2024-01-05 09:00:00"
+    },
+    {
+      "id": 6,
+      "uuid": "eeee6a2b-1111-4ccc-8ddd-000000000006",
+      "author": "someone",
+      "name": "PrivilegedThing",
+      "description": "Needs a privileged installer",
+      "features": null,
+      "docker_image": "ghcr.io/yolks:alpine",
+      "docker_images": null,
+      "config_files": null,
+      "config_startup": null,
+      "config_stop": null,
+      "startup": "./run",
+      "script_is_privileged": true,
+      "script_install": "mount something",
+      "script_entry": "bash",
+      "script_container": "debian:12-slim",
+      "created_at": "2024-02-01 00:00:00"
+    }
+  ],
+  "egg_variables": [
+    {
+      "id": 51,
+      "egg_id": 5,
+      "name": "Server Jar File",
+      "description": "The name of the jar to run",
+      "env_variable": "SERVER_JARFILE",
+      "default_value": "server.jar",
+      "user_viewable": 1,
+      "user_editable": 1,
+      "rules": "required|string|max:20"
+    },
+    {
+      "id": 52,
+      "egg_id": 5,
+      "name": "Minecraft Version",
+      "description": "The version to run",
+      "env_variable": "MINECRAFT_VERSION",
+      "default_value": "1.20.4",
+      "user_viewable": 1,
+      "user_editable": 1,
+      "rules": "required|string"
+    },
+    {
+      "id": 53,
+      "egg_id": 5,
+      "name": "Internal Flag",
+      "description": "Not shown to users",
+      "env_variable": "INTERNAL_FLAG",
+      "default_value": "on",
+      "user_viewable": 0,
+      "user_editable": 0,
+      "rules": null
+    }
+  ],
+  "servers": [
+    {
+      "id": 101,
+      "external_id": "ext-101",
+      "uuid": "2ab5c1d0-0000-4000-8000-000000010101",
+      "uuidShort": "2ab5c1d0",
+      "node_id": 1,
+      "name": "Survival Prime",
+      "description": "The main survival world",
+      "status": "running",
+      "skip_scripts": 0,
+      "owner_id": 1,
+      "memory": 4096,
+      "swap": 0,
+      "disk": 20000,
+      "io": 500,
+      "cpu": 200,
+      "threads": "0-3",
+      "oom_disabled": 0,
+      "allocation_id": 1001,
+      "egg_id": 5,
+      "startup": "java -Xms256M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}}",
+      "image": "ghcr.io/parkervcp/yolks:java_21",
+      "allocation_limit": 3,
+      "database_limit": 2,
+      "backup_limit": 5,
+      "installed_at": "2024-03-02 08:15:00",
+      "created_at": "2024-03-01 12:00:00",
+      "updated_at": "2024-04-28 19:30:00"
+    },
+    {
+      "id": 102,
+      "external_id": null,
+      "uuid": "9f8e7d6c-0000-4000-8000-000000010102",
+      "uuidShort": "not-hex!",
+      "node_id": 2,
+      "name": "Sky Factory",
+      "description": null,
+      "status": "crashed",
+      "skip_scripts": 1,
+      "owner_id": 2,
+      "memory": 8192,
+      "swap": -1,
+      "disk": 40000,
+      "io": 2000,
+      "cpu": 0,
+      "threads": "bad-spec",
+      "oom_disabled": 1,
+      "allocation_id": 1002,
+      "egg_id": 5,
+      "startup": null,
+      "image": null,
+      "allocation_limit": null,
+      "database_limit": null,
+      "backup_limit": null,
+      "installed_at": null,
+      "created_at": "2024-03-15 10:00:00",
+      "updated_at": "2024-04-01 09:45:00"
+    },
+    {
+      "id": 103,
+      "external_id": null,
+      "uuid": "11111111-0000-4000-8000-000000010103",
+      "uuidShort": "11111111",
+      "node_id": 1,
+      "name": "Rejected Egg Server",
+      "description": null,
+      "status": null,
+      "skip_scripts": 0,
+      "owner_id": 2,
+      "memory": 1024,
+      "swap": 0,
+      "disk": 5000,
+      "io": 100,
+      "cpu": 100,
+      "threads": null,
+      "oom_disabled": 0,
+      "allocation_id": 1003,
+      "egg_id": 6,
+      "startup": "./run",
+      "image": "ghcr.io/yolks:alpine",
+      "allocation_limit": null,
+      "database_limit": null,
+      "backup_limit": 0,
+      "installed_at": null,
+      "created_at": "2024-03-20 10:00:00",
+      "updated_at": "2024-03-20 10:00:00"
+    }
+  ],
+  "allocations": [
+    { "id": 1001, "node_id": 1, "ip": "192.0.2.10", "port": 25565, "server_id": 101, "notes": "primary" },
+    { "id": 1002, "node_id": 2, "ip": "198.51.100.7", "port": 25566, "server_id": 102, "notes": null },
+    { "id": 1003, "node_id": 1, "ip": "192.0.2.10", "port": 25567, "server_id": 103, "notes": null },
+    { "id": 1004, "node_id": 1, "ip": "203.0.113.99", "port": 25568, "server_id": null, "notes": "spare" }
+  ],
+  "server_variables": [
+    { "id": 900, "server_id": 101, "variable_id": 51, "variable_value": "paper.jar" },
+    { "id": 901, "server_id": 101, "variable_id": 52, "variable_value": "1.20.1" },
+    { "id": 902, "server_id": 103, "variable_id": 51, "variable_value": "x.jar" }
+  ],
+  "subusers": [
+    {
+      "id": 700,
+      "user_id": 2,
+      "server_id": 101,
+      "permissions": ["control.start", "control.stop", "websocket.connect", "schedule.read", "turbo.mode"]
+    },
+    {
+      "id": 701,
+      "user_id": 2,
+      "server_id": 102,
+      "permissions": ["*"]
+    },
+    {
+      "id": 702,
+      "user_id": 1,
+      "server_id": 103,
+      "permissions": []
+    }
+  ],
+  "schedules": [
+    {
+      "id": 300,
+      "server_id": 101,
+      "name": "Nightly restart",
+      "cron_minute": "0",
+      "cron_hour": "4",
+      "cron_day_of_month": "*",
+      "cron_month": "*",
+      "cron_day_of_week": "*",
+      "is_active": 1,
+      "only_when_online": 1,
+      "last_run_at": "2024-04-29 04:00:00",
+      "next_run_at": "2024-04-30 04:00:00"
+    },
+    {
+      "id": 310,
+      "server_id": 103,
+      "name": "Nothing",
+      "cron_minute": "*",
+      "cron_hour": "*",
+      "cron_day_of_month": "*",
+      "cron_month": "*",
+      "cron_day_of_week": "*",
+      "is_active": 0,
+      "only_when_online": 0,
+      "last_run_at": null,
+      "next_run_at": null
+    }
+  ],
+  "schedule_tasks": [
+    { "id": 301, "schedule_id": 300, "sequence_id": 0, "action": "power", "payload": "restart", "time_offset": 0, "continue_on_failure": 0 },
+    { "id": 302, "schedule_id": 300, "sequence_id": 1, "action": "send_command", "payload": "say Restarting in 5 minutes", "time_offset": 30, "continue_on_failure": 0 },
+    { "id": 311, "schedule_id": 310, "sequence_id": 0, "action": "power", "payload": "stop", "time_offset": 0, "continue_on_failure": 0 }
+  ],
+  "backups": [
+    {
+      "id": 500,
+      "server_id": 101,
+      "uuid": "b0000000-1111-4222-8333-000000000501",
+      "is_successful": 1,
+      "is_locked": 1,
+      "name": "Nightly",
+      "checksum": "1111111111111111111111111111111111111111111111111111111111111111",
+      "bytes": 1048576,
+      "completed_at": "2024-04-29 02:00:00",
+      "deleted_at": null,
+      "created_at": "2024-04-29 01:55:00"
+    },
+    {
+      "id": 501,
+      "server_id": 101,
+      "uuid": "b0000000-1111-4222-8333-000000000502",
+      "is_successful": 0,
+      "is_locked": 0,
+      "name": "Failed nightly",
+      "checksum": null,
+      "bytes": 512,
+      "completed_at": "2024-04-30 02:00:00",
+      "deleted_at": null,
+      "created_at": "2024-04-30 01:55:00"
+    },
+    {
+      "id": 502,
+      "server_id": 101,
+      "uuid": "b0000000-1111-4222-8333-000000000503",
+      "is_successful": 1,
+      "is_locked": 0,
+      "name": "Deleted",
+      "checksum": null,
+      "bytes": 10,
+      "completed_at": "2024-04-01 02:00:00",
+      "deleted_at": "2024-04-02 09:00:00",
+      "created_at": "2024-04-01 01:55:00"
+    }
+  ],
+  "activity_logs": [
+    {
+      "id": 600,
+      "event": "server:power.start",
+      "ip": "203.0.113.50",
+      "description": null,
+      "actor_type": "user",
+      "actor_id": 1,
+      "properties": { "power": "start" },
+      "timestamp": "2024-04-28 19:30:00"
+    },
+    {
+      "id": 601,
+      "event": "server:file.download",
+      "ip": "203.0.113.51",
+      "description": "world_backup.zip",
+      "actor_type": "user",
+      "actor_id": 2,
+      "properties": "legacy junk that is not json",
+      "timestamp": "2024-04-28 20:00:00"
+    },
+    {
+      "id": 602,
+      "event": "user:login",
+      "ip": "198.51.100.9",
+      "description": null,
+      "actor_type": "user",
+      "actor_id": 99,
+      "properties": { "successful": true },
+      "timestamp": "2024-04-28 09:00:00"
+    },
+    {
+      "id": 603,
+      "event": "auth:ip-blocked",
+      "ip": "10.0.0.9",
+      "description": "too many attempts",
+      "actor_type": null,
+      "actor_id": null,
+      "properties": null,
+      "timestamp": "2024-04-29 03:00:00"
+    }
+  ],
+  "activity_log_subjects": [
+    { "activity_log_id": 600, "subject_type": "server", "subject_id": 101 },
+    { "activity_log_id": 601, "subject_type": "App\\Models\\Server", "subject_id": 101 },
+    { "activity_log_id": 603, "subject_type": "user", "subject_id": 99 }
+  ],
+  "server_transfers": [
+    {
+      "id": 800,
+      "server_id": 101,
+      "old_node": 1,
+      "new_node": 2,
+      "successful": 1,
+      "created_at": "2024-02-10 14:00:00"
+    },
+    {
+      "id": 801,
+      "server_id": 101,
+      "old_node": 2,
+      "new_node": 1,
+      "successful": null,
+      "created_at": "2024-04-20 16:30:00"
+    }
+  ],
+  "databases": [
+    { "id": 1, "server_id": 101, "database": "survival" },
+    { "id": 2, "server_id": 101, "database": "survival_auth" }
+  ],
+  "api_keys": [
+    { "id": 1, "user_id": 1, "abilities": ["*"] }
+  ],
+  "settings": [
+    { "key": "APP_URL", "value": "https://panel.example" },
+    { "key": "PTERODACTYL_TELEMETRY", "value": "false" },
+    { "key": "UNKNOWN_THING", "value": "1" }
+  ]
+}

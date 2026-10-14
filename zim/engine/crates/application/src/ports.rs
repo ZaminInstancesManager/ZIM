@@ -24,8 +24,8 @@
 
 use zim_engine_domain::{
     Allocation, AuditRecord, Backup, Egg, EggId, ExtensionRegistration, Instance, InstanceId,
-    InstanceStatus, Job, JobId, JobState, Node, NodeId, Permission, Schedule, ScheduleId, Transfer,
-    TransferId, User, UserId,
+    InstanceStatus, InstanceVariable, Job, JobId, JobState, Node, NodeId, Permission, Schedule,
+    ScheduleId, Transfer, TransferId, User, UserId,
 };
 
 /// Errors returned by [`Persistence`] implementations.
@@ -126,6 +126,51 @@ pub trait Persistence: Send + Sync {
         id: &InstanceId,
         status: InstanceStatus,
     ) -> Result<(), PersistenceError>;
+
+    // ── Instance variables (M10) ────────────────────────────────
+
+    /// Insert or replace the per-instance variable overrides for
+    /// one instance (upsert per env name; the migration importer's
+    /// `server_variables` target). An empty slice is a no-op.
+    fn put_instance_variables(
+        &self,
+        instance: &InstanceId,
+        variables: &[InstanceVariable],
+    ) -> Result<(), PersistenceError>;
+
+    /// The per-instance variable overrides for an instance,
+    /// ordered by env name (the env-resolution override layer:
+    /// these values win over the egg variable defaults).
+    fn list_instance_variables(
+        &self,
+        instance: &InstanceId,
+    ) -> Result<Vec<InstanceVariable>, PersistenceError>;
+
+    // ── Bulk import batching (M10) ──────────────────────────────
+
+    /// Begin an explicit transaction bracketing subsequent `put_*`
+    /// calls (offline bulk import only — the migration importer's
+    /// one-transaction-per-table batching per
+    /// `docs/compatibility/MIGRATION_AND_COMPATIBILITY.md` §2.4;
+    /// the engine's runtime paths never hold a transaction across
+    /// port calls).
+    fn begin_batch(&self) -> Result<(), PersistenceError>;
+
+    /// Commit the explicit transaction opened by
+    /// [`Persistence::begin_batch`].
+    fn commit_batch(&self) -> Result<(), PersistenceError>;
+
+    /// Roll back the explicit transaction opened by
+    /// [`Persistence::begin_batch`] (a failed table import leaves
+    /// no partial rows).
+    fn rollback_batch(&self) -> Result<(), PersistenceError>;
+
+    /// Toggle foreign-key enforcement for the duration of a bulk
+    /// import (off while tables are written in mapping order, on
+    /// again afterwards — the same bracket the migration runner
+    /// uses). Must not be called inside a transaction: SQLite
+    /// silently ignores the pragma mid-transaction.
+    fn set_import_foreign_keys(&self, enabled: bool) -> Result<(), PersistenceError>;
 
     // ── Nodes ───────────────────────────────────────────────────────
 
@@ -260,6 +305,11 @@ pub trait Persistence: Send + Sync {
         &self,
         id: &zim_engine_domain::BackupId,
     ) -> Result<Option<Backup>, PersistenceError>;
+
+    /// Fetch a backup by its UUID (import deduplication — the
+    /// Panel's backup identity, mirroring
+    /// [`Persistence::get_egg_by_legacy_uuid`]).
+    fn get_backup_by_uuid(&self, uuid: &str) -> Result<Option<Backup>, PersistenceError>;
 
     /// Delete a backup by id.
     fn delete_backup(&self, id: &zim_engine_domain::BackupId) -> Result<(), PersistenceError>;

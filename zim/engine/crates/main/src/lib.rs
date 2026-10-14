@@ -12,7 +12,9 @@
 //! HTTPS API until shutdown.
 //!
 //! The binary half (`main.rs`) parses arguments/environment and calls
-//! [`run`].
+//! [`run`] — except the offline `migrate` subcommand (M10), which
+//! dispatches straight to `zim_engine_migrate_pterodactyl::cli`
+//! before any engine wiring exists.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

@@ -758,3 +758,61 @@ async fn instances_without_an_allocation_install_with_placeholder_env() {
         .iter()
         .any(|(k, v)| k == "SERVER_PORT" && v == "0"));
 }
+
+#[tokio::test]
+async fn instance_variable_overrides_win_over_the_egg_defaults() {
+    // M10: the per-instance variable overrides (the migration
+    // importer's server_variables) layer over the egg's defaults in
+    // the install env — the override's value wins, and an orphaned
+    // override (a name the egg no longer declares) must not leak
+    // into the environment.
+    let bed = Testbed::new(vec![MockInstallRun::Run {
+        run_for: Duration::ZERO,
+        exit_code: 0,
+        output: "installing\n".to_owned(),
+    }])
+    .await;
+    let seeded = bed.seed().await;
+
+    // The panel-import shape: SERVER_JAR overridden, plus one
+    // orphaned name the egg does not declare.
+    bed.persistence
+        .put_instance_variables(
+            &seeded.instance.id,
+            &[
+                zim_engine_domain::InstanceVariable {
+                    env_name: "SERVER_JAR".to_owned(),
+                    value: "paper.jar".to_owned(),
+                },
+                zim_engine_domain::InstanceVariable {
+                    env_name: "PANEL_ORPHAN".to_owned(),
+                    value: "must-not-leak".to_owned(),
+                },
+            ],
+        )
+        .unwrap();
+
+    let job = bed
+        .installs
+        .initiate(seeded.instance.id, InstallOptions::default())
+        .await
+        .expect("initiation must be accepted");
+    bed.wait_for_job(job.id, JobState::Succeeded).await;
+
+    let specs = bed.runner.specs();
+    assert_eq!(specs.len(), 1);
+    let env = &specs[0].env;
+    // The override replaced the egg's default.
+    assert!(env
+        .iter()
+        .any(|(k, v)| k == "SERVER_JAR" && v == "paper.jar"));
+    assert!(!env
+        .iter()
+        .any(|(k, v)| k == "SERVER_JAR" && v == "server.jar"));
+    // The untouched default survives.
+    assert!(env
+        .iter()
+        .any(|(k, v)| k == "MINECRAFT_VERSION" && v == "1.20.4"));
+    // The orphaned override did not leak.
+    assert!(!env.iter().any(|(k, _)| k == "PANEL_ORPHAN"));
+}

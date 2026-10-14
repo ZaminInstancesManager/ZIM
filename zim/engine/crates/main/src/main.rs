@@ -1,15 +1,25 @@
 //! ZIM engine binary entrypoint.
 //!
-//! Minimal argument surface (full CLI arrives with the frontend
-//! milestone): `--data-dir DIR`, `--port N`; environment overrides
-//! via [`zim_engine_main::EngineOptions::from_env`]. Runs until
-//! SIGTERM / Ctrl-C.
+//! Argument surface: `--data-dir DIR`, `--port N` (environment
+//! overrides via [`zim_engine_main::EngineOptions::from_env`]); the
+//! offline `migrate` subcommand (M10) runs the Pterodactyl Panel
+//! importer and exits before the engine boots. Runs until SIGTERM /
+//! Ctrl-C.
 
 #![forbid(unsafe_code)]
 
 fn main() {
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+
+    // M10: the offline migration importer — no engine boot, no
+    // async runtime, exit with the importer's status.
+    if argv.first().map(String::as_str) == Some("migrate") {
+        let rest: Vec<String> = argv.into_iter().skip(1).collect();
+        std::process::exit(zim_engine_migrate_pterodactyl::cli::run_cli(&rest));
+    }
+
     let mut options = zim_engine_main::EngineOptions::default();
-    let mut args = std::env::args().skip(1);
+    let mut args = argv.into_iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--data-dir" => {
@@ -25,7 +35,10 @@ fn main() {
             "--help" | "-h" => {
                 println!(
                     "zim_engine — ZIM engine (Zamin Instances Manager)\n\n\
-                     Usage: zim_engine [--data-dir DIR] [--port N]\n\n\
+                     Usage: zim_engine [--data-dir DIR] [--port N]\n\
+                            zim_engine migrate pterodactyl \
+                             (--panel-mysql-dsn=DSN | --panel-fixture=PATH) \
+                             --zim-db=PATH [--dry-run]\n\n\
                      Environment: ZIM_DATA_DIR, ZIM_PORT, \
                      ZIM_BOOTSTRAP_ADMIN_EMAIL, ZIM_BOOTSTRAP_ADMIN_PASSWORD"
                 );

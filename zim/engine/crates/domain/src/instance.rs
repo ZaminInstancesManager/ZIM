@@ -114,6 +114,40 @@ impl Instance {
     }
 }
 
+/// One per-instance environment-variable override (M10).
+///
+/// The migration importer's `server_variables` target and the
+/// runtime's env-resolution override layer: the value wins over the
+/// egg variable's default when the instance's env is rendered (the
+/// install runner's script env, and the workload env at startup).
+///
+/// Keyed by env *name* rather than egg-variable id: egg re-imports
+/// replace the egg's variable rows wholesale (fresh ids per
+/// `put_egg`), so an id-keyed override would be silently dropped on
+/// every re-import; the env name is the stable vocabulary both the
+/// egg declarations and the rendered environment share. Overrides
+/// whose env name the egg no longer declares are ignored at render
+/// time (an orphaned override must not leak into the environment).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct InstanceVariable {
+    /// The environment variable name (the egg's declared
+    /// `env_name`; uppercase by the egg's convention).
+    pub env_name: String,
+    /// The override value (empty is legitimate — an explicitly
+    /// cleared variable).
+    pub value: String,
+}
+
+impl InstanceVariable {
+    /// Validate the structural invariant: a non-empty env name.
+    pub fn validate(&self) -> Result<(), InstanceError> {
+        if self.env_name.trim().is_empty() {
+            return Err(InstanceError::EmptyEnvName);
+        }
+        Ok(())
+    }
+}
+
 /// Resource limits for an instance.
 ///
 /// Units follow Wings: memory/swap/disk in bytes (panel UIs use MiB),
@@ -192,6 +226,9 @@ pub enum InstanceError {
     /// `io_weight` outside the 0 (unset) or 1–1000 range.
     #[error("io_weight {0} out of range; expected 0 (unset) or 1-1000")]
     IoWeightOutOfRange(u16),
+    /// A per-instance variable override has an empty env name.
+    #[error("instance variable env name must not be empty")]
+    EmptyEnvName,
     /// The CPU pinning spec is not a valid cpuset expression.
     #[error("malformed cpu thread spec {0:?}; expected e.g. \"0-3,8\"")]
     MalformedThreadSpec(String),
@@ -305,6 +342,29 @@ mod tests {
         assert_eq!(short.len(), 8);
         assert!(short.chars().all(|c| c.is_ascii_hexdigit()));
         assert!(long.replace('-', "").starts_with(&short));
+    }
+
+    #[test]
+    fn instance_variable_round_trips_through_serde() {
+        let variable = InstanceVariable {
+            env_name: "SERVER_JARFILE".to_owned(),
+            value: "server.jar".to_owned(),
+        };
+        let json = serde_json::to_string(&variable).unwrap();
+        let back: InstanceVariable = serde_json::from_str(&json).unwrap();
+        assert_eq!(variable, back);
+    }
+
+    #[test]
+    fn instance_variable_rejects_empty_env_names() {
+        let variable = InstanceVariable {
+            env_name: "  ".to_owned(),
+            value: String::new(),
+        };
+        assert!(matches!(
+            variable.validate(),
+            Err(InstanceError::EmptyEnvName)
+        ));
     }
 
     #[test]
