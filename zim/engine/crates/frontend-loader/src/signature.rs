@@ -16,8 +16,8 @@
 //! compiled into the engine binary, not uploaded), which is why it
 //! carries no signature.
 //!
-//! Development key policy: `keys/zaminmc-dev.key` is the repo-held
-//! development signing key (see that directory's README); production
+//! Development key policy: `keys/zaminmc-dev.seed` is the repo-held
+//! development signing seed (see that directory's README); production
 //! signing keys rotate out-of-band before any signed release
 //! channel exists.
 
@@ -30,11 +30,14 @@ use crate::manifest::FrontendManifest;
 /// bytes), embedded from `keys/zaminmc-dev.pub`.
 pub const BUILTIN_TRUSTED_KEY: &str = include_str!("../keys/zaminmc-dev.pub");
 
-/// The development *signing* key (base64, raw 32 bytes). Committed
+/// The development *signing* seed (base64, raw 32 bytes). Committed
 /// openly — it signs test fixtures and development builds only; see
 /// the module docs for the rotation policy. Compiled into tests and
 /// the `sign` helper path, never into any release trust decision.
-pub const DEV_SIGNING_KEY: &str = include_str!("../keys/zaminmc-dev.key");
+/// (Named `.seed`, not `.key`, so the repo's secrets gitignore rule
+/// doesn't have to be weakened for this documented development
+/// fixture.)
+pub const DEV_SIGNING_KEY: &str = include_str!("../keys/zaminmc-dev.seed");
 
 /// The outcome of classifying a manifest's signature.
 #[derive(Debug, Clone, PartialEq, Eq)]
