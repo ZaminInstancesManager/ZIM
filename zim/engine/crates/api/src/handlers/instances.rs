@@ -1940,12 +1940,43 @@ pub async fn unlock_backup(
     set_backup_lock(&state, caller, id, bid, false).await
 }
 
-/// `POST /instances/{id}/schedules/{sid}/run` — M9 (scheduler).
-pub async fn schedule_run_stub() -> Result<Response, ApiError> {
-    Err(ApiError::NotImplemented {
-        feature: "triggering a schedule immediately",
-        milestone: "M9 (scheduler)",
-    })
+/// `POST /instances/{id}/schedules/{sid}/run` — trigger a schedule
+/// immediately (spec §10.6; `schedule.run` grant): dispatches the
+/// actions now, respecting the `only_when_online` gate, and stamps
+/// `last_run_at`. The cron schedule itself is not disturbed.
+pub async fn schedule_run(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path((id, sid)): Path<(String, String)>,
+) -> Result<StatusCode, ApiError> {
+    let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
+    let schedule_id = parse_uuid::<ScheduleId>(&sid, "sid")?;
+    let (_instance, ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
+    check_grants(&ctx, &[PermissionGrant::ScheduleUpdate])?;
+
+    state
+        .scheduler
+        .run_now(schedule_id)
+        .await
+        .map_err(|e| match e {
+            zim_engine_scheduler::RunNowError::NotFound(_) => {
+                ApiError::not_found("schedule", sid.clone())
+            }
+            zim_engine_scheduler::RunNowError::InstanceOffline => ApiError::StateConflict(
+                "the schedule only fires while the instance is running, and it is not".to_owned(),
+            ),
+            other => ApiError::bad_request(other.to_string()),
+        })?;
+
+    audit(
+        &state,
+        Some(ctx.user_id.to_string()),
+        "schedule.run",
+        Some(instance_id),
+        serde_json::json!({ "schedule_id": schedule_id }),
+    )
+    .await;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Workload-kind-specific surface (§10.15) — M16+.

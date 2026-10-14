@@ -10,6 +10,7 @@
 
 pub mod audit;
 pub mod auth;
+pub mod eggs;
 pub mod instances;
 pub mod misc;
 pub mod nodes;

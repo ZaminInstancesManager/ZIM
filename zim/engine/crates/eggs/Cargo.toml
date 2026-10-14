@@ -14,5 +14,18 @@ name = "zim_engine_eggs"
 path = "src/lib.rs"
 
 [dependencies]
-zim_engine_application = { workspace = true }
+# The egg domain model (Egg + satellite types).
 zim_engine_domain = { workspace = true }
+# Image-reference parsing (startup templates carry no deps beyond
+# the domain's CommandTemplate).
+# (No application-layer dependency: the importer is pure
+# source-string -> Egg; persistence and API wiring compose it.)
+# Timestamps on the imported rows.
+chrono = { workspace = true }
+# Legacy egg JSON parsing (lenient, unknown-field tolerant).
+serde = { workspace = true }
+serde_json = { workspace = true }
+# The ZIM-native zim.toml format.
+toml = { workspace = true }
+# The importer's error surface.
+thiserror = { workspace = true }

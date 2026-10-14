@@ -14,5 +14,22 @@ name = "zim_engine_scheduler"
 path = "src/lib.rs"
 
 [dependencies]
+# The persistence port (schedule rows) + supervision's power queue
+# and console input (the dispatch targets).
 zim_engine_application = { workspace = true }
+# Schedule rows + actions.
 zim_engine_domain = { workspace = true }
+# 5-field cron expressions + next-fire computation.
+cron = { workspace = true }
+# Timestamps.
+chrono = { workspace = true }
+# The tick loop + the async persistence bridge.
+tokio = { workspace = true }
+# The error surface.
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# In-memory store for the integration tests.
+zim_engine_persistence_sqlite = { workspace = true }
+# The mock runtime testbed (power dispatch without Docker).
+zim_engine_application = { workspace = true, features = ["test-util"] }

@@ -80,6 +80,11 @@ zim_engine_migrate_pterodactyl = { path = "crates/migrate-pterodactyl" }
 # place; `cargo update -p <name>` bumps the lockfile entry.
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# M9: the ZIM-native egg/server-definition format (zim.toml).
+toml = "0.8"
+# M9: 5-field cron expression parsing + next-fire computation
+# (the scheduler crate; chrono-compatible).
+cron = "0.12"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 thiserror = "2.0"

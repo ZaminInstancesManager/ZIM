@@ -87,6 +87,10 @@ impl StreamEngine {
         );
         transfers.register().await;
         jobs.start();
+        // M9: the cron scheduler (parity with the production
+        // assembly; the loop is not started in these tests).
+        let scheduler =
+            zim_engine_scheduler::Scheduler::new(Arc::clone(&persistence), Arc::clone(&supervisor));
         let state = Arc::new(AppState::new(
             Arc::clone(&persistence),
             supervisor,
@@ -96,6 +100,7 @@ impl StreamEngine {
             Arc::clone(&jobs),
             Arc::clone(&backups),
             Arc::clone(&transfers),
+            Arc::clone(&scheduler),
             ApiConfig::default(),
         ));
         let router =

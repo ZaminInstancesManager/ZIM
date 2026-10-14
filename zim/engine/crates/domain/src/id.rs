@@ -99,6 +99,10 @@ uuid_id_type!(
     "Identifier for an Egg (Pterodactyl server definition)."
 );
 uuid_id_type!(
+    EggVariableId,
+    "Identifier for an EggVariable (one declared env var)."
+);
+uuid_id_type!(
     JobId,
     "Identifier for a durable Job (backup/transfer/install)."
 );

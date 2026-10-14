@@ -1,6 +1,6 @@
 //! Remaining endpoints: health, jobs reads (§10.8), extensions list
-//! (§10.12), and the 501 families for eggs (§10.11), frontend
-//! packages (§10.14), and workload integrations (§10.16).
+//! (§10.12), and the 501 families for frontend packages (§10.14)
+//! and workload integrations (§10.16).
 
 use std::sync::Arc;
 
@@ -180,16 +180,6 @@ pub async fn extension_install_stub() -> Result<Response, ApiError> {
     Err(ApiError::NotImplemented {
         feature: "extension install / uninstall / enable / disable / grant",
         milestone: "post-M11 (extension loader + signature verification)",
-    })
-}
-
-// ── Eggs (§10.11) ─────────────────────────────────────────────────
-
-/// The egg family — the egg model + importer land in M9.
-pub async fn egg_stub() -> Result<Response, ApiError> {
-    Err(ApiError::NotImplemented {
-        feature: "egg management (list, import, update, delete)",
-        milestone: "M9 (egg importer + scheduler)",
     })
 }
 

@@ -221,6 +221,14 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
     transfers.register().await;
     jobs.start();
 
+    // ── Cron scheduler (M9) ─────────────────────────────────────
+    // The per-instance schedule rows become executable here: the
+    // driver loop fires due schedules through the supervision
+    // module's power queue and console input.
+    let scheduler =
+        zim_engine_scheduler::Scheduler::new(Arc::clone(&persistence), Arc::clone(&supervisor));
+    scheduler.start();
+
     // ── Credential managers (in-memory by design; see auth crate) ─
     let sessions = Arc::new(SessionManager::new(Default::default()));
     let api_keys = Arc::new(ApiKeyManager::new());
@@ -237,6 +245,7 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         Arc::clone(&jobs),
         Arc::clone(&backups),
         Arc::clone(&transfers),
+        Arc::clone(&scheduler),
         ApiConfig::default(),
     ));
     let router = zim_engine_api::router(Arc::clone(&state));

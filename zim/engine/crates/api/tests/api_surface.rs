@@ -74,6 +74,9 @@ impl TestEngine {
         );
         transfers.register().await;
         jobs.start();
+        // M9: the cron scheduler (schedule firing + run-now).
+        let scheduler =
+            zim_engine_scheduler::Scheduler::new(Arc::clone(&persistence), Arc::clone(&supervisor));
         let state = Arc::new(AppState::new(
             Arc::clone(&persistence),
             supervisor,
@@ -83,6 +86,7 @@ impl TestEngine {
             Arc::clone(&jobs),
             Arc::clone(&backups),
             Arc::clone(&transfers),
+            Arc::clone(&scheduler),
             config,
         ));
         let router = zim_engine_api::router(Arc::clone(&state));
@@ -1046,7 +1050,7 @@ async fn instance_state_and_lifecycle() {
         .unwrap();
     assert_eq!(row.status, zim_engine_domain::InstanceStatus::Offline);
 
-    // Eggs are still M9.
+    // The egg listing is live since M9 (empty on a fresh engine).
     let response = engine
         .client
         .get(engine.url("/eggs"))
@@ -1054,7 +1058,9 @@ async fn instance_state_and_lifecycle() {
         .send()
         .await
         .unwrap();
-    assert_eq!(response.status(), 501);
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["data"].as_array().unwrap().len(), 0);
 }
 
 /// Lifecycle permission gates: the subuser grant model over the power
@@ -1539,7 +1545,9 @@ async fn schedule_crud_and_validation() {
     let body: Value = response.json().await.unwrap();
     assert_eq!(body["is_active"], false);
 
-    // "Run now" is the scheduler's business (M9).
+    // "Run now" is live since M9: the scheduler dispatches the
+    // actions immediately (this schedule's actions are ungated
+    // power ops on an offline instance — accepted, 204).
     let response = engine
         .client
         .post(engine.url(&format!("/instances/{id}/schedules/{sid}/run")))
@@ -1547,7 +1555,7 @@ async fn schedule_crud_and_validation() {
         .send()
         .await
         .unwrap();
-    assert_eq!(response.status(), 501);
+    assert_eq!(response.status(), 204);
 
     // Delete.
     let response = engine
@@ -2069,4 +2077,142 @@ fn hex_lower(bytes: &[u8]) -> String {
         out.push_str(&format!("{b:02x}"));
     }
     out
+}
+
+// ── Eggs (§10.11, M9) ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn eggs_import_list_get_and_delete() {
+    let engine = TestEngine::start().await;
+    engine.seed_user("admin@zim.local", "correct horse", true);
+    let session = login(&engine, "admin@zim.local", "correct horse")
+        .await
+        .unwrap();
+
+    // Import a bare legacy egg document.
+    let legacy = json!({
+        "meta": { "version": "PTDL_v1", "update_url": null },
+        "name": "API Egg",
+        "description": "Imported through the endpoint.",
+        "author": "admin@zim.local",
+        "features": ["eula"],
+        "docker_images": { "Java 21": "eclipse-temurin:21-jre" },
+        "startup": "java -jar {{SERVER_JARFILE}}",
+        "variables": [{
+            "name": "Jar",
+            "env_variable": "SERVER_JARFILE",
+            "default_value": "server.jar",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": ["required"]
+        }]
+    });
+    let response = engine
+        .client
+        .post(engine.url("/eggs"))
+        .header("cookie", format!("zim_session={session}"))
+        .json(&legacy)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201);
+    let body: Value = response.json().await.unwrap();
+    let egg = body["egg"].clone();
+    let egg_id = egg["id"].as_str().unwrap().to_owned();
+    assert_eq!(egg["name"], "API Egg");
+    assert_eq!(egg["variables"].as_array().unwrap().len(), 1);
+    assert_eq!(body["updated_existing"], false);
+
+    // The listing (any session) carries it.
+    let response = engine
+        .client
+        .get(engine.url("/eggs"))
+        .header("cookie", format!("zim_session={session}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["data"].as_array().unwrap().len(), 1);
+    assert_eq!(body["data"][0]["name"], "API Egg");
+
+    // The full definition from GET /eggs/{id}.
+    let response = engine
+        .client
+        .get(engine.url(&format!("/eggs/{egg_id}")))
+        .header("cookie", format!("zim_session={session}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["startup"], "java -jar {{SERVER_JARFILE}}");
+
+    // A re-import of the same legacy UUID updates in place (200).
+    let legacy_with_uuid = json!({
+        "meta": { "version": "PTDL_v1", "update_url": null },
+        "uuid": "6ba7b811-9dad-11d1-80b4-00c04fd430c9",
+        "name": "Dedup Egg v1",
+        "startup": "run",
+        "docker_images": { "default": "alpine:latest" },
+        "variables": []
+    });
+    let response = engine
+        .client
+        .post(engine.url("/eggs"))
+        .header("cookie", format!("zim_session={session}"))
+        .json(&legacy_with_uuid)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201);
+    let response = engine
+        .client
+        .post(engine.url("/eggs"))
+        .header("cookie", format!("zim_session={session}"))
+        .json(&json!({
+            "format": "legacy_json",
+            "source": serde_json::to_string(&legacy_with_uuid).unwrap(),
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["updated_existing"], true);
+
+    // A privileged egg is refused by default (409 conflict).
+    let privileged = json!({
+        "name": "Bad Egg",
+        "startup": "run",
+        "features": ["priviledged_install_scripts"],
+        "variables": []
+    });
+    let response = engine
+        .client
+        .post(engine.url("/eggs"))
+        .header("cookie", format!("zim_session={session}"))
+        .json(&privileged)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 409);
+
+    // Delete: no instances reference it, so it goes.
+    let response = engine
+        .client
+        .delete(engine.url(&format!("/eggs/{egg_id}")))
+        .header("cookie", format!("zim_session={session}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 204);
+    let response = engine
+        .client
+        .get(engine.url(&format!("/eggs/{egg_id}")))
+        .header("cookie", format!("zim_session={session}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 404);
 }

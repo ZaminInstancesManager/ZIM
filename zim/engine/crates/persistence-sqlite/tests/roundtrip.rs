@@ -689,8 +689,8 @@ fn port_trait_object_dispatch_works() {
     let node = sample_node("via-trait");
     port.put_node(&node).unwrap();
     assert_eq!(port.get_node(&node.id).unwrap().unwrap(), node);
-    // Migration 0002 (jobs.payload) is the current head.
-    assert_eq!(port.schema_version().unwrap(), 2);
+    // Migration 0003 (eggs) is the current head.
+    assert_eq!(port.schema_version().unwrap(), 3);
 }
 
 #[test]
@@ -728,4 +728,117 @@ fn create_allocation_assigns_fresh_autoincrement_ids() {
         dup,
         zim_engine_application::ports::PersistenceError::Backend(_)
     ));
+}
+
+// ── Eggs (M9) ─────────────────────────────────────────────────────
+
+#[test]
+fn egg_round_trips_with_variables_and_satellite_payloads() {
+    use zim_engine_domain::{
+        Egg, EggConfig, EggFeatures, EggImage, EggScript, EggScripts, EggVariable, EggVariableId,
+        FileParserRule, ParserKind, ReplaceRule, StopConfig,
+    };
+
+    let store = migrated_store();
+    let now = chrono::Utc::now();
+    let egg = Egg {
+        id: EggId::new(),
+        legacy_uuid: Some("6ba7b810-9dad-11d1-80b4-00c04fd430c9".to_owned()),
+        name: "Roundtrip Egg".to_owned(),
+        description: "Everything must survive the store.".to_owned(),
+        author: "zim@local".to_owned(),
+        images: vec![EggImage {
+            label: "Java 21".to_owned(),
+            image: "eclipse-temurin:21-jre".parse().unwrap(),
+        }],
+        startup: CommandTemplate::new("java -jar {{SERVER_JARFILE}}"),
+        features: EggFeatures {
+            eula: true,
+            privileged_install_scripts: false,
+            requires_root: false,
+        },
+        scripts: EggScripts {
+            install: Some(EggScript {
+                container: "debian:12-slim".parse().unwrap(),
+                entrypoint: "bash".to_owned(),
+                script: "#!/bin/bash\ntrue\n".to_owned(),
+            }),
+            update: None,
+        },
+        config: EggConfig {
+            files: vec![FileParserRule {
+                file: "server.properties".to_owned(),
+                parser: ParserKind::Properties,
+                replace: vec![ReplaceRule {
+                    r#match: "server-port".to_owned(),
+                    value: "{{SERVER_PORT}}".to_owned(),
+                }],
+            }],
+            startup_done: Some("Done!".to_owned()),
+            stop: Some(StopConfig {
+                command: "stop".to_owned(),
+                signal: false,
+            }),
+        },
+        variables: vec![EggVariable {
+            id: EggVariableId::new(),
+            env_name: "SERVER_JARFILE".to_owned(),
+            name: "Jar".to_owned(),
+            description: "Which jar".to_owned(),
+            default_value: "server.jar".to_owned(),
+            user_viewable: true,
+            user_editable: true,
+            rules: vec!["required".to_owned()],
+        }],
+        created_at: now,
+        updated_at: now,
+    };
+    egg.validate().unwrap();
+
+    store.put_egg(&egg).unwrap();
+    let read = store.get_egg(&egg.id).unwrap().expect("the egg row exists");
+    assert_eq!(read, egg);
+
+    // The legacy-UUID lookup agrees.
+    let by_uuid = store
+        .get_egg_by_legacy_uuid("6ba7b810-9dad-11d1-80b4-00c04fd430c9")
+        .unwrap()
+        .expect("the legacy-UUID lookup finds it");
+    assert_eq!(by_uuid.id, egg.id);
+
+    // The listing carries it (with variables attached).
+    let listed = store.list_eggs().unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].variables.len(), 1);
+
+    // A re-put with one fewer variable replaces the projection
+    // wholesale (no orphaned rows).
+    let mut trimmed = egg.clone();
+    trimmed.variables.clear();
+    trimmed.name = "Trimmed".to_owned();
+    store.put_egg(&trimmed).unwrap();
+    let read = store.get_egg(&egg.id).unwrap().unwrap();
+    assert_eq!(read.variables.len(), 0);
+    assert_eq!(read.name, "Trimmed");
+
+    // Deletion works while nothing references the egg.
+    store.delete_egg(&egg.id).unwrap();
+    assert!(store.get_egg(&egg.id).unwrap().is_none());
+    assert!(store.list_eggs().unwrap().is_empty());
+
+    // An instance referencing the egg blocks the delete (the FK is
+    // the backstop).
+    let node = sample_node("egg-fk");
+    store.put_node(&node).unwrap();
+    let user = sample_user("egg-owner@example.org");
+    store.put_user(&user).unwrap();
+    let allocation = sample_allocation(&node, 41000);
+    store.put_allocation(&allocation).unwrap();
+    let mut instance = sample_instance(&node, &user, &allocation);
+    instance.egg_id = egg.id;
+    store.put_instance(&instance).unwrap();
+    store.put_egg(&egg).unwrap();
+    let blockers = store.list_instances_by_egg(&egg.id).unwrap();
+    assert_eq!(blockers.len(), 1);
+    assert!(store.delete_egg(&egg.id).is_err());
 }

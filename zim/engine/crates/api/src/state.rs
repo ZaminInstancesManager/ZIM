@@ -10,6 +10,7 @@ use zim_engine_auth::{ApiKeyManager, SessionManager, TabTokenManager};
 use zim_engine_backups::BackupService;
 use zim_engine_domain::User;
 use zim_engine_jobs::JobSystem;
+use zim_engine_scheduler::Scheduler;
 use zim_engine_transfers::TransferService;
 
 use crate::config::ApiConfig;
@@ -104,6 +105,8 @@ pub struct AppState {
     /// The transfer service (M8.2): transfer initiation, cancel,
     /// and status reads.
     pub transfers: Arc<TransferService>,
+    /// The cron scheduler (M9): schedule firing + run-now.
+    pub scheduler: Arc<Scheduler>,
     /// Server configuration.
     pub config: ApiConfig,
 }
@@ -112,7 +115,7 @@ impl AppState {
     /// Assemble the state from its parts. The two limiters are
     /// constructed from `config`'s budgets.
     ///
-    /// (Nine parts is the honest composition surface — a builder
+    /// (Ten parts is the honest composition surface — a builder
     /// would hide which halves are optional; nothing here is.)
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -124,6 +127,7 @@ impl AppState {
         jobs: Arc<JobSystem>,
         backups: Arc<BackupService>,
         transfers: Arc<TransferService>,
+        scheduler: Arc<Scheduler>,
         config: ApiConfig,
     ) -> Self {
         Self {
@@ -141,6 +145,7 @@ impl AppState {
             jobs,
             backups,
             transfers,
+            scheduler,
             config,
         }
     }

@@ -23,9 +23,9 @@
 //! changing the domain layer.
 
 use zim_engine_domain::{
-    Allocation, AuditRecord, Backup, ExtensionRegistration, Instance, InstanceId, InstanceStatus,
-    Job, JobId, JobState, Node, NodeId, Permission, Schedule, ScheduleId, Transfer, TransferId,
-    User, UserId,
+    Allocation, AuditRecord, Backup, Egg, EggId, ExtensionRegistration, Instance, InstanceId,
+    InstanceStatus, Job, JobId, JobState, Node, NodeId, Permission, Schedule, ScheduleId, Transfer,
+    TransferId, User, UserId,
 };
 
 /// Errors returned by [`Persistence`] implementations.
@@ -300,6 +300,33 @@ pub trait Persistence: Send + Sync {
         &self,
         instance: &InstanceId,
     ) -> Result<Vec<Schedule>, PersistenceError>;
+
+    /// Every schedule, across instances (the scheduler's scan).
+    fn list_all_schedules(&self) -> Result<Vec<Schedule>, PersistenceError>;
+
+    // ── Eggs ───────────────────────────────────────────────────────
+
+    /// Insert or replace an egg (its variables are replaced
+    /// wholesale).
+    fn put_egg(&self, egg: &Egg) -> Result<(), PersistenceError>;
+
+    /// Fetch an egg by id.
+    fn get_egg(&self, id: &EggId) -> Result<Option<Egg>, PersistenceError>;
+
+    /// Fetch an egg by its legacy Pterodactyl UUID (import
+    /// deduplication).
+    fn get_egg_by_legacy_uuid(&self, uuid: &str) -> Result<Option<Egg>, PersistenceError>;
+
+    /// Every egg, ordered by name.
+    fn list_eggs(&self) -> Result<Vec<Egg>, PersistenceError>;
+
+    /// Delete an egg by id (refused while instances reference it;
+    /// callers that want the friendly error pre-check with
+    /// [`Persistence::list_instances_by_egg`]).
+    fn delete_egg(&self, id: &EggId) -> Result<(), PersistenceError>;
+
+    /// Every instance currently on an egg (the delete guard).
+    fn list_instances_by_egg(&self, egg: &EggId) -> Result<Vec<Instance>, PersistenceError>;
 
     // ── Audit (append-only) ─────────────────────────────────────────
 

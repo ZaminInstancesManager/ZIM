@@ -9,7 +9,7 @@ use axum::middleware::from_fn_with_state;
 use axum::routing::{delete, get, patch, post};
 use axum::Router;
 
-use crate::handlers::{audit, auth, instances, misc, nodes, stream, users};
+use crate::handlers::{audit, auth, eggs, instances, misc, nodes, stream, users};
 use crate::middleware;
 use crate::state::AppState;
 
@@ -131,7 +131,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route(
             "/instances/{id}/schedules/{sid}/run",
-            post(instances::schedule_run_stub),
+            post(instances::schedule_run),
         )
         .route(
             "/instances/{id}/backups",
@@ -211,12 +211,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/jobs/{id}", get(misc::get_job))
         .route("/jobs/{id}/cancel", post(misc::cancel_job))
         // ── Eggs (§10.11) ─────────────────────────────────────────
-        .route("/eggs", get(misc::egg_stub).post(misc::egg_stub))
+        .route("/eggs", get(eggs::list_eggs).post(eggs::import_egg))
         .route(
             "/eggs/{id}",
-            get(misc::egg_stub)
-                .patch(misc::egg_stub)
-                .delete(misc::egg_stub),
+            get(eggs::get_egg)
+                .patch(eggs::patch_egg)
+                .delete(eggs::delete_egg),
         )
         // ── Extensions (§10.12) ───────────────────────────────────
         .route(

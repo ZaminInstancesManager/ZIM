@@ -15,10 +15,10 @@ use crate::migrations;
 use rusqlite::params;
 use zim_engine_application::ports::{Persistence, PersistenceError};
 use zim_engine_domain::{
-    Allocation, AllocationId, AuditRecord, Backup, BackupId, CommandTemplate, ExtensionId,
-    ExtensionRegistration, ExtensionSignature, Instance, InstanceId, InstanceStatus, Job, JobId,
-    JobState, Node, NodeId, Permission, PermissionSet, Schedule, ScheduleId, Transfer, TransferId,
-    User, UserId,
+    Allocation, AllocationId, AuditRecord, Backup, BackupId, CommandTemplate, Egg, EggId,
+    EggVariable, ExtensionId, ExtensionRegistration, ExtensionSignature, Instance, InstanceId,
+    InstanceStatus, Job, JobId, JobState, Node, NodeId, Permission, PermissionSet, Schedule,
+    ScheduleId, Transfer, TransferId, User, UserId,
 };
 
 // ─── Error & conversion helpers ───────────────────────────────────────────
@@ -925,6 +925,172 @@ impl Persistence for crate::SqlitePersistence {
         })
     }
 
+    fn list_all_schedules(&self) -> Result<Vec<Schedule>, PersistenceError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, instance_id, name, cron, next_run_at, last_run_at, is_active,
+                            only_when_online, actions
+                     FROM schedules ORDER BY next_run_at, name",
+                )
+                .map_err(db_err)?;
+            let mut rows = stmt.query([]).map_err(db_err)?;
+            collect_rows(&mut rows, row_to_schedule)
+        })
+    }
+
+    // ── Eggs ───────────────────────────────────────────────────────
+
+    fn put_egg(&self, egg: &Egg) -> Result<(), PersistenceError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO eggs (
+                    id, legacy_uuid, name, description, author, images, startup, features,
+                    scripts, config, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                ON CONFLICT (id) DO UPDATE SET
+                    legacy_uuid = excluded.legacy_uuid,
+                    name = excluded.name,
+                    description = excluded.description,
+                    author = excluded.author,
+                    images = excluded.images,
+                    startup = excluded.startup,
+                    features = excluded.features,
+                    scripts = excluded.scripts,
+                    config = excluded.config,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at",
+                params![
+                    uuid_to_text(egg.id),
+                    egg.legacy_uuid,
+                    egg.name,
+                    egg.description,
+                    egg.author,
+                    ser(&egg.images)?,
+                    egg.startup.as_str(),
+                    ser(&egg.features)?,
+                    ser(&egg.scripts)?,
+                    ser(&egg.config)?,
+                    ts(&egg.created_at),
+                    ts(&egg.updated_at),
+                ],
+            )
+            .map_err(db_err)?;
+            // Variables are replaced wholesale (the egg row is the
+            // authority; the table is its indexed projection).
+            conn.execute(
+                "DELETE FROM egg_variables WHERE egg_id = ?1",
+                params![uuid_to_text(egg.id)],
+            )
+            .map_err(db_err)?;
+            for variable in &egg.variables {
+                conn.execute(
+                    "INSERT INTO egg_variables (
+                        id, egg_id, env_name, name, description, default_value,
+                        user_viewable, user_editable, rules
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![
+                        uuid_to_text(variable.id),
+                        uuid_to_text(egg.id),
+                        variable.env_name,
+                        variable.name,
+                        variable.description,
+                        variable.default_value,
+                        variable.user_viewable,
+                        variable.user_editable,
+                        ser(&variable.rules)?,
+                    ],
+                )
+                .map_err(db_err)?;
+            }
+            Ok(())
+        })
+    }
+
+    fn get_egg(&self, id: &EggId) -> Result<Option<Egg>, PersistenceError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, legacy_uuid, name, description, author, images, startup,
+                            features, scripts, config, created_at, updated_at
+                     FROM eggs WHERE id = ?1",
+                )
+                .map_err(db_err)?;
+            let mut rows = stmt.query(params![uuid_to_text(id)]).map_err(db_err)?;
+            let mut eggs = collect_rows(&mut rows, row_to_egg)?;
+            if let Some(egg) = eggs.first_mut() {
+                egg.variables = self.egg_variables_of(conn, egg.id)?;
+            }
+            Ok(eggs.pop())
+        })
+    }
+
+    fn get_egg_by_legacy_uuid(&self, uuid: &str) -> Result<Option<Egg>, PersistenceError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, legacy_uuid, name, description, author, images, startup,
+                            features, scripts, config, created_at, updated_at
+                     FROM eggs WHERE legacy_uuid = ?1",
+                )
+                .map_err(db_err)?;
+            let mut rows = stmt.query(params![uuid]).map_err(db_err)?;
+            let mut eggs = collect_rows(&mut rows, row_to_egg)?;
+            if let Some(egg) = eggs.first_mut() {
+                egg.variables = self.egg_variables_of(conn, egg.id)?;
+            }
+            Ok(eggs.pop())
+        })
+    }
+
+    fn list_eggs(&self) -> Result<Vec<Egg>, PersistenceError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, legacy_uuid, name, description, author, images, startup,
+                            features, scripts, config, created_at, updated_at
+                     FROM eggs ORDER BY name",
+                )
+                .map_err(db_err)?;
+            let mut rows = stmt.query([]).map_err(db_err)?;
+            let mut eggs = collect_rows(&mut rows, row_to_egg)?;
+            // Attach each egg's variables (the table join, in-place
+            // to keep the row codec simple).
+            for egg in &mut eggs {
+                egg.variables = self.egg_variables_of(conn, egg.id)?;
+            }
+            Ok(eggs)
+        })
+    }
+
+    fn delete_egg(&self, id: &EggId) -> Result<(), PersistenceError> {
+        self.with_conn(|conn| {
+            // Refuse while instances still reference the egg. The
+            // 0001 instances table predates the eggs table, so no FK
+            // exists to enforce this — the guard is explicit (the
+            // callers also pre-check, for the friendly error).
+            let referencing: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM instances WHERE egg_id = ?1",
+                    params![uuid_to_text(id)],
+                    |row| row.get(0),
+                )
+                .map_err(db_err)?;
+            if referencing > 0 {
+                return Err(PersistenceError::backend(format!(
+                    "the egg still backs {referencing} instance(s)"
+                )));
+            }
+            conn.execute("DELETE FROM eggs WHERE id = ?1", params![uuid_to_text(id)])
+                .map(|_| ())
+                .map_err(db_err)
+        })
+    }
+
+    fn list_instances_by_egg(&self, egg: &EggId) -> Result<Vec<Instance>, PersistenceError> {
+        self.list_instances_where("WHERE egg_id = ?1", params![uuid_to_text(egg)])
+    }
+
     // ── Audit (append-only) ─────────────────────────────────────────
 
     fn append_audit(&self, record: &AuditRecord) -> Result<u64, PersistenceError> {
@@ -1272,6 +1438,46 @@ fn row_to_schedule(row: &rusqlite::Row<'_>) -> Result<Schedule, PersistenceError
     })
 }
 
+fn row_to_egg(row: &rusqlite::Row<'_>) -> Result<Egg, PersistenceError> {
+    let legacy_uuid: Option<String> = row.get(1).map_err(db_err)?;
+    let images: String = row.get(5).map_err(db_err)?;
+    let startup: String = row.get(6).map_err(db_err)?;
+    let features: String = row.get(7).map_err(db_err)?;
+    let scripts: String = row.get(8).map_err(db_err)?;
+    let config: String = row.get(9).map_err(db_err)?;
+    let created_at: String = row.get(10).map_err(db_err)?;
+    let updated_at: String = row.get(11).map_err(db_err)?;
+    Ok(Egg {
+        id: uuid_from_text(&row.get::<_, String>(0).map_err(db_err)?, "egg")?.into(),
+        legacy_uuid,
+        name: row.get(2).map_err(db_err)?,
+        description: row.get(3).map_err(db_err)?,
+        author: row.get(4).map_err(db_err)?,
+        images: deser(&images)?,
+        startup: CommandTemplate::new(startup),
+        features: deser(&features)?,
+        scripts: deser(&scripts)?,
+        config: deser(&config)?,
+        variables: Vec::new(),
+        created_at: parse_ts(&created_at)?,
+        updated_at: parse_ts(&updated_at)?,
+    })
+}
+
+fn row_to_egg_variable(row: &rusqlite::Row<'_>) -> Result<EggVariable, PersistenceError> {
+    let rules: String = row.get(8).map_err(db_err)?;
+    Ok(EggVariable {
+        id: uuid_from_text(&row.get::<_, String>(0).map_err(db_err)?, "egg variable")?.into(),
+        env_name: row.get(2).map_err(db_err)?,
+        name: row.get(3).map_err(db_err)?,
+        description: row.get(4).map_err(db_err)?,
+        default_value: row.get(5).map_err(db_err)?,
+        user_viewable: row.get(6).map_err(db_err)?,
+        user_editable: row.get(7).map_err(db_err)?,
+        rules: deser(&rules)?,
+    })
+}
+
 fn row_to_audit(row: &rusqlite::Row<'_>) -> Result<AuditRecord, PersistenceError> {
     let timestamp: String = row.get(1).map_err(db_err)?;
     let instance_id: Option<String> = row.get(5).map_err(db_err)?;
@@ -1318,4 +1524,26 @@ fn row_to_extension(row: &rusqlite::Row<'_>) -> Result<ExtensionRegistration, Pe
             .map(deser::<ExtensionSignature>)
             .transpose()?,
     })
+}
+
+// ─── Inherent helpers (non-trait store internals) ──────────────────────────
+
+impl crate::SqlitePersistence {
+    /// An egg's variables, ordered by env name (the projection
+    /// half of [`Persistence::put_egg`]).
+    pub(crate) fn egg_variables_of(
+        &self,
+        conn: &rusqlite::Connection,
+        egg: EggId,
+    ) -> Result<Vec<EggVariable>, PersistenceError> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, egg_id, env_name, name, description, default_value,
+                        user_viewable, user_editable, rules
+                 FROM egg_variables WHERE egg_id = ?1 ORDER BY env_name",
+            )
+            .map_err(db_err)?;
+        let mut rows = stmt.query(params![uuid_to_text(egg)]).map_err(db_err)?;
+        collect_rows(&mut rows, row_to_egg_variable)
+    }
 }

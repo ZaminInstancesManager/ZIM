@@ -27,6 +27,10 @@ zim_engine_jobs = { workspace = true }
 zim_engine_backups = { workspace = true }
 # M8.2: the transfer service (the §10.9 transfer mutation family).
 zim_engine_transfers = { workspace = true }
+# M9: the egg importer (the §10.11 import endpoint) and the cron
+# scheduler (the §10.6 run-now endpoint + AppState wiring).
+zim_engine_eggs = { workspace = true }
+zim_engine_scheduler = { workspace = true }
 # Async runtime (listener, middleware, spawn_blocking bridge).
 tokio = { workspace = true }
 # HTTP framework: router, extractors, `from_fn` middleware, and

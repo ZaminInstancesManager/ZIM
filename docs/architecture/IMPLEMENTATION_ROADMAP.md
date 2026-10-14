@@ -479,6 +479,34 @@ local ship step). M8.3 (install jobs) follows.
 **Goal:** Implement the egg importer (legacy Pterodactyl JSON
 format → ZIM egg store) and the scheduler (per-instance cron).
 
+**Status:** Delivered (issue #7) — the egg importer and the
+scheduler. The `zim_engine_eggs` crate: the domain `Egg` model
+(labeled images, startup template, verbatim install/update
+scripts, per-file config parser rules incl. unknown-kinds
+preserved, variables with legacy validation rules), migration
+0003 (`eggs` + `egg_variables` tables; `delete_egg` refuses while
+instances reference the egg), the legacy PTDL_v1/v2 JSON importer
+(lenient: unknown fields/features surface as warnings; the
+double-encoded `config.files` string and the v1 single-image
+fallback both handled; unresolved startup placeholders warn), the
+ZIM-native `zim.toml` format in both directions (round-trip
+fidelity tested), and the security gates (`priviledged_install_scripts`
+/ `requires_root` rejected unless the admin explicitly opts in).
+The §10.11 egg API surface is live: `GET/POST /eggs`,
+`GET/PATCH/DELETE /eggs/{id}` (import deduplicates on the legacy
+UUID — a re-import updates in place). The `zim_engine_scheduler`
+crate: a driver loop feeding a deterministic `tick(now)` — 5-field
+cron (a zero-seconds field prepended onto the `cron` crate's
+6-field dialect), `next_run_at`/`last_run_at` walked forward,
+freshly-seen schedules never fire for past instants, missed
+instants coalesce into one fire, `only_when_online` gates on the
+supervisor's observed state, actions dispatch through the power
+queue and console input, and `POST /instances/{id}/schedules/{sid}/run`
+answers immediately (retiring the 501). The runtime config-rewriting
+module (the `beevik/etree` XML path) is deferred to the
+M17 workload-integration milestones — the parser rules are
+preserved, not yet applied.
+
 **Deliverables:**
 - `zim_engine_eggs` crate with the importer and the
   config-rewriting module (using `beevik/etree` equivalent in
