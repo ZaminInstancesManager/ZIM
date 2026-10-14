@@ -1042,12 +1042,24 @@ async fn instance_state_and_lifecycle() {
     assert_eq!(body["status"], "offline");
     assert_eq!(body["observed"]["state"], "offline");
 
-    // The persisted row followed the observation.
-    let row = engine
-        .persistence
-        .get_instance(&id.parse::<zim_engine_domain::InstanceId>().unwrap())
-        .unwrap()
-        .unwrap();
+    // The persisted row follows the observation asynchronously (the
+    // power worker's row write lags the observed-state flip by a
+    // task boundary) — poll it too, same deadline.
+    let instance_id = id.parse::<zim_engine_domain::InstanceId>().unwrap();
+    let row_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let row = loop {
+        let row = engine
+            .persistence
+            .get_instance(&instance_id)
+            .unwrap()
+            .unwrap();
+        if row.status == zim_engine_domain::InstanceStatus::Offline
+            || std::time::Instant::now() > row_deadline
+        {
+            break row;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    };
     assert_eq!(row.status, zim_engine_domain::InstanceStatus::Offline);
 
     // The egg listing is live since M9 (empty on a fresh engine).
