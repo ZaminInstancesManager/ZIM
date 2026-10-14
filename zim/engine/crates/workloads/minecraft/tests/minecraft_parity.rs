@@ -187,6 +187,8 @@ fn fakemc_config(name: &str, image: &str) -> (InstanceConfig, std::path::PathBuf
         container_data_dir: std::path::PathBuf::from("/home/container"),
         labels: vec![("Service".to_owned(), "ZIM".to_owned())],
         crash_detection_enabled: true,
+        user: None,
+        readonly_rootfs: None,
     };
     (config, data_dir)
 }

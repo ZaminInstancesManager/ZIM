@@ -107,6 +107,8 @@ mod tests {
                 container_data_dir: std::path::PathBuf::from("/home/container"),
                 labels: Vec::new(),
                 crash_detection_enabled: true,
+                user: None,
+                readonly_rootfs: None,
             })
             .await
             .unwrap();

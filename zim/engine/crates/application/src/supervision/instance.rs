@@ -987,6 +987,13 @@ pub fn build_instance_config(
             ("ZIM.InstanceId".to_owned(), instance.id.to_string()),
         ],
         crash_detection_enabled: instance.crash_detection_enabled,
+        // M18's spec-driven per-instance overrides: the persisted
+        // row has no user/rootfs posture of its own yet (the
+        // workload spec carries it); the database integrations fill
+        // these when they build their own configs, and the
+        // spec-less game-server path keeps the runtime defaults.
+        user: None,
+        readonly_rootfs: None,
     })
 }
 

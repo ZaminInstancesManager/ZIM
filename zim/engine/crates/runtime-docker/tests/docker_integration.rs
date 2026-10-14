@@ -94,6 +94,8 @@ fn busybox_config(
         container_data_dir: std::path::PathBuf::from("/home/container"),
         labels: vec![("Service".to_owned(), "ZIM".to_owned())],
         crash_detection_enabled: true,
+        user: None,
+        readonly_rootfs: None,
     };
     (config, data_dir)
 }
@@ -792,6 +794,8 @@ async fn supervisor_reconcile_over_docker() {
             container_data_dir: std::path::PathBuf::from("/home/container"),
             labels: Vec::new(),
             crash_detection_enabled: true,
+            user: None,
+            readonly_rootfs: None,
         })
         .await
         .expect("runtime");
@@ -813,6 +817,8 @@ async fn supervisor_reconcile_over_docker() {
             container_data_dir: std::path::PathBuf::from("/home/container"),
             labels: Vec::new(),
             crash_detection_enabled: true,
+            user: None,
+            readonly_rootfs: None,
         })
         .await
         .expect("bootstrap start");
@@ -1293,6 +1299,8 @@ async fn backup_and_restore_of_container_data() {
         container_data_dir: std::path::PathBuf::from("/home/container"),
         labels: vec![("Service".to_owned(), "ZIM".to_owned())],
         crash_detection_enabled: false,
+        user: None,
+        readonly_rootfs: None,
     };
     let factory = Arc::new(
         DockerRuntimeFactory::connect(test_settings())

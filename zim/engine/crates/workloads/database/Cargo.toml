@@ -19,3 +19,35 @@ zim_engine_domain = { workspace = true }
 # The integration SDK (trait + manifest + the declaration macro,
 # re-exported).
 zim_engine_workloads_sdk = { workspace = true }
+# The runtime abstraction the workload handle bridges (Runtime,
+# InstanceConfig, ExecCommand, ResourceUsage).
+zim_engine_application = { workspace = true }
+# The Wings-parity file API (the FilesystemCapable implementation's
+# engine, and the snapshot family's archive/extract surface).
+zim_engine_files = { workspace = true }
+# Spec (de)serialization.
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Migration checkpoint markers.
+chrono = { workspace = true }
+# The handle's sync→async bridge (a runtime Handle carried per
+# workload; capability calls block on it from worker threads).
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
+
+[dev-dependencies]
+# The Docker runtime factory + adapter the parity tests drive.
+zim_engine_runtime_docker = { workspace = true }
+# The docker client (the parity suite's container inspection for
+# the network-endpoint acceptance).
+bollard = { workspace = true }
+# Unique container names and temp data dirs per test run.
+uuid = { workspace = true }
+# The parity tests run on a multi-thread runtime (the spawn_blocking
+# ↔ Handle::block_on bridge requires workers to drive IO/timers
+# while a blocking thread awaits a capability call).
+tokio = { workspace = true, features = [
+    "rt-multi-thread",
+    "macros",
+    "time",
+    "sync",
+] }

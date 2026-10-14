@@ -3047,7 +3047,16 @@ dependencies = [
 name = "zim_engine_workloads_database"
 version = "0.0.1"
 dependencies = [
+ "bollard",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+ "zim_engine_application",
  "zim_engine_domain",
+ "zim_engine_files",
+ "zim_engine_runtime_docker",
  "zim_engine_workloads_sdk",
 ]
 

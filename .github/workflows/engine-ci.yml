@@ -99,7 +99,18 @@ jobs:
     # over the bind mount, exec/metrics, backup create/restore, and
     # the migration quiesce/relaunch family (all self-skipping the
     # same way without a daemon).
-    name: Docker integration (runtime-docker + minecraft)
+    #
+    # M18: the Database integration's parity suite joins — the
+    # real official images (postgres:16-alpine, mariadb:11,
+    # mysql:8.4, redis:7-alpine; the runtime pulls them on first
+    # use): install/start/query/snapshot/restore, the recovery
+    # readiness window, the second-node migration, the lock-held
+    # FTWRL snapshot, the mysqlx multi-endpoint surface, and the
+    # BGSAVE/RDB lifecycle. The database engines' first boots are
+    # minutes-scale (initdb / mariadb-install-db / mysqld
+    # --initialize), so this job runs longer than the rest — by
+    # design, not by accident.
+    name: Docker integration (runtime-docker + minecraft + database)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -134,6 +145,12 @@ jobs:
         # base + the Minecraft console-contract script); busybox is
         # already local after the runtime suite's own pull.
         run: cargo test -p zim_engine_workloads_minecraft --all-targets
+
+      - name: cargo test -p zim_engine_workloads_database
+        # The §M18 parity suite: the real Postgres / MariaDB / MySQL /
+        # Redis containers (pulled by the runtime on first use — the
+        # images land in the job's Docker cache together).
+        run: cargo test -p zim_engine_workloads_database --all-targets
 
       - name: cargo test -p zim_engine_files
         # The file API's §2.6/§2.7 attack suite is pure host-filesystem

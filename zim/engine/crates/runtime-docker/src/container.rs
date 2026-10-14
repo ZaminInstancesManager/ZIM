@@ -322,7 +322,6 @@ fn build_create_body(
         port_bindings: Some(port_bindings),
         cap_drop: Some(DOCKER_CAP_DROP.iter().map(|s| s.to_string()).collect()),
         security_opt: Some(vec!["no-new-privileges".to_owned()]),
-        readonly_rootfs: Some(true),
         network_mode: Some(settings.network_name.clone()),
         log_config: Some(HostConfigLogConfig {
             typ: Some("json-file".to_owned()),
@@ -331,12 +330,25 @@ fn build_create_body(
                 settings.log_max_size.clone(),
             )])),
         }),
+        // M18: the per-instance rootfs posture — `None` keeps the
+        // engine's hardened read-only default; the spec-driven
+        // database images that must write their runtime dirs
+        // (MySQL/MariaDB's /run/mysqld) carry `Some(false)`.
+        readonly_rootfs: Some(cfg.readonly_rootfs.unwrap_or(true)),
         ..Default::default()
     };
 
     ContainerCreateBody {
         hostname: Some(cfg.hostname.clone()),
-        user: Some(settings.container_user.clone()),
+        // M18: the per-instance container user — `None` keeps the
+        // Wings `988:988` posture; the managed-database images
+        // carry their root-entrypoint user so their entrypoints can
+        // chown the bind-mounted data directory before
+        // self-demoting.
+        user: cfg
+            .user
+            .clone()
+            .or_else(|| Some(settings.container_user.clone())),
         attach_stdin: Some(true),
         attach_stdout: Some(true),
         attach_stderr: Some(true),
@@ -517,6 +529,8 @@ mod tests {
             container_data_dir: PathBuf::from("/home/container"),
             labels: vec![("Service".to_owned(), "ZIM".to_owned())],
             crash_detection_enabled: true,
+            user: None,
+            readonly_rootfs: None,
         }
     }
 
@@ -572,6 +586,32 @@ mod tests {
             .as_ref()
             .unwrap()
             .contains_key("25565/tcp"));
+    }
+
+    #[test]
+    fn per_instance_user_and_rootfs_overrides_win() {
+        // M18: the spec-driven database posture — a root-entrypoint
+        // user and a writable rootfs — overrides the Wings defaults
+        // exactly when the instance config carries them.
+        let settings = DockerSettings::default();
+        let mut cfg = test_config();
+        cfg.user = Some("0:0".to_owned());
+        cfg.readonly_rootfs = Some(false);
+        let body = build_create_body(&cfg, &settings, None);
+        assert_eq!(body.user.as_deref(), Some("0:0"));
+        assert_eq!(
+            body.host_config.as_ref().unwrap().readonly_rootfs,
+            Some(false)
+        );
+
+        // The unset posture keeps the engine defaults (the
+        // game-server path is unchanged by M18).
+        let body = build_create_body(&test_config(), &settings, None);
+        assert_eq!(body.user.as_deref(), Some("988:988"));
+        assert_eq!(
+            body.host_config.as_ref().unwrap().readonly_rootfs,
+            Some(true)
+        );
     }
 
     #[test]

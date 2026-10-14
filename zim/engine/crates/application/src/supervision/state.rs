@@ -202,6 +202,30 @@ pub struct InstanceConfig {
     pub labels: Vec<(String, String)>,
     /// Whether crash detection is enabled for this instance.
     pub crash_detection_enabled: bool,
+    /// Per-instance container-user override (`uid:gid` or name);
+    /// `None` keeps the runtime's global default (the Wings
+    /// `988:988` posture).
+    ///
+    /// The managed-database images (M18) are the motivating case:
+    /// their entrypoints must start as root to `chown` the bind
+    /// mounted data directory before self-demoting to the engine's
+    /// own unprivileged user — a `988:988` start fails inside
+    /// `initdb`/`mariadb-install-db` before any service comes up.
+    /// The override is spec-driven (the `DatabaseSpec` carries it
+    /// per engine); game-server workloads leave it unset.
+    pub user: Option<String>,
+    /// Per-instance read-only-rootfs override; `None` keeps the
+    /// engine's hardened default (`true`).
+    ///
+    /// `Some(false)` grants a writable container root filesystem —
+    /// the MySQL/MariaDB images write their runtime socket under
+    /// `/run/mysqld` during first-boot initialization, which a
+    /// read-only rootfs forbids. Postgres (socket overridden into
+    /// the `/tmp` tmpfs) and Redis (writes only the bind-mounted
+    /// data directory) keep the read-only posture; the database
+    /// integration's engine table records which engines need the
+    /// escape hatch.
+    pub readonly_rootfs: Option<bool>,
 }
 
 /// A one-shot command execution request (the `exec` capability;
