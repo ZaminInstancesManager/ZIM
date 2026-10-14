@@ -61,17 +61,6 @@ fn test_settings() -> DockerSettings {
     }
 }
 
-/// Test settings whose containers run as root: the M8.1 backup test
-/// has the container write into its bind-mounted data directory,
-/// which the engine created host-side (owned by the test user — not
-/// writable by the wings-parity 988:988 container user).
-fn root_user_settings() -> DockerSettings {
-    DockerSettings {
-        container_user: "root".to_owned(),
-        ..test_settings()
-    }
-}
-
 /// A minimal busybox-sleep instance config.
 fn busybox_config(
     name: &str,
@@ -1263,6 +1252,15 @@ async fn backup_and_restore_of_container_data() {
         &test_settings().data_root,
         &instance.uuid_short,
     );
+    // The wings-parity container user (988:988, CAP_DAC_OVERRIDE
+    // dropped) cannot write into an engine-created dir owned by the
+    // test user — widen it, the way an operator prepares the data
+    // root for the container user.
+    std::fs::create_dir_all(&data_dir).unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&data_dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+    }
     let config = zim_engine_application::supervision::InstanceConfig {
         instance_id: instance.id,
         container_name: instance.uuid.clone(),
@@ -1283,7 +1281,7 @@ async fn backup_and_restore_of_container_data() {
         crash_detection_enabled: false,
     };
     let factory = Arc::new(
-        DockerRuntimeFactory::connect(root_user_settings())
+        DockerRuntimeFactory::connect(test_settings())
             .await
             .expect("factory"),
     );
