@@ -271,6 +271,13 @@ impl Supervisor {
                 supervised.persist_status_now().await;
                 report.observed_running += 1;
                 supervised.arm_monitor_now();
+                // The adopted container's post-boot console output
+                // streams too (M7.1): a fresh attach begins at
+                // adoption; output produced before this engine's
+                // attach is not retained (the hub's buffers are
+                // in-memory by design — see the streaming crate's
+                // retention docs).
+                supervised.arm_console_pump_now();
                 continue;
             }
 

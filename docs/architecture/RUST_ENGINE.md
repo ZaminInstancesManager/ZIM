@@ -604,6 +604,38 @@ dropped" notice. This is the explicit backpressure strategy — older
 console output is less valuable than newer, and dropping old is
 better than blocking the runtime.
 
+### The console attach pump (M7.1)
+
+Console output enters the stream through two cooperating pieces,
+split exactly along the §2 crate boundary:
+
+- **Runtime side** (`zim_engine_runtime_docker`): `Runtime::attach_console`
+  opens one bollard attach per *run* of the container (stdin + stdout +
+  stderr, live stream only). Its pump task re-segments the attach
+  frames on newline boundaries (TTY frames are not line-aligned),
+  decodes lossily, and forwards each line over a bounded channel —
+  the `ConsoleAttachment` the supervision layer receives. The attach's
+  stdin writer stays parked in the runtime so `Runtime::send_input`
+  writes through the *same* persistent attachment (a one-shot attach
+  would EOF the container's stdin when dropped).
+- **Supervision side** (`zim_engine_application::supervision`): a
+  per-instance console pump task (mirroring the crash monitor's
+  replace-slot semantics: armed when the target enters `Running`,
+  replaced on restart — no double-pumps) consumes the channel and
+  publishes each line onto the hub as an `instance.console_output`
+  event. Publishing is synchronous and bounded (the hub's
+  drop-oldest backpressure above), so the pump never blocks the
+  runtime. The pump ends — flushing the attachment's partial-line
+  tail — when the container's attach stream ends on exit.
+
+Lines keep their newline as received (a TTY's `\r\n` included); a
+target that dies mid-line has its unterminated tail flushed without
+one. Console input is newline-terminated by the runtime when the
+caller's payload is not (the API's `line` field is newline-free).
+A stopped or unattached target answers `RuntimeError::NotRunning`
+— the API's retryable `409 state_conflict`, not the pre-M7.1
+`501 not_implemented`.
+
 ## 7. Scheduling
 
 The scheduler module (`zim_engine_scheduler`) reproduces Pterodactyl's

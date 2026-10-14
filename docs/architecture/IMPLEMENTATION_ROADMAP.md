@@ -351,8 +351,7 @@ specified, with the scope decisions below recorded for reviewers.
   runtime (202s, grant gates incl. the elevated kill and suspend
   conflicts, observed_by supervisor, persisted-status follow).
 - Known simplifications, each documented at its implementation site:
-  console attach/send_input answer `Unsupported` until M7's
-  streaming attach; the M6 startup renderer substitutes only
+  the M6 startup renderer substitutes only
   `{{SERVER_MEMORY}}`/`{{SERVER_PORT}}`/`{{SERVER_IP}}` (the full
   egg-variable surface arrives with M9's egg importer); crash
   observation is poll-based (1s default) pending M7's event-driven
@@ -362,12 +361,28 @@ specified, with the scope decisions below recorded for reviewers.
   additive revision); non-admin owners now receive the implicit
   grant set (all but `AdminInstance`) in `load_instance_for_caller`
   — recorded as an M6 fix of an M5 gap (owners were "implicitly
-  authorized" in prose but held empty grant sets in code).
+  authorized" in prose but held empty grant sets in code). The
+  console simplification (attach/send_input answering `Unsupported`)
+  was retired by M7.1: the Docker runtime ships the attach pump and
+  stdin writer, the mock runtime an in-memory echo mode, and
+  `RuntimeError::NotRunning` the stopped-target vocabulary.
 
 ### M7: Streaming (console + metrics)
 
 **Goal:** Implement the streaming module with WebSocket fan-out,
 replay-from-checkpoint, and backpressure.
+
+**Status:** M7 (core) delivered — the hub, the `/api/v1/stream`
+WebSocket endpoint, replay, and backpressure; M7.1 (the follow-up
+issue #4) delivered the runtime side of the console pipe: the
+Docker adapter's bollard attach pump (decoded lossy-UTF-8 lines
+onto the hub, a persistent stdin writer for `send_input`, replace
+semantics mirroring the crash monitor's arm slot), the supervision
+layer's console pump (`instance.console_output` events in
+generation order, flush on exit, no double-pumps across restarts),
+the mock runtime's echo mode, and the retirement of the console
+input endpoint's 501 mapping (a stopped target now answers the
+retryable `409 state_conflict`).
 
 **Deliverables:**
 - `zim_engine_streaming` crate with `StreamSource`,

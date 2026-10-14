@@ -1182,17 +1182,18 @@ fn power_error(error: zim_engine_application::supervision::PowerError) -> ApiErr
 
 /// Map a console-input runtime failure onto the API vocabulary.
 ///
-/// `Unsupported` is the expected answer from runtimes without a
-/// persistent attachment stream (the Docker attach pump is the M7
-/// follow-up): the endpoint answers the spec's `501
-/// not_implemented` instead of failing as an internal error.
+/// M7.1 retired the `501 not_implemented` mapping: the Docker
+/// runtime maintains the persistent attachment, so no production
+/// runtime answers `Unsupported` for console input anymore. A
+/// stopped (unattached) target is a `409 state_conflict` — the
+/// request is retryable after a start; an unreachable backend stays
+/// the structured `503 runtime_unavailable`.
 fn runtime_input_error(error: zim_engine_application::supervision::RuntimeError) -> ApiError {
     use zim_engine_application::supervision::RuntimeError;
     match error {
-        RuntimeError::Unsupported { .. } => ApiError::NotImplemented {
-            feature: "console input",
-            milestone: "M7 follow-up (runtime attach)",
-        },
+        RuntimeError::NotRunning(message) => ApiError::StateConflict(format!(
+            "console input rejected: the instance is not running ({message})"
+        )),
         RuntimeError::Unavailable(message) => ApiError::RuntimeUnavailable { message },
         other => ApiError::internal(format!("console input failed: {other}")),
     }
@@ -1476,16 +1477,16 @@ pub async fn console(
 }
 
 /// `POST /instances/{id}/console/input` — send console input
-/// (M7 wiring; spec §10.3).
+/// (M7.1; spec §10.3).
 ///
 /// The request body is `{ "line": "say hello" }`; the line is
 /// validated against the §13 console-input length limit (64 KB)
-/// and forwarded to the runtime's `send_input`. Runtimes without a
-/// persistent attachment stream answer `501 not_implemented`
-/// (the Docker adapter's attach pump is the M7 follow-up tracked
-/// in the repository issues), so the endpoint's shape — auth,
-/// validation, and the structured error vocabulary — is already
-/// the final one.
+/// and forwarded to the runtime's `send_input`, which writes it
+/// through the persistent console attachment (newline-terminated:
+/// the TTY line discipline delivers on newline). The echoed line
+/// surfaces on the `instance.console_output` stream — see the
+/// `stream_ws` tests for the live path. A stopped instance answers
+/// `409 state_conflict` (retryable after a start).
 pub async fn console_input(
     State(state): State<Arc<AppState>>,
     Extension(caller): Extension<Caller>,
@@ -1519,8 +1520,8 @@ pub async fn console_input(
 
     // Wings-parity: console input goes straight to the attached
     // container's stdin (not through the power queue — input is not
-    // a lifecycle action). Runtimes without a persistent attachment
-    // stream answer the structured 501 below.
+    // a lifecycle action). A stopped target's structured answer is
+    // the 409 mapped below.
     let generation = state
         .supervisor
         .send_console_input(&instance_id, line.as_bytes())

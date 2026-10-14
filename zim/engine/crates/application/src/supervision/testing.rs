@@ -15,11 +15,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use tokio::sync::mpsc;
 
 use super::runtime::{Runtime, RuntimeFactory};
 use super::state::{
-    ExecCommand, ExecOutput, InstanceConfig, ObservedState, ResourceUsage, RuntimeError,
-    RuntimeKind,
+    ConsoleAttachment, ExecCommand, ExecOutput, InstanceConfig, ObservedState, ResourceUsage,
+    RuntimeError, RuntimeKind,
 };
 
 /// What one `start()` call does.
@@ -60,12 +61,22 @@ pub struct MockRuntime {
     max_active: Arc<AtomicUsize>,
     calls: Arc<Mutex<MockCalls>>,
     stop_latency: Duration,
+    /// Whether `start()` opens an in-memory console attachment whose
+    /// `send_input` echoes the line back (the live console path for
+    /// tests without a Docker daemon).
+    echo_console: bool,
 }
 
 struct MockCore {
     state: ObservedState,
     exit: (Option<i32>, bool),
     script: VecDeque<MockStart>,
+    /// The live console attachment's sending half (echo mode);
+    /// `None` while the mock is not running.
+    console_tx: Option<mpsc::Sender<String>>,
+    /// The pending receiving half of the current run's attachment,
+    /// taken by `attach_console` (one consumer per run).
+    console_rx: Option<mpsc::Receiver<String>>,
 }
 
 impl MockRuntime {
@@ -87,12 +98,28 @@ impl MockRuntime {
                 },
                 exit: (None, false),
                 script: script.into(),
+                console_tx: None,
+                console_rx: None,
             })),
             active: Arc::new(AtomicUsize::new(0)),
             max_active: Arc::new(AtomicUsize::new(0)),
             calls: Arc::new(Mutex::new(MockCalls::default())),
             stop_latency,
+            echo_console: false,
         }
+    }
+
+    /// Enable the in-memory echo console (M7.1): every `start()`
+    /// opens a console attachment, `attach_console` hands out its
+    /// receiving half, `send_input` echoes the line onto it, and
+    /// stop/kill close it (the consumer's stream ends after the
+    /// buffered lines drain — the flush semantics of a real
+    /// container exit). This is the `cat`-style echo container the
+    /// API and supervision tests use to cover the live console path
+    /// without a Docker daemon.
+    pub fn with_echo_console(mut self) -> Self {
+        self.echo_console = true;
+        self
     }
 
     /// A mock that starts successfully and runs forever.
@@ -191,6 +218,11 @@ impl Runtime for MockRuntime {
                         pid: Some(4242),
                     };
                     core.exit = (exit_code, oom_killed);
+                    if self.echo_console {
+                        let (tx, rx) = mpsc::channel(64);
+                        core.console_tx = Some(tx);
+                        core.console_rx = Some(rx);
+                    }
                 }
                 // The mock's "process": flips state to Offline after
                 // run_for (guarded by still-running so a later
@@ -217,6 +249,11 @@ impl Runtime for MockRuntime {
                     pid: Some(4242),
                 };
                 core.exit = (None, false);
+                if self.echo_console {
+                    let (tx, rx) = mpsc::channel(64);
+                    core.console_tx = Some(tx);
+                    core.console_rx = Some(rx);
+                }
                 Ok(())
             }
         };
@@ -240,6 +277,11 @@ impl Runtime for MockRuntime {
                 exit_code: core.exit.0,
                 oom_killed: core.exit.1,
             };
+            // The run's console attachment closes: dropping the
+            // sender ends the consumer's stream once the buffered
+            // lines drain (a real container exit does the same).
+            core.console_tx = None;
+            core.console_rx = None;
         }
         self.leave();
         self.complete("stop");
@@ -259,6 +301,8 @@ impl Runtime for MockRuntime {
                 oom_killed: core.exit.1,
             };
             core.exit.0 = core.exit.0.or(Some(137));
+            core.console_tx = None;
+            core.console_rx = None;
         }
         self.leave();
         self.complete("kill");
@@ -273,11 +317,56 @@ impl Runtime for MockRuntime {
         })
     }
 
-    async fn send_input(&self, _input: &[u8]) -> Result<(), RuntimeError> {
-        Err(RuntimeError::Unsupported {
-            feature: "console input".to_owned(),
-            milestone: "M7 (streaming)".to_owned(),
-        })
+    async fn attach_console(&self) -> Result<ConsoleAttachment, RuntimeError> {
+        let mut core = self.lock_core();
+        if !core.state.is_running() {
+            return Err(RuntimeError::NotRunning(
+                "mock runtime: console attach requires the running state".to_owned(),
+            ));
+        }
+        match core.console_rx.take() {
+            Some(lines) => Ok(ConsoleAttachment { lines }),
+            None => Err(RuntimeError::Backend(
+                "mock runtime: this run's console attachment is already consumed".to_owned(),
+            )),
+        }
+    }
+
+    async fn send_input(&self, input: &[u8]) -> Result<(), RuntimeError> {
+        if !self.echo_console {
+            return Err(RuntimeError::Unsupported {
+                feature: "console input".to_owned(),
+                milestone: "echo console not enabled on this mock".to_owned(),
+            });
+        }
+        // Clone the sender out of the lock: the bounded send below
+        // must never hold the core mutex across an await. A stop that
+        // lands in between simply ends the channel after this line
+        // drains — the flush semantics of a real container exit.
+        let sender = {
+            let core = self.lock_core();
+            if !core.state.is_running() {
+                return Err(RuntimeError::NotRunning(
+                    "mock runtime: console input requires the running state".to_owned(),
+                ));
+            }
+            core.console_tx.clone()
+        };
+        let Some(tx) = sender else {
+            return Err(RuntimeError::NotRunning(
+                "mock runtime: no live console attachment".to_owned(),
+            ));
+        };
+        // Line-oriented echo, mirroring the runtime contract: the
+        // line keeps a trailing newline (added when the caller's
+        // bytes do not end with one), decoded lossily.
+        let mut line = String::from_utf8_lossy(input).into_owned();
+        if !line.ends_with('\n') {
+            line.push('\n');
+        }
+        tx.send(line)
+            .await
+            .map_err(|_| RuntimeError::Backend("mock console closed".to_owned()))
     }
 
     async fn exit_state(&self) -> Result<(Option<i32>, bool), RuntimeError> {

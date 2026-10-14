@@ -1,4 +1,4 @@
-//! Docker integration tests (M6 acceptance).
+//! Docker integration tests (M6 acceptance + M7.1 console).
 //!
 //! These run against the *real* local Docker daemon and self-skip
 //! (printing a notice, exiting Ok) when none is reachable — the
@@ -10,7 +10,10 @@
 //! stop/observe Offline, crash detection with exit codes + OOM flag
 //! and crash-loop engagement, engine-restart reconciliation — plus
 //! the Wings-parity container spec (readonly rootfs, tmpfs, network
-//! attach, port bindings) and the exec/stats capabilities.
+//! attach, port bindings) and the exec/stats capabilities; and the
+//! §M7.1 acceptance criteria — the console attach pump's
+//! stdout-to-hub round trip, stdin-through-the-attachment input, and
+//! the console retention bounds under load.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -853,4 +856,360 @@ async fn supervisor_reconcile_over_docker() {
     supervisor.shutdown().await;
     remove_quietly(&docker, &adopted.uuid).await;
     remove_quietly(&docker, &restarted.uuid).await;
+}
+
+// ── M7.1: the console attach pump (stdout streaming + stdin) ─────
+
+/// §M7.1 direct-runtime acceptance: `attach_console` streams the
+/// container's stdout (newline-terminated, generation-ordered lines
+/// on the channel), `send_input` reaches the container's stdin, and
+/// a not-running target answers the structured `NotRunning` form.
+#[tokio::test]
+async fn console_attach_and_input_round_trip() {
+    let Some(docker) = docker_or_skip().await else {
+        return;
+    };
+    ensure_busybox(&docker).await;
+    let name = unique_name("zim-console-direct");
+    remove_quietly(&docker, &name).await;
+
+    let factory = Arc::new(
+        DockerRuntimeFactory::connect(test_settings())
+            .await
+            .expect("factory"),
+    );
+    let (config, _data_dir) = busybox_config(&name, vec!["cat".into()], 46120);
+    let runtime = factory.create(&config).await.expect("runtime");
+
+    // No container yet: both console surfaces answer NotRunning (the
+    // retryable state-conflict form, never a silent success).
+    let attach = runtime.attach_console().await;
+    assert!(
+        matches!(
+            attach,
+            Err(zim_engine_application::supervision::RuntimeError::NotRunning(_))
+        ),
+        "attach before start answers NotRunning, got {attach:?}"
+    );
+    let input = runtime.send_input(b"early\n").await;
+    assert!(
+        matches!(
+            input,
+            Err(zim_engine_application::supervision::RuntimeError::NotRunning(_))
+        ),
+        "input before start answers NotRunning, got {input:?}"
+    );
+
+    // The echo container: a TTY `cat` repeats its stdin on stdout.
+    runtime.start(&config).await.expect("start");
+    wait_until_running(runtime.as_ref()).await;
+
+    let mut lines = runtime.attach_console().await.expect("attach").lines;
+
+    // stdin reaches the container through the persistent attachment
+    // (newline-terminated by the runtime when the payload is not).
+    runtime.send_input(b"hello-from-zim").await.expect("input");
+
+    // The echoed line arrives on the channel within a generous
+    // deadline (a TTY echoes the input, and cat repeats it — at
+    // least one occurrence is the contract).
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let mut seen = false;
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_secs(2), lines.recv()).await {
+            Ok(Some(line)) => {
+                if line.contains("hello-from-zim") {
+                    seen = true;
+                    break;
+                }
+            }
+            Ok(None) => panic!("console stream ended before the echo arrived"),
+            Err(_) => continue, // keep waiting within the deadline
+        }
+    }
+    assert!(seen, "the container's stdout carries the input line");
+
+    // Graceful stop ends the stream (the flush path: recv drains to
+    // None instead of hanging).
+    runtime.stop(Duration::from_secs(10)).await.expect("stop");
+    let mut drained_end = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_secs(2), lines.recv()).await {
+            Ok(Some(_)) => continue,
+            Ok(None) => {
+                drained_end = true;
+                break;
+            }
+            Err(_) => continue,
+        }
+    }
+    assert!(
+        drained_end,
+        "the attach stream ends after the container exits"
+    );
+
+    // After the exit the attachment is gone: input answers
+    // NotRunning again (the pump detached the stdin writer).
+    let input = runtime.send_input(b"late\n").await;
+    assert!(
+        matches!(
+            input,
+            Err(zim_engine_application::supervision::RuntimeError::NotRunning(_))
+        ),
+        "input after exit answers NotRunning, got {input:?}"
+    );
+
+    remove_quietly(&docker, &name).await;
+}
+
+/// §M7.1 supervisor acceptance: the console pump publishes the
+/// running container's stdout onto the hub as
+/// `instance.console_output` events in generation order, and console
+/// input surfaces on the stream within a monitor tick.
+#[tokio::test]
+async fn console_pump_publishes_to_hub_through_supervisor() {
+    let Some(docker) = docker_or_skip().await else {
+        return;
+    };
+    ensure_busybox(&docker).await;
+
+    let store = seed_store();
+    let user = seed_user(store.as_ref());
+    let node = seed_node(store.as_ref());
+    // The echo container: `cat` repeats stdin on stdout.
+    let instance = seed_instance(store.as_ref(), &node, &user, 46121, "cat");
+    remove_quietly(&docker, &instance.uuid).await;
+
+    let factory = Arc::new(
+        DockerRuntimeFactory::connect(test_settings())
+            .await
+            .expect("factory"),
+    );
+    let supervisor = Supervisor::new(
+        Arc::clone(&store),
+        factory,
+        SupervisionPolicy {
+            crash: Default::default(),
+            monitor_poll_interval: Duration::from_millis(200),
+            stop_deadline: Duration::from_secs(10),
+            stream_metrics: false,
+        },
+        test_settings().data_root,
+    );
+    supervisor.load_local().await.expect("load");
+
+    supervisor
+        .request_power(&instance.id, PowerAction::Start)
+        .await
+        .expect("start accepted");
+    assert!(
+        soon(|| async {
+            supervisor
+                .observed(&instance.id)
+                .await
+                .map(|s| s.observed.is_running())
+                .unwrap_or(false)
+        })
+        .await
+    );
+
+    // Console input surfaces on the stream as an echoed console
+    // event (generation-ordered on the lane).
+    supervisor
+        .send_console_input(&instance.id, b"hello-through-hub")
+        .await
+        .expect("console input");
+    let hub_lines = || {
+        supervisor
+            .stream()
+            .console_buffer(instance.id)
+            .iter()
+            .map(|event| match &event.data {
+                zim_engine_streaming::EventData::ConsoleOutput { line } => line.clone(),
+                other => panic!("console lane carries console events only, got {other:?}"),
+            })
+            .collect::<Vec<String>>()
+    };
+    assert!(
+        soon(|| async { hub_lines().iter().any(|l| l.contains("hello-through-hub")) }).await,
+        "the echoed line reaches the hub's console lane"
+    );
+    {
+        let lines = hub_lines();
+        let matched: Vec<&String> = lines
+            .iter()
+            .filter(|l| l.contains("hello-through-hub"))
+            .collect();
+        assert!(
+            !matched.is_empty() && matched[0].ends_with('\n'),
+            "lines are newline-terminated"
+        );
+    }
+
+    // Graceful stop; the pump ends with the container (no hang, no
+    // leak into the next run — covered for restarts by the mock
+    // suite's replace-semantics test).
+    supervisor
+        .request_power(
+            &instance.id,
+            PowerAction::Stop {
+                deadline: Duration::from_secs(10),
+            },
+        )
+        .await
+        .expect("stop accepted");
+    assert!(
+        soon(|| async {
+            supervisor
+                .observed(&instance.id)
+                .await
+                .map(|s| matches!(s.observed, ObservedState::Offline { .. }))
+                .unwrap_or(false)
+        })
+        .await
+    );
+
+    supervisor.shutdown().await;
+    remove_quietly(&docker, &instance.uuid).await;
+}
+
+/// §M7.1 retention bounds under load: a container that emits far
+/// more than the retention window keeps the hub's console lane
+/// bounded (10k events / 1 MB defaults), evicting from the front and
+/// keeping the newest tail.
+#[tokio::test]
+async fn console_retention_bounds_under_load() {
+    let Some(docker) = docker_or_skip().await else {
+        return;
+    };
+    ensure_busybox(&docker).await;
+
+    let store = seed_store();
+    let user = seed_user(store.as_ref());
+    let node = seed_node(store.as_ref());
+    // 40k lines (~7 bytes each: well over the 10k-event bound, well
+    // under the 1 MB byte bound, so the event cap is the binding one).
+    let instance = seed_instance(store.as_ref(), &node, &user, 46122, "seq 1 40000");
+    remove_quietly(&docker, &instance.uuid).await;
+    // A one-shot workload: disable crash detection so the exit does
+    // not auto-restart (and re-emit) the whole sequence.
+    {
+        let mut row = store.get_instance(&instance.id).unwrap().unwrap();
+        row.crash_detection_enabled = false;
+        store.put_instance(&row).unwrap();
+    }
+
+    let factory = Arc::new(
+        DockerRuntimeFactory::connect(test_settings())
+            .await
+            .expect("factory"),
+    );
+    let supervisor = Supervisor::new(
+        Arc::clone(&store),
+        factory,
+        SupervisionPolicy {
+            crash: Default::default(),
+            monitor_poll_interval: Duration::from_millis(200),
+            stop_deadline: Duration::from_secs(10),
+            stream_metrics: false,
+        },
+        test_settings().data_root,
+    );
+    supervisor.load_local().await.expect("load");
+
+    supervisor
+        .request_power(&instance.id, PowerAction::Start)
+        .await
+        .expect("start accepted");
+
+    // Wait for the workload to finish and the pump to drain: the
+    // observed state settles Offline and the lane's generation stops
+    // advancing.
+    assert!(
+        soon(|| async {
+            supervisor
+                .observed(&instance.id)
+                .await
+                .map(|s| matches!(s.observed, ObservedState::Offline { .. }))
+                .unwrap_or(false)
+        })
+        .await
+    );
+    // Wait for the lane to settle: no new generation for ~600 ms
+    // after the last event (the pump has drained the whole stream).
+    let settle_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let mut last_generation = supervisor.stream().last_generation(instance.id);
+    let mut settled_since: Option<tokio::time::Instant> = None;
+    loop {
+        assert!(
+            tokio::time::Instant::now() < settle_deadline,
+            "the console lane settles after the workload exits"
+        );
+        let generation = supervisor.stream().last_generation(instance.id);
+        if generation == last_generation {
+            if settled_since.is_some_and(|t| t.elapsed() >= Duration::from_millis(600)) {
+                break;
+            }
+        } else {
+            last_generation = generation;
+            settled_since = Some(tokio::time::Instant::now());
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    let buffer = supervisor.stream().console_buffer(instance.id);
+    let policy = supervisor.stream().policy();
+    assert!(
+        buffer.len() <= policy.console_retention_events,
+        "retention keeps at most {} events, got {}",
+        policy.console_retention_events,
+        buffer.len()
+    );
+    let bytes: usize = buffer
+        .iter()
+        .map(|event| match &event.data {
+            zim_engine_streaming::EventData::ConsoleOutput { line } => line.len(),
+            _ => 0,
+        })
+        .sum();
+    assert!(
+        bytes <= policy.console_retention_bytes,
+        "retention keeps at most {} bytes, got {}",
+        policy.console_retention_bytes,
+        bytes
+    );
+    // The newest tail survived: the last retained line is from the
+    // end of the sequence, and eviction happened from the front.
+    let last_line = match &buffer.last().expect("a retained tail").data {
+        zim_engine_streaming::EventData::ConsoleOutput { line } => line.clone(),
+        other => panic!("console lane carries console events only, got {other:?}"),
+    };
+    let last_number: u64 = last_line
+        .trim_end()
+        .trim_end_matches('\r')
+        .parse()
+        .expect("seq lines are numbers");
+    assert!(
+        last_number >= 39_900,
+        "the newest lines are retained (got {last_number})"
+    );
+    assert!(
+        buffer.len() < 40_000,
+        "eviction engaged: the full 40k lines are not retained"
+    );
+    // Generations on the lane are strictly increasing (order).
+    let generations: Vec<u64> = buffer.iter().map(|e| e.generation).collect();
+    let sorted = {
+        let mut g = generations.clone();
+        g.sort_unstable();
+        g
+    };
+    assert_eq!(
+        generations, sorted,
+        "retained events are in generation order"
+    );
+
+    supervisor.shutdown().await;
+    remove_quietly(&docker, &instance.uuid).await;
 }

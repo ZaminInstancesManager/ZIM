@@ -141,6 +141,9 @@ pub(crate) struct InstanceInner {
     revision_tx: watch::Sender<u64>,
     worker: Mutex<Option<tokio::task::JoinHandle<()>>>,
     monitor: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// The M7.1 console pump task (mirror of `monitor`'s replace
+    /// slot: at most one pump runs per instance).
+    console_pump: Mutex<Option<tokio::task::JoinHandle<()>>>,
     cancel: CancellationToken,
     pub(crate) policy: SupervisionPolicy,
     persistence: Arc<dyn Persistence>,
@@ -186,6 +189,7 @@ impl SupervisedInstance {
             revision_tx,
             worker: Mutex::new(None),
             monitor: Mutex::new(None),
+            console_pump: Mutex::new(None),
             cancel: cancel.clone(),
             policy,
             persistence,
@@ -291,9 +295,9 @@ impl SupervisedInstance {
         self.inner.crash.clear();
     }
 
-    /// Write to the target's stdin (M7 console input; the runtime
-    /// answers `Unsupported` until it maintains a persistent
-    /// attachment stream).
+    /// Write to the target's stdin (console input; M7.1). Writes go
+    /// through the live console attachment — a target without one
+    /// (not running) answers `NotRunning`.
     pub(crate) async fn send_input(
         &self,
         input: &[u8],
@@ -352,7 +356,16 @@ impl SupervisedInstance {
         arm_monitor(&self.inner);
     }
 
-    /// Stop the power worker and monitor (engine shutdown).
+    /// Arm the console pump from outside the power worker
+    /// (reconciliation's adoption of an already-running target:
+    /// a container started before this engine boot streams its
+    /// post-adoption output onto the hub).
+    pub(crate) fn arm_console_pump_now(&self) {
+        arm_console_pump(&self.inner);
+    }
+
+    /// Stop the power worker, monitor, and console pump (engine
+    /// shutdown).
     ///
     /// Running containers are left running on purpose (the engine is
     /// independently recoverable from its workloads; restart
@@ -371,7 +384,13 @@ impl SupervisedInstance {
             .lock()
             .expect("supervision state poisoned by a panicking worker")
             .take();
-        for handle in [worker, monitor].into_iter().flatten() {
+        let console_pump = self
+            .inner
+            .console_pump
+            .lock()
+            .expect("supervision state poisoned by a panicking worker")
+            .take();
+        for handle in [worker, monitor, console_pump].into_iter().flatten() {
             // Bounded: a worker mid-action finishes its current
             // action at most within the stop deadline.
             let _ = tokio::time::timeout(self.inner.policy.stop_deadline * 2, handle).await;
@@ -453,6 +472,7 @@ async fn apply_start(inner: &Arc<InstanceInner>) {
             set_observed(inner, observed);
             persist_status(inner).await;
             arm_monitor(inner);
+            arm_console_pump(inner);
         }
         Err(e) => {
             // A failed start is a failed operation, not a process
@@ -564,6 +584,72 @@ fn arm_monitor(inner: &Arc<InstanceInner>) {
     *slot = Some(tokio::spawn(async move {
         monitor_loop(monitor_inner).await;
     }));
+}
+
+/// Arm (or re-arm) the per-instance console pump (M7.1).
+///
+/// Mirrors [`arm_monitor`]'s replace semantics: at most one pump
+/// runs per instance, and arming aborts any previous pump after
+/// taking the slot — a restart's new pump never double-pumps with
+/// the old one's tail (any stale lines from the destroyed container
+/// are dropped, which is exactly what "no double-pumps" wants).
+fn arm_console_pump(inner: &Arc<InstanceInner>) {
+    let mut slot = inner
+        .console_pump
+        .lock()
+        .expect("supervision state poisoned by a panicking worker");
+    if let Some(previous) = slot.take() {
+        previous.abort();
+    }
+    let pump_inner = Arc::clone(inner);
+    *slot = Some(tokio::spawn(async move {
+        console_pump_loop(pump_inner).await;
+    }));
+}
+
+/// The M7.1 console pump: attach to the runtime's console, publish
+/// each decoded line onto the streaming hub as an
+/// `instance.console_output` event, and end when the attachment's
+/// stream ends (the target exited; the runtime's pump flushes its
+/// partial-line tail first) or the instance is shut down.
+///
+/// The pump obeys the instance's supervision lifetime — it arms when
+/// the target enters `Running`, ends on exit, and is replaced on
+/// restart — and it never blocks the runtime: hub publishes are
+/// synchronous and bounded (the hub drops events under subscriber
+/// backpressure, §11.2), and the runtime's own pump task only awaits
+/// its attach stream and the bounded channel.
+async fn console_pump_loop(inner: Arc<InstanceInner>) {
+    let mut lines = match inner.runtime.attach_console().await {
+        Ok(attachment) => attachment.lines,
+        Err(e) => {
+            // Not-running is the quiet case (the target died between
+            // observation and attach, or the runtime has no console
+            // capability); unavailable runtimes surface through the
+            // monitor's Unknown path. Anything else is worth a line
+            // in the log but never fails supervision.
+            if !e.is_unavailable() && !matches!(e, RuntimeError::NotRunning(_)) {
+                eprintln!(
+                    "zim_engine: supervision: instance {} console attach failed: {e}",
+                    inner.id
+                );
+            }
+            return;
+        }
+    };
+
+    loop {
+        let line = tokio::select! {
+            _ = inner.cancel.cancelled() => break,
+            line = lines.recv() => match line {
+                Some(line) => line,
+                None => break, // the attachment ended: flushed and done
+            },
+        };
+        inner
+            .stream
+            .publish(inner.id, EventData::ConsoleOutput { line });
+    }
 }
 
 /// The M6 crash monitor: poll the runtime while the instance runs,

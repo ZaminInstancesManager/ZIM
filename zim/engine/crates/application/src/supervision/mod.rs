@@ -61,8 +61,8 @@ pub use instance::{
 pub use null::NullRuntimeFactory;
 pub use runtime::{Runtime, RuntimeFactory};
 pub use state::{
-    DesiredState, ExecCommand, ExecOutput, InstanceConfig, ObservedState, PortBinding,
-    PortProtocol, ResourceUsage, RuntimeError, RuntimeKind,
+    ConsoleAttachment, DesiredState, ExecCommand, ExecOutput, InstanceConfig, ObservedState,
+    PortBinding, PortProtocol, ResourceUsage, RuntimeError, RuntimeKind,
 };
 pub use supervisor::{ReconcileReport, Supervisor};
 

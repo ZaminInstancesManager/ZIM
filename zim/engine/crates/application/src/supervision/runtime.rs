@@ -8,8 +8,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use super::state::{
-    ExecCommand, ExecOutput, InstanceConfig, ObservedState, ResourceUsage, RuntimeError,
-    RuntimeKind,
+    ConsoleAttachment, ExecCommand, ExecOutput, InstanceConfig, ObservedState, ResourceUsage,
+    RuntimeError, RuntimeKind,
 };
 
 /// The runtime abstraction (RUST_ENGINE.md §4).
@@ -34,9 +34,12 @@ use super::state::{
 ///   up to `deadline`, then kill if the target is still running.
 /// - Not-found results on stop/kill are `Ok(())` (already in the
 ///   requested state), matching Wings's 404 tolerance.
-/// - `send_input`/console attach require a persistent attachment
-///   stream; the M6 surface returns `Unsupported` from runtimes that
-///   do not maintain one (the Docker adapter ships it with M7).
+/// - `send_input`/`attach_console` require a persistent attachment
+///   stream (M7.1): the Docker adapter maintains one per run of the
+///   container — `attach_console` opens it (spawning the output
+///   pump) and `send_input` writes through its stdin side; calling
+///   `send_input` with no live attachment answers `NotRunning`
+///   (a stopped target naturally rejects console input).
 #[async_trait]
 pub trait Runtime: Send + Sync {
     /// Which class of runtime this is (invariant 8).
@@ -62,6 +65,18 @@ pub trait Runtime: Send + Sync {
 
     /// Run a one-shot command inside the instance's target.
     async fn exec(&self, cmd: &ExecCommand) -> Result<ExecOutput, RuntimeError>;
+
+    /// Attach to the target's console output (M7.1): one attachment
+    /// per run of the target, carrying decoded, lossy-UTF-8 output
+    /// lines over a bounded channel.
+    ///
+    /// Callers (the supervision layer's console pump) attach when
+    /// the target enters `Running` and consume until the stream
+    /// ends — the target's exit closes it after flushing any
+    /// partial-line tail. Dropping the receiver detaches. The
+    /// attachment's stdin side stays with the runtime:
+    /// [`Self::send_input`] writes through it while it is live.
+    async fn attach_console(&self) -> Result<ConsoleAttachment, RuntimeError>;
 
     /// Write to the target's stdin (console input; M7 surface).
     async fn send_input(&self, input: &[u8]) -> Result<(), RuntimeError>;

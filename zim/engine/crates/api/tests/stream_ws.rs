@@ -150,7 +150,9 @@ async fn supervisor_over(persistence: Arc<dyn Persistence>) -> Arc<Supervisor> {
     }
     let supervisor = Supervisor::new(
         persistence,
-        Arc::new(MockRuntimeFactory::new(MockRuntime::always_running())),
+        Arc::new(MockRuntimeFactory::new(
+            MockRuntime::always_running().with_echo_console(),
+        )),
         SupervisionPolicy {
             monitor_poll_interval: Duration::from_millis(50),
             ..Default::default()
@@ -615,8 +617,9 @@ async fn console_and_metrics_endpoints_serve_hub_state() {
     assert!(samples[0]["data"]["memory_usage_bytes"].as_u64().is_some());
     assert!(body["last_generation"].as_u64().unwrap() > 0);
 
-    // Console buffer: empty in M7-core (no attach pump yet) but the
-    // cursor is served for reconnects.
+    // Console buffer: the M7.1 attach pump keeps the echoed input
+    // lines (the live path, no daemon required) and serves the
+    // reconnect cursor.
     let response = engine
         .client
         .get(engine.url(&format!("/instances/{instance_id}/console")))
@@ -626,11 +629,15 @@ async fn console_and_metrics_endpoints_serve_hub_state() {
         .unwrap();
     assert_eq!(response.status(), 200);
     let body: Value = response.json().await.unwrap();
-    assert_eq!(body["events"].as_array().unwrap().len(), 0);
     assert!(body["last_generation"].as_u64().unwrap() > 0);
+    assert!(
+        body["events"].as_array().unwrap().is_empty(),
+        "no console input yet: the buffer starts empty"
+    );
 
-    // Console input reaches the runtime port and answers the
-    // structured 501 (the mock has no attachment stream).
+    // Console input reaches the runtime's attachment and answers
+    // the sent ack (M7.1: the echo console implements the live
+    // path; the pre-M7.1 501 is retired).
     let response = engine
         .client
         .post(engine.url(&format!("/instances/{instance_id}/console/input")))
@@ -639,9 +646,34 @@ async fn console_and_metrics_endpoints_serve_hub_state() {
         .send()
         .await
         .unwrap();
-    assert_eq!(response.status(), 501);
+    assert_eq!(response.status(), 200);
     let body: Value = response.json().await.unwrap();
-    assert_eq!(body["error"]["code"], "not_implemented");
+    assert_eq!(body["status"], "sent");
+    assert_eq!(body["bytes"].as_u64().unwrap(), "say hello".len() as u64);
+
+    // The echoed line lands in the retained console buffer (the
+    // supervision pump publishes asynchronously — poll briefly).
+    let echoed = std::time::Instant::now();
+    let events = loop {
+        let response = engine
+            .client
+            .get(engine.url(&format!("/instances/{instance_id}/console")))
+            .header("Cookie", format!("zim_session={cookie}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let body: Value = response.json().await.unwrap();
+        let events = body["events"].as_array().expect("events array").clone();
+        if !events.is_empty() || echoed.elapsed() > Duration::from_secs(2) {
+            break events;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+    assert_eq!(events.len(), 1, "exactly one echoed console line");
+    assert_eq!(events[0]["type"], "instance.console_output");
+    assert_eq!(events[0]["data"]["line"], "say hello\n");
+    assert_eq!(events[0]["instance_id"], instance_id);
 
     // Validation still applies before the runtime is consulted.
     let response = engine
@@ -653,6 +685,125 @@ async fn console_and_metrics_endpoints_serve_hub_state() {
         .await
         .unwrap();
     assert_eq!(response.status(), 400);
+}
+
+// ── M7.1: the live console path over the WebSocket ────────────────
+
+/// The §M7.1 acceptance flow at the API level (echo-console mock):
+/// a WS subscriber receives `instance.console_output` lines in
+/// generation order, console input surfaces on the stream, and a
+/// reconnect with `?since_generation` replays the retained console
+/// tail.
+#[tokio::test]
+async fn ws_console_output_live_and_replay() {
+    let engine = StreamEngine::start().await;
+    engine.seed_user("admin@zim.local", "admin pass", true);
+    let cookie = login(&engine, "admin@zim.local", "admin pass").await;
+    let instance_id = seed_instance(&engine, &cookie).await;
+
+    // Subscribe, then start the instance.
+    let request = ws_request(
+        &engine,
+        &format!("instance_id={instance_id}"),
+        &[("cookie", format!("zim_session={cookie}"))],
+    );
+    let (mut stream, _response) = connect_async(request).await.expect("upgrade succeeds");
+
+    let start = engine
+        .client
+        .post(engine.url(&format!("/instances/{instance_id}/start")))
+        .header("Cookie", format!("zim_session={cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(start.status(), 202);
+
+    // Wait for the running transition (the console attach arms with
+    // it), then send console input over the HTTP endpoint.
+    until(&mut stream, |env| {
+        env["type"] == "instance.state_change" && env["data"]["to"] == "running"
+    })
+    .await
+    .expect("the starting→running transition arrives");
+
+    let input = engine
+        .client
+        .post(engine.url(&format!("/instances/{instance_id}/console/input")))
+        .header("Cookie", format!("zim_session={cookie}"))
+        .json(&json!({ "line": "say hello" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(input.status(), 200);
+
+    // The echoed line arrives as an instance.console_output envelope
+    // in generation order (after any earlier lane events).
+    let console = until(&mut stream, |env| {
+        env["type"] == "instance.console_output"
+            && env["data"]["line"]
+                .as_str()
+                .is_some_and(|l| l == "say hello\n")
+    })
+    .await
+    .expect("the echoed line reaches the subscriber");
+    assert_eq!(console["instance_id"], instance_id);
+    assert!(console["generation"].as_u64().unwrap() > 0);
+    let checkpoint = console["generation"].as_u64().unwrap();
+
+    // A second line after the checkpoint: §11.3 replays exactly the
+    // events newer than the checkpoint, so this one (not the first)
+    // is what a reconnecting subscriber must receive.
+    let input = engine
+        .client
+        .post(engine.url(&format!("/instances/{instance_id}/console/input")))
+        .header("Cookie", format!("zim_session={cookie}"))
+        .json(&json!({ "line": "list players" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(input.status(), 200);
+
+    let second = until(&mut stream, |env| {
+        env["type"] == "instance.console_output"
+            && env["data"]["line"]
+                .as_str()
+                .is_some_and(|l| l == "list players\n")
+    })
+    .await
+    .expect("the second echoed line reaches the subscriber");
+    assert!(
+        second["generation"].as_u64().unwrap() > checkpoint,
+        "the second line is stamped after the checkpoint"
+    );
+
+    let _ = stream.close(None).await;
+
+    // Reconnect from the checkpoint: the retained console tail newer
+    // than the checkpoint is replayed (§11.3) — the second line, at
+    // its original generation; the first (already-delivered,
+    // generation == checkpoint) is not re-sent.
+    let request = ws_request(
+        &engine,
+        &format!("instance_id={instance_id}&since_generation={checkpoint}"),
+        &[("cookie", format!("zim_session={cookie}"))],
+    );
+    let (mut stream, _response) = connect_async(request).await.expect("reconnect succeeds");
+
+    let replayed = until(&mut stream, |env| {
+        env["type"] == "instance.console_output"
+            && env["data"]["line"]
+                .as_str()
+                .is_some_and(|l| l == "list players\n")
+    })
+    .await
+    .expect("the retained console tail replays after reconnect");
+    assert_eq!(
+        replayed["generation"].as_u64().unwrap(),
+        second["generation"].as_u64().unwrap(),
+        "the replayed line keeps its original generation"
+    );
+
+    let _ = stream.close(None).await;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────

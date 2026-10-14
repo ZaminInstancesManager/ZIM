@@ -13,7 +13,10 @@
 //! - stop is graceful-then-forcible bounded by a deadline
 //!   (`WaitForStop` with `terminate = true`);
 //! - stop/kill tolerate a missing container (404-as-Ok, Wings's
-//!   `client.IsErrNotFound` handling).
+//!   `client.IsErrNotFound` handling);
+//! - the console surface is a persistent bollard attach (M7.1):
+//!   `attach_console` opens it once per run and `send_input` writes
+//!   through its stdin side (see `attach.rs`).
 //!
 //! # Deviations from Wings, documented per site
 //!
@@ -31,6 +34,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod attach;
 mod container;
 mod exec;
 mod network;
@@ -191,6 +195,7 @@ impl RuntimeFactory for DockerRuntimeFactory {
             name: cfg.container_name.clone(),
             settings: self.settings.clone(),
             network_gateway: self.network_gateway,
+            console: attach::ConsoleState::shared(),
         }))
     }
 
@@ -211,6 +216,9 @@ pub struct DockerRuntime {
     name: String,
     settings: DockerSettings,
     network_gateway: Option<std::net::Ipv4Addr>,
+    /// The console attachment state (M7.1): the live attach's stdin
+    /// writer, shared with the output pump that clears it on end.
+    console: Arc<attach::ConsoleState>,
 }
 
 #[async_trait]
@@ -246,14 +254,17 @@ impl Runtime for DockerRuntime {
         exec::exec(&self.docker, &self.name, cmd, self.settings.api_timeout).await
     }
 
-    async fn send_input(&self, _input: &[u8]) -> Result<(), RuntimeError> {
-        // Console input needs the persistent attach stream the M7
-        // streaming module owns; a one-shot attach would send EOF to
-        // the container's stdin when dropped (SIGHUP risk).
-        Err(RuntimeError::Unsupported {
-            feature: "console input".to_owned(),
-            milestone: "M7 (streaming)".to_owned(),
-        })
+    async fn attach_console(
+        &self,
+    ) -> Result<zim_engine_application::supervision::ConsoleAttachment, RuntimeError> {
+        attach::attach_console(&self.docker, &self.name, &self.console).await
+    }
+
+    async fn send_input(&self, input: &[u8]) -> Result<(), RuntimeError> {
+        // Writes go through the persistent attachment opened by
+        // `attach_console` (M7.1); without one the container is not
+        // running and the input has nowhere to go.
+        attach::send_input(&self.console, input).await
     }
 
     async fn exit_state(&self) -> Result<(Option<i32>, bool), RuntimeError> {

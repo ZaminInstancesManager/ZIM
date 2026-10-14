@@ -28,12 +28,24 @@ async-trait = { workspace = true }
 # Timestamp mapping for `ObservedState::Running { started_at }`.
 chrono = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["rt", "macros", "time", "sync"] }
+tokio = { workspace = true, features = [
+    "rt",
+    "macros",
+    "time",
+    "sync",
+    # io-util: AsyncWriteExt on the console attach's stdin writer
+    # (M7.1 `Runtime::send_input`).
+    "io-util",
+] }
 
 [dev-dependencies]
 # Supervision-module integration (the DockerRuntime is exercised
 # through the supervisor's lifecycle invariants, not just directly).
 zim_engine_application = { workspace = true, features = ["test-util"] }
+# M7.1 console tests inspect the hub's retained console events (the
+# streaming crate's EventData vocabulary) — test-only; the library's
+# dependency direction stays as RUST_ENGINE.md §2 documents.
+zim_engine_streaming = { workspace = true }
 # In-memory store for the supervision-over-Docker tests.
 zim_engine_persistence_sqlite = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }

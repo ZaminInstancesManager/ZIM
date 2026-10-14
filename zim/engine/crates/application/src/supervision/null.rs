@@ -14,8 +14,8 @@ use async_trait::async_trait;
 
 use super::runtime::{Runtime, RuntimeFactory};
 use super::state::{
-    ExecCommand, ExecOutput, InstanceConfig, ObservedState, ResourceUsage, RuntimeError,
-    RuntimeKind,
+    ConsoleAttachment, ExecCommand, ExecOutput, InstanceConfig, ObservedState, ResourceUsage,
+    RuntimeError, RuntimeKind,
 };
 
 /// The unreachable-backend [`RuntimeFactory`].
@@ -66,6 +66,10 @@ impl Runtime for NullRuntime {
         Err(RuntimeError::unavailable(NO_RUNTIME))
     }
 
+    async fn attach_console(&self) -> Result<ConsoleAttachment, RuntimeError> {
+        Err(RuntimeError::unavailable(NO_RUNTIME))
+    }
+
     async fn send_input(&self, _input: &[u8]) -> Result<(), RuntimeError> {
         Err(RuntimeError::unavailable(NO_RUNTIME))
     }
@@ -112,5 +116,6 @@ mod tests {
         assert!(runtime.state().await.unwrap_err().is_unavailable());
         assert!(runtime.kill().await.unwrap_err().is_unavailable());
         assert!(runtime.stats().await.unwrap_err().is_unavailable());
+        assert!(runtime.attach_console().await.unwrap_err().is_unavailable());
     }
 }

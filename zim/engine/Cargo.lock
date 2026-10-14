@@ -2391,6 +2391,7 @@ dependencies = [
  "zim_engine_application",
  "zim_engine_domain",
  "zim_engine_persistence_sqlite",
+ "zim_engine_streaming",
 ]
 
 [[package]]

@@ -767,3 +767,195 @@ async fn unavailable_backend_surfaces_unknown() {
     assert_eq!(row.status, InstanceStatus::Unknown);
     supervisor.shutdown().await;
 }
+
+// ── M7.1: the console attach pump over the supervision layer ──────
+
+/// A fixture variant whose mock carries the echo console.
+async fn echo_fixture(script: Vec<MockStart>) -> Fixture {
+    let store = in_memory_store();
+    let user = seed_user(store.as_ref());
+    let node = seed_local_node(store.as_ref());
+    let instance = seed_instance(store.as_ref(), &node, &user, 25565);
+    let mock = MockRuntime::scripted(script).with_echo_console();
+    let factory = MockRuntimeFactory::new(mock.clone());
+    let supervisor = Supervisor::new(
+        Arc::clone(&store),
+        Arc::new(factory),
+        test_policy(),
+        std::env::temp_dir().join("zim-supervision-test"),
+    );
+    supervisor.load_local().await.unwrap();
+    Fixture {
+        supervisor,
+        store,
+        mock,
+        instance,
+    }
+}
+
+/// The console buffer's lines as `(generation, line)` pairs.
+fn console_lines(supervisor: &Supervisor, id: zim_engine_domain::InstanceId) -> Vec<(u64, String)> {
+    supervisor
+        .stream()
+        .console_buffer(id)
+        .iter()
+        .map(|event| match &event.data {
+            zim_engine_streaming::EventData::ConsoleOutput { line } => {
+                (event.generation, line.clone())
+            }
+            other => panic!("console lane carries console events only, got {other:?}"),
+        })
+        .collect()
+}
+
+/// §M7.1: input echoes onto the hub as `instance.console_output`
+/// events in generation order, and the stopped-instance form is the
+/// retryable NotRunning error.
+#[tokio::test]
+async fn console_input_publishes_echoed_lines() {
+    let f = echo_fixture(vec![MockStart::Run {
+        run_for: Duration::from_secs(3600),
+        exit_code: Some(0),
+        oom_killed: false,
+    }])
+    .await;
+    let id = f.instance.id;
+
+    // Before any start: console input is a NotRunning state conflict
+    // (the retryable form, never a silent success).
+    let err = f.supervisor.send_console_input(&id, b"early\n").await;
+    assert!(
+        matches!(err, Err(RuntimeError::NotRunning(_))),
+        "stopped console input answers NotRunning, got {err:?}"
+    );
+    assert!(console_lines(&f.supervisor, id).is_empty());
+
+    // Start, then send two console inputs.
+    f.supervisor
+        .request_power(&id, PowerAction::Start)
+        .await
+        .unwrap();
+    assert!(
+        soon(|| async {
+            f.supervisor
+                .observed(&id)
+                .await
+                .unwrap()
+                .observed
+                .is_running()
+        })
+        .await
+    );
+
+    f.supervisor
+        .send_console_input(&id, b"say hello")
+        .await
+        .unwrap();
+    f.supervisor
+        .send_console_input(&id, b"list players\n")
+        .await
+        .unwrap();
+
+    // Both lines land on the hub's console lane, newline-terminated,
+    // in generation order.
+    assert!(soon(|| async { console_lines(&f.supervisor, id).len() >= 2 }).await);
+    let lines = console_lines(&f.supervisor, id);
+    assert_eq!(lines.len(), 2, "exactly the two echoed lines");
+    assert_eq!(
+        lines[0].1, "say hello\n",
+        "newline-terminated, input order kept"
+    );
+    assert_eq!(
+        lines[1].1, "list players\n",
+        "an input already ending in a newline is not doubled"
+    );
+    assert!(lines[0].0 < lines[1].0, "generations increase per line");
+
+    f.supervisor.shutdown().await;
+}
+
+/// §M7.1: the pump ends and flushes when the target exits, and a
+/// restart never double-pumps (the replace semantics).
+#[tokio::test]
+async fn console_pump_replace_semantics_across_restart() {
+    let f = echo_fixture(vec![
+        MockStart::Run {
+            run_for: Duration::from_millis(150),
+            exit_code: Some(0),
+            oom_killed: false,
+        },
+        MockStart::Run {
+            run_for: Duration::from_secs(3600),
+            exit_code: Some(0),
+            oom_killed: false,
+        },
+    ])
+    .await;
+    let id = f.instance.id;
+
+    // First run: echo one line, then the "process" dies on its own.
+    f.supervisor
+        .request_power(&id, PowerAction::Start)
+        .await
+        .unwrap();
+    assert!(
+        soon(|| async {
+            f.supervisor
+                .observed(&id)
+                .await
+                .unwrap()
+                .observed
+                .is_running()
+        })
+        .await
+    );
+    f.supervisor
+        .send_console_input(&id, b"run one\n")
+        .await
+        .unwrap();
+
+    // The monitor observes the exit (crash handling: desired-started
+    // exits restart, subject to the loop policy — one crash is under
+    // the threshold, so the second scripted start runs).
+    assert!(
+        soon(|| async {
+            let snapshot = f.supervisor.observed(&id).await.unwrap();
+            snapshot.in_crash_loop || snapshot.observed.is_running()
+        })
+        .await
+    );
+
+    // The second run's attachment is live: input echoes exactly once
+    // (no double-pump from the first run's pump).
+    f.supervisor
+        .send_console_input(&id, b"run two\n")
+        .await
+        .unwrap();
+    assert!(
+        soon(|| async {
+            console_lines(&f.supervisor, id)
+                .iter()
+                .any(|(_, l)| l == "run two\n")
+        })
+        .await
+    );
+
+    let two_runs: Vec<String> = console_lines(&f.supervisor, id)
+        .into_iter()
+        .map(|(_, line)| line)
+        .collect();
+    assert_eq!(
+        two_runs
+            .iter()
+            .filter(|l| l.as_str() == "run two\n")
+            .count(),
+        1,
+        "exactly one pump delivers the second run's line: {two_runs:?}"
+    );
+    assert!(
+        two_runs.iter().any(|l| l == "run one\n"),
+        "the first run's line was flushed before the pump ended: {two_runs:?}"
+    );
+
+    f.supervisor.shutdown().await;
+}

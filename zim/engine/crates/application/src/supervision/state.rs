@@ -255,6 +255,33 @@ pub struct ResourceUsage {
     pub pids_current: Option<u64>,
 }
 
+/// A live console attachment (M7.1): the decoded output-line stream
+/// of one run of the instance's target.
+///
+/// [`Runtime::attach_console`](super::runtime::Runtime::attach_console)
+/// establishes the attachment (the Docker adapter's bollard attach
+/// pump) and returns this handle; the supervision layer owns the
+/// consuming task that publishes each line onto the streaming hub as
+/// an `instance.console_output` event (RUST_ENGINE.md §6). Lines are
+/// decoded lossily — invalid UTF-8 becomes replacement characters —
+/// and keep their newline as received from the target's attach
+/// stream (a TTY's `\r\n` included); a target that dies mid-line has
+/// its unterminated tail flushed without one.
+///
+/// The channel is bounded: the runtime's pump task applies
+/// backpressure to the target's *output* only when the supervision
+/// consumer stalls — it never blocks the runtime's lifecycle calls
+/// (the pump is a standalone task, and `Runtime::send_input` writes
+/// through the attachment's stdin side independently).
+#[derive(Debug)]
+pub struct ConsoleAttachment {
+    /// Decoded console output lines, oldest first. The stream ends
+    /// (returns `None`) when the target exits and the pump has
+    /// flushed its partial-line tail — or when the consumer drops
+    /// the receiver, which detaches the stdin side too.
+    pub lines: tokio::sync::mpsc::Receiver<String>,
+}
+
 /// The error vocabulary of the runtime abstraction.
 ///
 /// The supervision layer (and the API boundary above it) maps these
@@ -278,9 +305,18 @@ pub enum RuntimeError {
     /// The configuration is not runnable as given.
     #[error("invalid instance configuration: {0}")]
     InvalidConfig(String),
-    /// The runtime does not implement this capability yet (e.g.
-    /// console streaming before M7). Carries the milestone that will
-    /// deliver it.
+    /// The operation requires the target to be running, and it is
+    /// not — console input with no live attachment is the M7.1
+    /// example. The API maps this onto its state-conflict vocabulary
+    /// (`409`), not an internal error: the caller asked for something
+    /// the instance's current lifecycle state cannot satisfy, and a
+    /// retry after a start is meaningful.
+    #[error("runtime target is not running: {0}")]
+    NotRunning(String),
+    /// The runtime does not implement this capability yet. Carries
+    /// the milestone that will deliver it. After M7.1 no in-tree
+    /// runtime answers this for the console surface; it remains the
+    /// vocabulary for future capability gaps.
     #[error("runtime capability not implemented: {feature} (arrives with {milestone})")]
     Unsupported {
         /// Which capability was requested.
@@ -365,12 +401,18 @@ mod tests {
         assert!(RuntimeError::NotFound("gone".into()).is_not_found());
         assert!(RuntimeError::unavailable("daemon down").is_unavailable());
         assert!(!RuntimeError::Backend("boom".into()).is_unavailable());
-        // The error Display includes the milestone for the API's 501
-        // mapping.
+        // The not-running form is distinct from unavailable and
+        // backend failures (the API's 409 mapping keys on it).
+        let err = RuntimeError::NotRunning("no attachment".to_owned());
+        assert!(!err.is_unavailable());
+        assert!(!err.is_not_found());
+        assert!(err.to_string().contains("not running"));
+        // The error Display includes the milestone for a capability
+        // gap's structured surfacing.
         let err = RuntimeError::Unsupported {
-            feature: "console attach".to_owned(),
-            milestone: "M7 (streaming)".to_owned(),
+            feature: "future capability".to_owned(),
+            milestone: "M16 (workloads)".to_owned(),
         };
-        assert!(err.to_string().contains("M7"));
+        assert!(err.to_string().contains("M16"));
     }
 }
