@@ -1016,10 +1016,24 @@ async fn console_pump_publishes_to_hub_through_supervisor() {
 
     // Console input surfaces on the stream as an echoed console
     // event (generation-ordered on the lane).
-    supervisor
-        .send_console_input(&instance.id, b"hello-through-hub")
-        .await
-        .expect("console input");
+    //
+    // The "observed running" gate above can be satisfied before the
+    // runtime's console *attachment* is live (attach follows start);
+    // under a loaded CI runner the gap is observable as a transient
+    // `NotRunning` from send_console_input. Retry with a deadline —
+    // the engine's contract is eventual attachment, and this test's
+    // subject is the pump, not the attach race.
+    let input_ok = soon(|| async {
+        supervisor
+            .send_console_input(&instance.id, b"hello-through-hub")
+            .await
+            .is_ok()
+    })
+    .await;
+    assert!(
+        input_ok,
+        "console input never succeeded: the attachment did not come live within 30s"
+    );
     let hub_lines = || {
         supervisor
             .stream()
