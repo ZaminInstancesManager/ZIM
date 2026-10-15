@@ -70,12 +70,18 @@ fn test_settings() -> zim_engine_runtime_docker::DockerSettings {
 }
 
 /// The dev process's own command: a shell loop that announces
-/// its boot marker and keeps running (the dev-loop stand-in).
+/// its boot marker periodically and keeps running (the dev-loop
+/// stand-in). The periodic announcement is the console surface's
+/// own contract: the runtime's attach carries live output only
+/// (no historical replay — the M7.1 posture), so a process that
+/// speaks once at boot is silent to every later attach; the
+/// stand-in speaks every second, the way a real dev loop's
+/// watcher output does.
 fn loop_command(marker: &str) -> Vec<String> {
     vec![
         "sh".to_owned(),
         "-c".to_owned(),
-        format!("echo boot-{marker}; while true; do sleep 5; done"),
+        format!("while true; do echo boot-{marker}; sleep 1; done"),
     ]
 }
 

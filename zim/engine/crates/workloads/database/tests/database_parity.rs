@@ -359,10 +359,14 @@ async fn eval_ok_retrying(workload: &DatabaseWorkload, statement: &str) -> Strin
         // the real one not yet created — psql's "No such file or
         // directory" / "Is the server running locally"), the
         // real server starting up, and the mid-statement
-        // termination. The statements the suite runs are either
-        // idempotent or crash-window safe (an uncommitted
-        // statement rolls back with the connection), so the
-        // retry is the honest posture.
+        // termination. One more form rides the init phase
+        // itself: the temporary server accepts connections
+        // before the entrypoint has created the spec's database
+        // and user (a connection-level FATAL "does not exist",
+        // distinct from a statement-level ERROR). The statements
+        // the suite runs are either idempotent or crash-window
+        // safe (an uncommitted statement rolls back with the
+        // connection), so the retry is the honest posture.
         let connection_shaped = stderr.contains("could not connect")
             || stderr.contains("Connection refused")
             || stderr.contains("Can't connect")
@@ -372,6 +376,7 @@ async fn eval_ok_retrying(workload: &DatabaseWorkload, statement: &str) -> Strin
             || stderr.contains("Is the server running locally")
             || stderr.contains("administrator command")
             || stderr.contains("server closed the connection unexpectedly")
+            || (stderr.contains("FATAL:") && stderr.contains("does not exist"))
             || stdout.contains("Connection refused");
         if !connection_shaped || tokio::time::Instant::now() >= deadline {
             panic!("statement {statement:?} failed: {stdout}{stderr}");
