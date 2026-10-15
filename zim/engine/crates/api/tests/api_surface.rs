@@ -145,6 +145,12 @@ impl TestEngine {
         format!("{}{path}", self.base)
     }
 
+    /// A `/zim/` page-surface URL (the engine's loopback page
+    /// origin, not the API prefix — M24's addon-serving tests).
+    fn page_url(&self, path: &str) -> String {
+        format!("{}{path}", self.base.trim_end_matches("/api/v1"))
+    }
+
     /// A supervisor over the mock runtime factory (lifecycle tests
     /// drive the power queue through it without a Docker daemon).
     async fn supervisor_over(persistence: Arc<dyn Persistence>) -> Arc<Supervisor> {
@@ -2621,7 +2627,7 @@ async fn extension_family_lifecycle_end_to_end() {
     // own — the frontend does not declare it, the fallback routes).
     let response = engine
         .client
-        .get(engine.url("/zim/servers/abc123/pane"))
+        .get(engine.page_url("/zim/servers/abc123/pane"))
         .send()
         .await
         .unwrap();
@@ -2632,7 +2638,7 @@ async fn extension_family_lifecycle_end_to_end() {
     // The reserved asset namespace serves the addon's own files.
     let response = engine
         .client
-        .get(engine.url("/zim/ext/org.example.addon.itest/assets/pane.js"))
+        .get(engine.page_url("/zim/ext/org.example.addon.itest/assets/pane.js"))
         .send()
         .await
         .unwrap();
@@ -2692,7 +2698,7 @@ async fn extension_family_lifecycle_end_to_end() {
     assert_eq!(body["enabled"], false);
     let response = engine
         .client
-        .get(engine.url("/zim/servers/abc123/pane"))
+        .get(engine.page_url("/zim/servers/abc123/pane"))
         .send()
         .await
         .unwrap();
@@ -2709,7 +2715,7 @@ async fn extension_family_lifecycle_end_to_end() {
     assert_eq!(response.status(), 200);
     let response = engine
         .client
-        .get(engine.url("/zim/servers/abc123/pane"))
+        .get(engine.page_url("/zim/servers/abc123/pane"))
         .send()
         .await
         .unwrap();
@@ -2767,7 +2773,7 @@ async fn extension_family_lifecycle_end_to_end() {
     assert_eq!(response.status(), 204);
     let response = engine
         .client
-        .get(engine.url("/zim/servers/abc123/pane"))
+        .get(engine.page_url("/zim/servers/abc123/pane"))
         .send()
         .await
         .unwrap();
