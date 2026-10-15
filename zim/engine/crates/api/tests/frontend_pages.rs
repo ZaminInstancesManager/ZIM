@@ -331,7 +331,12 @@ async fn pages_serve_the_default_frontend_with_csp() {
     assert!(body.contains("ZIM"));
 
     // The M22 application chrome surface.
-    let response = engine.client.get(engine.page_url("/app")).send().await.unwrap();
+    let response = engine
+        .client
+        .get(engine.page_url("/app"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(response.status(), 200);
     assert!(response.text().await.unwrap().contains("tabstrip"));
 
