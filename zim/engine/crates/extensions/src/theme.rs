@@ -270,15 +270,7 @@ fn slugify(name: &str) -> String {
         .trim()
         .to_lowercase()
         .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c
-            } else if c == ' ' || c == '_' || c == '.' {
-                '-'
-            } else {
-                '-'
-            }
-        })
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
     let collapsed = slug
         .split('-')

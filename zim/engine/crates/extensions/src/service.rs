@@ -554,7 +554,7 @@ impl ExtensionsService {
         Ok(ExtensionRegistration {
             id: existing
                 .map(|addon| addon.registration.id)
-                .unwrap_or_else(ExtensionId::new),
+                .unwrap_or_default(),
             manifest: domain_manifest_of(manifest),
             version: manifest.version.clone(),
             installed_at: chrono::Utc::now(),
