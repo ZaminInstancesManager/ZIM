@@ -70,7 +70,10 @@ fn start_engine(bin: &Path, data_dir: &Path) -> Child {
         }
         std::thread::sleep(Duration::from_millis(250));
     }
+    // Reap the child on the failure path too — an unreaped kill
+    // leaves a zombie (clippy::zombie_processes).
     let _ = child.kill();
+    let _ = child.wait();
     panic!("engine did not become healthy within 30s");
 }
 
@@ -102,10 +105,17 @@ fn attach_finds_a_running_engine_and_maps_newtab() {
     assert_ne!(port, 0, "the ephemeral port was recorded");
 
     // The composed URL the shell would navigate to: zim://newtab →
-    // the engine's page root → the newtab entrypoint.
+    // the engine's page root → the newtab entrypoint. The fetch
+    // uses the MAPPED URL's own path, so the mapping itself is
+    // under test, not a restated constant.
     let origin = format!("https://127.0.0.1:{port}");
     let url = zim_url::resolve("zim://newtab", &origin).unwrap();
-    let (status, content_type, body) = engine::https_get(port, "/zim/").unwrap();
+    assert!(
+        url.starts_with(&origin),
+        "the mapped URL stays on the engine origin: {url}"
+    );
+    let path = &url[origin.len()..];
+    let (status, content_type, body) = engine::https_get(port, path).unwrap();
     assert_eq!(status, 200);
     assert!(content_type.starts_with("text/html"));
     let body = String::from_utf8_lossy(&body);
@@ -159,6 +169,9 @@ fn attach_finds_a_running_engine_and_maps_newtab() {
                 engine::discover(&data_dir).is_none(),
                 "graceful shutdown removed the discovery file"
             );
+            // Reap the SIGTERM'd engine (a reaped exit is also the
+            // proof it actually stopped).
+            let _ = child.wait();
         } else {
             eprintln!("note: could not SIGTERM the engine; skipping the removal assert");
             crash(&mut child);
