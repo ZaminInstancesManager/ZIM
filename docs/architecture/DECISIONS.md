@@ -537,9 +537,75 @@ the namespace onto the engine-served frontend.
 **Decision:** The shell resolves `zim://` URLs to the engine's
 active frontend package — via a Tauri custom protocol or a
 loopback-origin mapping (the M21 spike decides; tracked in
-`docs/architecture/BROWSER_INTEGRATION.md` §13). URLs are stable
+`docs/architecture/BROWSER_INTEGRATION.md` §13; **resolved by
+AD-23: loopback-origin mapping**). URLs are stable
 identifiers and remain the persistence format for sessions and
 quick-access entries.
+
+### AD-23: `zim://` resolves via loopback-origin mapping; the shell finds the engine through the data-dir discovery file. (2026-10-15)
+
+**Status:** Accepted (resolves the AD-22 spike and
+`BROWSER_INTEGRATION.md` §13 Q2; implemented by M21).
+
+**Context:** Two mechanisms could give `zim://` URLs loadable
+content: a shell custom protocol (Tauri protocol handler that the
+shell answers by fetching from the engine) or loopback-origin
+mapping (the shell rewrites `zim://` URLs onto the engine's
+`https://127.0.0.1:{port}/zim/…` origin before navigation).
+
+**Decision:** Loopback-origin mapping, implemented in
+`zim/shell/src/zim_url.rs`. Three reasons, in order of weight:
+
+1. **The frontend is same-origin by design.** The engine-served
+   package authenticates with the engine-set HttpOnly
+   `zim_session` cookie and streams over the WebSocket
+   sub-protocol `zim-events.v1` — both rely on the page's origin
+   being the engine's origin. A synthetic `zim://` origin breaks
+   both, or forces CORS/cookie re-engineering of a working,
+   security-reviewed surface.
+2. **The architecture forbids the shell proxying engine traffic**
+   (BROWSER_INTEGRATION.md §2). A custom protocol handler *is* a
+   proxy: every page, asset, and event byte would transit shell
+   code on its way between webview and engine.
+3. **`zim://` is an identifier, not a transport.** Session
+   restore, quick access, split pairings, and extension links
+   address pages by stable `zim://` URL; the loadable URL is
+   derived at navigation time against whichever engine instance is
+   healthy.
+
+**Engine discovery (same decision):** the engine writes
+`engine.json` (`schema`, `pid`, `port`, `engine_version`,
+`started_at_unix`) into its data dir at boot and removes it on
+graceful shutdown (`zim/engine/crates/main/src/discovery.rs`).
+The shell reads it, probes `/api/v1/health` over loopback TLS,
+attaches to a healthy engine, and spawns a **detached** engine
+process when nothing answers — closing or crashing the shell never
+touches the engine or any server (the architecture's first
+desktop invariant).
+
+**Loopback TLS trust (same decision):** the engine's self-signed
+certificate is persistent (`loopback-cert.pem` in the data dir),
+and the shell installs it into the OS trust store on first run
+and on rotation (`zim/shell/src/trust.rs`): the per-user Root
+store via `certutil` on Windows, the login keychain via
+`security` on macOS, and `/usr/local/share/ca-certificates/` +
+`update-ca-certificates` on Linux (an unprivileged Linux shell
+surfaces the two elevated commands on its recovery page). TLS
+validation is disabled nowhere: the webview gets a genuinely
+trusted certificate.
+
+**Risks / mitigations:**
+- The webview's visible origin is `https://127.0.0.1:{port}`, not
+  `zim://…` — mitigated in M22 by the address bar displaying the
+  canonical `zim://` identifier (`zim_url::canonical`), the way
+  Chrome's omnibox displays friendly origins.
+- macOS keychain trust added at first run may require a relaunch
+  before WKWebView honors it — the recovery page's Retry covers
+  the gap; recorded in BROWSER_INTEGRATION.md §13.
+- The engine's default port (8443) is a convention, not a
+  contract — the discovery file is the contract; the port probe is
+  only the fallback path.
+
 
 ## 2. Unresolved questions
 
@@ -547,7 +613,7 @@ These are open architectural questions that need further
 investigation or a future decision. They are tracked here so they
 are not lost; each has a "preliminary" answer that may be revised.
 
-### Q1: The exact `zim://` scheme registration mechanism. (RESOLVED-MOOT by AD-20/AD-22: shell-level resolution, not Chromium WebUI)
+### Q1: The exact `zim://` scheme registration mechanism. (RESOLVED by AD-20/AD-22/AD-23: shell-level loopback-origin mapping, not a registered scheme)
 
 **Status:** INVESTIGATE.
 **Preliminary:** Custom scheme (separate from `chrome://`), for

@@ -753,7 +753,7 @@ described as complete and valid; the corrected path forward
 
 **Status:** Complete.
 
-### M21: Desktop shell scaffold (Tauri 2)
+### M21: Desktop shell scaffold (Tauri 2) — COMPLETE (2026-10-15)
 
 **Goal:** A thin desktop shell hosting the engine-served frontend.
 
@@ -775,6 +775,46 @@ described as complete and valid; the corrected path forward
 - With a server running, killing the shell leaves the server
   running; relaunching the shell reattaches and shows live state.
 - Shell CI green on all three platforms.
+
+**What shipped:**
+- `zim/shell/` (Tauri 2, its own cargo workspace so the engine tree
+  stays GUI-dependency-free): `cli` (flag surface), `zim_url`
+  (AD-23 mapping + the full §3 inventory as tests), `engine`
+  (discovery-file read, loopback-TLS health probe, detached spawn,
+  the composed attach sequence), `trust` (OS trust-store
+  installation of the engine's persistent loopback certificate),
+  `tray` (show / new-tab / "engine keeps running" quit), bundled
+  `ui/boot.html` + `ui/down.html` pre-engine pages, tray and window
+  wiring in `lib.rs`.
+- Engine side (additive, small): the `engine.json` discovery file —
+  written at boot, removed on graceful shutdown
+  (`zim/engine/crates/main/src/discovery.rs`), smoke-tested.
+- AD-23 recorded (resolution mechanism, discovery contract, trust
+  strategy); BROWSER_INTEGRATION.md §13 Q2 resolved with M21
+  resolution notes; this roadmap updated.
+- CI: `Shell CI` — a 3-platform build/clippy/fmt/test matrix plus a
+  Linux `engine-integration` job that runs the shell's REAL attach
+  logic (discovery → probe → page fetch over real TLS → crash →
+  respawn → graceful-shutdown discovery removal) against a real
+  `zim_engine` binary. Engine CI's push trigger additionally covers
+  `m*-dev` branches (the dev-loop pattern, generalized).
+
+**Acceptance status (honest):**
+- `zim://newtab` rendering: implemented end to end
+  (discovery/probe/trust/navigation); CI verifies every layer it
+  can without a display session (the integration job's page fetch
+  IS the navigation target, over real TLS). The literal webview
+  pixel-render needs an interactive desktop session — first manual
+  acceptance pass pending, expected during M22 bring-up.
+- Engine lifecycle independence: structural (detached process
+  group / detached console spawn; no kill handles anywhere; the
+  tray quit says "the engine and servers keep running"); exercised
+  by the integration test's crash/respawn sequence.
+- Shell CI green on all three platforms: the acceptance gate of
+  this milestone's dev loop (see the workflow runs on the merge
+  commit).
+- Auth UX (login into a shell-spawned engine) is M22 scope; the
+  NTP renders unauthenticated, exactly as on any browser today.
 
 **Estimated effort:** 1-2 weeks.
 

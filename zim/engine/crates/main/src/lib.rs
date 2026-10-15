@@ -21,6 +21,8 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod discovery;
+
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -135,6 +137,9 @@ pub struct RunningEngine {
     pub local_addr: std::net::SocketAddr,
     /// The engine's last reconciliation pass (observability).
     pub reconciled: zim_engine_application::supervision::ReconcileReport,
+    /// The data dir (to remove the shell-discovery file on
+    /// shutdown).
+    data_dir: PathBuf,
     server: zim_engine_api::tls::RunningServer,
     supervisor: Arc<Supervisor>,
     jobs: Arc<JobSystem>,
@@ -142,13 +147,15 @@ pub struct RunningEngine {
 
 impl RunningEngine {
     /// Stop accepting connections, drain in-flight requests, stop
-    /// the supervision workers, and wait (up to the job policy's
+    /// the supervision workers, wait (up to the job policy's
     /// grace) for running jobs (running containers are left running
-    /// by design — the next boot's reconciliation re-adopts them).
+    /// by design — the next boot's reconciliation re-adopts them),
+    /// and remove the shell-discovery file.
     pub async fn shutdown(self) {
         self.jobs.shutdown().await;
         self.supervisor.shutdown().await;
         self.server.shutdown().await;
+        discovery::remove(&self.data_dir);
     }
 }
 
@@ -361,9 +368,21 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         options.data_dir.display()
     );
 
+    // ── Shell discovery (M21) ────────────────────────────────────
+    // The desktop shell reads this to find the engine's port and
+    // PID without guessing. A write failure degrades (the shell
+    // falls back to probing the default port), never blocks boot.
+    if let Err(e) = discovery::write(
+        &options.data_dir,
+        &discovery::DiscoveryInfo::current(server.local_addr.port()),
+    ) {
+        eprintln!("zim_engine: cannot write the discovery file: {e}");
+    }
+
     Ok(RunningEngine {
         local_addr: server.local_addr,
         reconciled,
+        data_dir: options.data_dir,
         server,
         supervisor,
         jobs,

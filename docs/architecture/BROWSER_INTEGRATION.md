@@ -287,11 +287,47 @@ source.
 ## 13. Open integration questions
 
 1. Shell content hosting strategy: single webview with iframe-based
-   panes vs. multiple native webviews per tab/pane (M21 spike;
-   trade-off is memory vs. per-pane isolation and fidelity).
-2. `zim://` resolution: shell custom protocol (Tauri `register_asynchronous_protocol`)
-   vs. engine loopback origin with URL rewriting (M21 spike).
+   panes vs. multiple native webviews per tab/pane (M22 spike;
+   trade-off is memory vs. per-pane isolation and fidelity. M21
+   shipped the single-window baseline the decision builds on).
+2. ~~`zim://` resolution~~ — **RESOLVED (M21, AD-23): loopback-origin
+   mapping.** The shell rewrites `zim://` URLs onto the engine's
+   `https://127.0.0.1:{port}/zim/…` origin at navigation time
+   (`zim/shell/src/zim_url.rs`; the full §3 inventory is covered by
+   its test suite). A shell custom protocol was rejected: it would
+   make the shell proxy engine traffic — violating §2's "the shell
+   never proxies engine traffic" — and it would break the
+   frontend's same-origin design (the HttpOnly `zim_session`
+   cookie and the `zim-events.v1` WebSocket sub-protocol) or force
+   re-engineering both. `zim://` URLs remain stable *identifiers*;
+   the loadable URL is derived at navigation time.
 3. Webview divergence testing matrix: which WebKitGTK/WebView2/
    WKWebView versions are the floor (M22; the dependency-free
    frontend keeps the surface small).
 4. Shell auto-update channel mechanics (deferred to M25 packaging).
+
+### M21 resolution notes (recorded for M22)
+
+- **Engine discovery**: the engine writes `engine.json`
+  (`schema`, `pid`, `port`, `engine_version`, `started_at_unix`)
+  into its data dir at boot and removes it on graceful shutdown
+  (`zim/engine/crates/main/src/discovery.rs`); the shell reads it,
+  probes `/api/v1/health` over loopback TLS, attaches when healthy,
+  and spawns a **detached** engine when nothing answers. A stale
+  file (crashed engine) is a hint, not an error — the probe decides.
+- **Loopback TLS trust**: the engine's certificate is persistent
+  (`loopback-cert.pem` in the data dir); the shell installs it into
+  the OS trust store on first run / rotation
+  (`zim/shell/src/trust.rs`): per-user Root via `certutil` on
+  Windows, the login keychain via `security` on macOS, and
+  `/usr/local/share/ca-certificates` + `update-ca-certificates` on
+  Linux (an unprivileged Linux shell surfaces the two elevated
+  commands on its recovery page). TLS validation is disabled
+  nowhere; the shell's probe verifier is a separate,
+  loopback-dialed-only liveness check, not a webview setting.
+- **Known first-run caveat (macOS)**: keychain trust added by
+  `security add-trusted-cert` may require a shell relaunch before
+  WKWebView honors it; the recovery page's Retry covers the gap.
+- **Shell window model**: M21 ships one webview window (`main`) —
+  the tab strip, address bar, split views, and multi-window
+  behavior are M22/M23 shell-UI work layered on this baseline.

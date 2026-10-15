@@ -50,6 +50,8 @@ rand_core = { workspace = true }
 semver = { workspace = true }
 # M11: recovery-notice audit metadata.
 serde_json = { workspace = true }
+# M21: the shell-discovery file's descriptor derives.
+serde = { workspace = true }
 # ── M16: the first-party workload integrations (optional) ─────────
 # The engine does not consume the integrations until their
 # implementation milestones (M17+) register them in the kind

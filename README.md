@@ -86,10 +86,17 @@ abstraction, and the roadmap that subsequent implementation work will follow.
   release-directory deploy family and the HTTP/TCP health
   checks, the DevProcess kind's `notify`-backed file-watch
   restart supervision, and the GenericContainer kind's
-  placement-time capability negotiation). Remaining: the Chromium
-  import (M12) and the integration milestones (M13-M15, gated on
-  it). Operations that need those milestones answer `501
-  not_implemented` per the API spec's transitional vocabulary.
+  placement-time capability negotiation), and the desktop shell
+  scaffold (M21 — `zim/shell/`, a Tauri 2 application over the
+  OS webview: engine discovery/attach via the data-dir
+  `engine.json` file, detached engine spawn with lifecycle
+  independence, `zim://` loopback-origin mapping (AD-23), OS
+  trust-store installation of the engine's persistent loopback
+  certificate, tray, and a 3-platform Shell CI workflow with a
+  real-engine integration job). Remaining: the desktop UX
+  milestones (M22-M26: Chrome-UX parity — tab strip, address bar,
+  split views, session restore — the addon system, packaging,
+  and the first alpha release).
 - A re-skinned Pterodactyl. The Panel's PHP/Laravel backend and Wings's Go
   daemon are preserved in `upstream/` as audit references and behavioral
   contracts; they are not part of ZIM's runtime architecture.
@@ -99,29 +106,49 @@ abstraction, and the roadmap that subsequent implementation work will follow.
 ```text
 ZIM/
 ├── chromium/                    # Cancelled Chromium import manifest (provenance; AD-20)
-│   ├── UPSTREAM_MANIFEST.md      # Pinned revision, import strategy, status
-│   └── PATCHES/                  # Local Chromium patches (initially empty)
+│   └── UPSTREAM_MANIFEST.md      # Pinned revision, import strategy, status
 ├── upstream/
 │   ├── pterodactyl-panel/        # Pterodactyl Panel v1.15.1 (subtree-merged)
 │   └── pterodactyl-wings/        # Pterodactyl Wings v1.13.3 (subtree-merged)
-├── zim/                          # ZIM's own code (skeletons for now)
-│   ├── engine/                   # Rust engine workspace (TBD)
-│   ├── contracts/                # Versioned IPC/API contracts
-│   ├── frontend/                 # Default frontend package
-│   ├── extensions/               # Bundled extensions
-│   └── integration/              # Browser ↔ engine integration layer
+├── zim/                          # ZIM's own code
+│   ├── engine/                   # Rust engine workspace (28 crates, M1-M19)
+│   ├── shell/                    # Tauri 2 desktop shell (M21): window, tray,
+│   │   │                         #   engine attach/spawn, zim:// mapping, trust
+│   │   ├── ui/                   #   bundled pre-engine pages (boot / recovery)
+│   │   ├── icons/                #   app icons (png / ico / icns)
+│   │   └── src/                  #   cli / zim_url / engine / trust / tray / state
+│   └── frontend/                 # Default frontend package (engine-served)
 ├── docs/
 │   ├── audits/                   # Upstream audits, baseline, dispositions
-│   ├── architecture/             # ZIM architecture, Rust engine, browser integration
+│   ├── architecture/             # ZIM architecture, Rust engine, desktop frontend
 │   ├── api/                      # API + frontend/extension specs
 │   ├── compatibility/            # Pterodactyl migration/compat
 │   ├── security/                 # Threat model
 │   └── decisions/               # ADRs
-├── tools/                        # Repo scripts
-├── tests/                        # Cross-component tests
 ├── LICENSE                       # Apache 2.0
 └── ZIM-ICON-SOURCE.png           # ZIM brand icon source
 ```
+
+## Building and running the desktop app (M21+)
+
+The engine and the shell are separate cargo workspaces (the engine
+stays free of GUI dependencies). Build and run in a dev layout:
+
+```bash
+# 1. The engine (its own workspace):
+cd zim/engine && cargo build
+
+# 2. The shell, pointed at that engine binary:
+cd ../shell && ZIM_ENGINE_PATH=../engine/target/debug/zim_engine cargo run
+```
+
+The shell attaches to an engine already serving the same data dir,
+or spawns a detached one (its default data dir is the per-OS
+app-data dir + `engine/`; override with `--data-dir`). Closing the
+shell never stops the engine. Linux prerequisites are the Tauri 2
+system stack (`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
+`libayatana-appindicator3-dev`, `librsvg2-dev`, `libxdo-dev`); the
+`Shell CI` workflow installs the exact set it builds with.
 
 ## Upstream pins
 
