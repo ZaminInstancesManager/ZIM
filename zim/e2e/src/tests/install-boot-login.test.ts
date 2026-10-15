@@ -55,12 +55,9 @@ test("install: the login card signs the bootstrap admin in through the real UI",
     await form.locator('input[type="password"]').fill(engine.admin.password);
     await form.locator('button[type="submit"]').click();
 
-    // Success hides the card and shows the signed-in row (the
-    // form's shadow DOM — Playwright pierces open shadow roots).
+    // Success hides the card (the authenticated signal — the new
+    // tab's own state, not anything inside the now-hidden card).
     await card.waitFor({ state: "hidden", timeout: 15_000 });
-    await page
-      .locator("zim-login-form .who")
-      .waitFor({ state: "visible", timeout: 15_000 });
 
     // The session cookie is real: a second tab starts signed in.
     const second = await context.newPage();

@@ -52,6 +52,24 @@ export async function adminClient(engine: EngineHandle): Promise<ApiClient> {
   return client;
 }
 
+// Allocation pools, keyed per client: a fresh engine's local node
+// ships ZERO free allocations, so the first instance creation
+// would 409 ("node \"local\" has no free allocation"). The pool is
+// created lazily by createInstance, once per (client, node), with
+// ports the harness picked as free moments earlier — the containers
+// bind them only when instances start, and every test file owns its
+// own engine, so cross-engine collisions are a TOCTOU rounding error.
+const ensuredNodesByClient = new WeakMap<ApiClient, Set<string>>();
+
+function ensuredNodesFor(client: ApiClient): Set<string> {
+  let nodes = ensuredNodesByClient.get(client);
+  if (nodes === undefined) {
+    nodes = new Set<string>();
+    ensuredNodesByClient.set(client, nodes);
+  }
+  return nodes;
+}
+
 /** Build a client without authenticating. */
 export function makeClient(engine: EngineHandle): ApiClient {
   let cookie: string | null = null;
@@ -181,6 +199,23 @@ export interface CreatedInstance {
   name: string;
 }
 
+/**
+ * Ensure the node owns a small free-allocation pool (ports the
+ * harness picked as free moments earlier). Callers normally go
+ * through `createInstance`, which memoizes per (client, node).
+ */
+export async function ensureAllocationPool(
+  client: ApiClient,
+  nodeId: string,
+  count = 6,
+): Promise<void> {
+  const { freePort } = await import("./util.js");
+  for (let index = 0; index < count; index += 1) {
+    const port = await freePort();
+    await client.post(`/api/v1/nodes/${nodeId}/allocations`, { port });
+  }
+}
+
 /** Create an instance (admin) with the busybox tick command. */
 export async function createInstance(
   client: ApiClient,
@@ -192,6 +227,13 @@ export async function createInstance(
     owner_id?: string;
   },
 ): Promise<CreatedInstance> {
+  // A fresh engine's node has no free allocations — create the
+  // pool once per (client, node) before the first instance.
+  const ensured = ensuredNodesFor(client);
+  if (!ensured.has(options.nodeId)) {
+    await ensureAllocationPool(client, options.nodeId);
+    ensured.add(options.nodeId);
+  }
   const instance = await client.post("/api/v1/instances", {
     name,
     node_id: options.nodeId,

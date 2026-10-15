@@ -104,6 +104,27 @@ jobs:
       - name: cargo build
         run: cargo build --workspace --all-targets
 
+      # M25 diagnostic: on Windows the shell's test binary has hit
+      # STATUS_ENTRYPOINT_NOT_FOUND at load (a missing DLL export).
+      # Probe the freshly built test exe with --list and let the
+      # loader's own message (which names the DLL) land in the log.
+      - name: Probe the Windows test binary load
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path target\debug\deps -Filter 'zim_shell-*.exe' |
+            Where-Object { $_.Name -notmatch 'build-script' } |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if (-not $exe) {
+            Write-Host 'no test binary found to probe'
+            exit 0
+          }
+          Write-Host "== probing $($exe.Name)"
+          $output = cmd /c "`"$($exe.FullName)`" --list 2>&1"
+          Write-Host $output
+          exit 0
+
       - name: cargo test
         # Unit tests only: the engine-attach integration test skips
         # itself without ZIM_SHELL_IT_ENGINE (the engine-integration

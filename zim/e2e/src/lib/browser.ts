@@ -63,13 +63,12 @@ export async function loginViaUi(
   await form.locator('input[type="password"]').fill(password);
   await form.locator('button[type="submit"]').click();
 
-  // Success: the hosting page hides the login card (newtab.ts) and
-  // the form flips to its signed-in row (the `.who` span lives in
-  // the form's open shadow root — Playwright pierces those).
+  // Success: the hosting page hides the login card (newtab.ts's
+  // own whoami refresh — the card hiding IS the authenticated
+  // signal; everything inside the hidden card reports hidden too).
   await page
     .locator("#login-card")
     .waitFor({ state: "hidden", timeout: 15_000 });
-  await page.locator("zim-login-form .who").waitFor({ state: "visible", timeout: 15_000 });
 }
 
 /** Seed a session snapshot into localStorage before first load. */

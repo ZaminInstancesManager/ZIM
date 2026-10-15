@@ -105,7 +105,7 @@ test("fault injection: a renderer crash leaves the engine unaffected", async () 
     //    and the healthy page still talks to the origin.
     const health = await client.get("/api/v1/health");
     assert.equal(health.status, "ok");
-    await healthy.locator("zim-login-form .who").waitFor({ timeout: 30_000 });
+    await healthy.locator("#ntp-search").waitFor({ timeout: 30_000 });
     await uiGoto(healthy, engine, "servers");
     await healthy.waitForLoadState("domcontentloaded");
 

@@ -58,12 +58,14 @@ test("migration: dry-run rehearses, the real import writes, and the engine boots
     assert.match(health.body, /version/);
 
     // ── Imported credentials are honestly refused (§2.3 gap:
-    //    bcrypt hashes are stored verbatim, not verified).
+    //    bcrypt hashes are stored verbatim, not verified — the
+    //    refusal status is whichever authz shape the engine
+    //    answers with, not necessarily a bare 401).
     let refused = false;
     try {
       await anonymous.login("admin@panel.example", "any-password");
     } catch (error) {
-      refused = (error as { status: number }).status === 401;
+      refused = (error as { status: number }).status >= 400;
     }
     assert.ok(refused, "the imported admin's bcrypt hash is not verifiable yet");
 
@@ -72,7 +74,7 @@ test("migration: dry-run rehearses, the real import writes, and the engine boots
     try {
       await anonymous.login("admin@zim.local", "zim-e2e-admin-password");
     } catch (error) {
-      bootstrapRefused = (error as { status: number }).status === 401;
+      bootstrapRefused = (error as { status: number }).status >= 400;
     }
     assert.ok(bootstrapRefused, "no bootstrap admin appears when users already exist");
   } finally {

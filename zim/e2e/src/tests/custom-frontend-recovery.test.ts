@@ -82,9 +82,9 @@ test("custom frontend: signed package uploads, activates, serves; broken ones ar
     assert.equal(String(restored.id), DEFAULT_ID);
     assert.equal(restored.is_default, true);
     await uiGoto(page, engine, "newtab");
-    // The default new-tab renders its own markers, not the custom one
-    // (the signed-in row — stable on a zero-instance engine).
-    await page.locator("zim-login-form .who").waitFor({ timeout: 30_000 });
+    // The default new-tab renders its own markers (the search box
+    // is always present there), not the custom one.
+    await page.locator("#ntp-search").waitFor({ timeout: 30_000 });
     assert.equal(await page.locator("#custom-marker").count(), 0);
 
     await context.close();
