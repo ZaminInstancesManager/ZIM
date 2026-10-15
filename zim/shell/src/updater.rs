@@ -97,10 +97,16 @@ async fn install(app: AppHandle, update: Update) {
 /// stored by `tray::init`; a missing tray is a no-op, not an error).
 fn set_label(app: &AppHandle, text: &str) {
     let shared = app.state::<Arc<Shared>>();
-    if let Ok(mut guard) = shared.update_menu_item.lock() {
-        if let Some(item) = guard.as_ref() {
-            let _ = item.set_text(text);
-        }
+    // Clone the handle out of the guard so the mutex's borrow ends
+    // inside this statement (a `MenuItem` is an owned, cheap native
+    // handle — cloning it is the menu API's own pattern).
+    let item = shared
+        .update_menu_item
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone());
+    if let Some(item) = item {
+        let _ = item.set_text(text);
     }
 }
 
