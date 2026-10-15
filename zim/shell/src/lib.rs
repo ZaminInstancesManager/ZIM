@@ -53,7 +53,7 @@ pub fn run() {
             commands::engine_retry
         ])
         .setup(|app| {
-            tray::init(&app.handle())?;
+            tray::init(app.handle())?;
             spawn_attach_thread(
                 app.handle().clone(),
                 app.state::<Arc<Shared>>().inner().clone(),

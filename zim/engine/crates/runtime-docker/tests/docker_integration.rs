@@ -638,9 +638,19 @@ async fn supervisor_lifecycle_over_docker() {
     let snapshot = supervisor.observed(&instance.id).await.unwrap();
     assert_eq!(snapshot.status, InstanceStatus::Running);
 
-    // The persisted row follows the observation.
-    let row = store.get_instance(&instance.id).unwrap().unwrap();
-    assert_eq!(row.status, InstanceStatus::Running);
+    // The persisted row follows the observation by a
+    // reconciliation tick — poll it (same rationale as the stop
+    // side below).
+    assert!(
+        soon(|| async {
+            store
+                .get_instance(&instance.id)
+                .unwrap()
+                .map(|row| row.status == InstanceStatus::Running)
+                .unwrap_or(false)
+        })
+        .await
+    );
 
     // Graceful stop through the supervisor.
     supervisor
@@ -662,8 +672,21 @@ async fn supervisor_lifecycle_over_docker() {
         })
         .await
     );
-    let row = store.get_instance(&instance.id).unwrap().unwrap();
-    assert_eq!(row.status, InstanceStatus::Offline);
+    // The persisted row follows the observation by a reconciliation
+    // tick — poll it too: a single-shot read races the transition
+    // write and flakes as `Stopping` under a loaded runner (seen on
+    // Engine CI #35, passing in the same run's dedicated Docker
+    // job — a timing artifact, not a behavior change).
+    assert!(
+        soon(|| async {
+            store
+                .get_instance(&instance.id)
+                .unwrap()
+                .map(|row| row.status == InstanceStatus::Offline)
+                .unwrap_or(false)
+        })
+        .await
+    );
 
     supervisor.shutdown().await;
     remove_quietly(&docker, &instance.uuid).await;

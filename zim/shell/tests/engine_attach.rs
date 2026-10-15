@@ -141,7 +141,6 @@ fn attach_finds_a_running_engine_and_maps_newtab() {
     // discovery file.
     #[cfg(unix)]
     {
-        use std::io::Write;
         let pid = child.id() as i32;
         let ok = Command::new("kill")
             .args(["-TERM", &pid.to_string()])
