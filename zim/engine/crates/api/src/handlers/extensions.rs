@@ -215,6 +215,8 @@ pub struct GrantRequest {
     pub permissions: Vec<String>,
 }
 
+/// The grant handler: validates the names, merges them into the
+/// registration's granted set, and audits the elevation.
 pub async fn grant(
     State(state): State<Arc<AppState>>,
     Extension(caller): Extension<Caller>,

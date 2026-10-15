@@ -1078,7 +1078,6 @@ fn api_major(version: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::manifest::{CommandSpec, ContextMenuItem, SidebarItem};
     use zim_engine_persistence_sqlite::SqlitePersistence;
 
     fn temp_dir() -> PathBuf {
@@ -1093,7 +1092,7 @@ mod tests {
     fn service() -> (ExtensionsService, PathBuf) {
         let dir = temp_dir();
         let persistence: Arc<dyn Persistence> = {
-            let store = SqlitePersistence::open(&dir.join("engine.db")).expect("sqlite store");
+            let store = SqlitePersistence::open(dir.join("engine.db")).expect("sqlite store");
             store.migrate().expect("sqlite migrations");
             Arc::new(store)
         };
@@ -1409,7 +1408,7 @@ mod tests {
         let dir = temp_dir();
         {
             let persistence: Arc<dyn Persistence> = {
-                let store = SqlitePersistence::open(&dir.join("engine.db")).expect("sqlite store");
+                let store = SqlitePersistence::open(dir.join("engine.db")).expect("sqlite store");
                 store.migrate().expect("sqlite migrations");
                 Arc::new(store)
             };
@@ -1441,7 +1440,7 @@ mod tests {
         // A fresh service over the same data dir (a reboot).
         {
             let persistence: Arc<dyn Persistence> = {
-                let store = SqlitePersistence::open(&dir.join("engine.db")).expect("sqlite store");
+                let store = SqlitePersistence::open(dir.join("engine.db")).expect("sqlite store");
                 store.migrate().expect("sqlite migrations");
                 Arc::new(store)
             };
@@ -1590,7 +1589,7 @@ mod tests {
         let dir = temp_dir();
         let build = || -> ExtensionsService {
             let persistence: Arc<dyn Persistence> = {
-                let store = SqlitePersistence::open(&dir.join("engine.db")).expect("sqlite store");
+                let store = SqlitePersistence::open(dir.join("engine.db")).expect("sqlite store");
                 store.migrate().expect("sqlite migrations");
                 Arc::new(store)
             };
