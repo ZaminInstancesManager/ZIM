@@ -79,10 +79,7 @@ fn main() {
 
 fn entry(addon: &str, relative: &str, absolute: &PathBuf) -> String {
     let bytes = fs::read(absolute).expect("reading an embedded addon file");
-    format!(
-        "    ({:?}, {:?}, &{:?}),\n",
-        addon, relative, bytes
-    )
+    format!("    ({:?}, {:?}, &{:?}),\n", addon, relative, bytes)
 }
 
 fn collect_files(root: &PathBuf, dir: &PathBuf, out: &mut Vec<(String, PathBuf)>) {

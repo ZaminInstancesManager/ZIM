@@ -38,11 +38,10 @@ pub async fn list(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_user(&caller)?;
     let extensions = Arc::clone(&state.extensions);
-    let (summaries, notices) = tokio::task::spawn_blocking(move || {
-        (extensions.list(), extensions.boot_notices())
-    })
-    .await
-    .map_err(|e| ApiError::internal(format!("extension list task failed: {e}")))?;
+    let (summaries, notices) =
+        tokio::task::spawn_blocking(move || (extensions.list(), extensions.boot_notices()))
+            .await
+            .map_err(|e| ApiError::internal(format!("extension list task failed: {e}")))?;
     Ok(Json(serde_json::json!({
         "data": summaries,
         "notices": notices,
@@ -99,8 +98,8 @@ pub async fn install(
                 }),
             )
             .await;
-            let mut response = Json(serde_json::to_value(&summary).unwrap_or_default())
-                .into_response();
+            let mut response =
+                Json(serde_json::to_value(&summary).unwrap_or_default()).into_response();
             *response.status_mut() = axum::http::StatusCode::CREATED;
             Ok(response)
         }
@@ -235,11 +234,9 @@ pub async fn grant(
     let extensions = Arc::clone(&state.extensions);
     let addon_id = id.clone();
     let permissions = request.permissions.clone();
-    let outcome = tokio::task::spawn_blocking(move || {
-        extensions.grant(&addon_id, &permissions)
-    })
-    .await
-    .map_err(|e| ApiError::internal(format!("extension grant task failed: {e}")))?;
+    let outcome = tokio::task::spawn_blocking(move || extensions.grant(&addon_id, &permissions))
+        .await
+        .map_err(|e| ApiError::internal(format!("extension grant task failed: {e}")))?;
 
     match outcome {
         Ok(summary) => {
@@ -267,9 +264,9 @@ pub async fn grant(
 fn map_error(error: ExtensionError) -> ApiError {
     match error {
         ExtensionError::NotFound(id) => ApiError::not_found("addon", id),
-        ExtensionError::AlreadyExists(id, version) => ApiError::Conflict(format!(
-            "addon {id} version {version} is already installed"
-        )),
+        ExtensionError::AlreadyExists(id, version) => {
+            ApiError::Conflict(format!("addon {id} version {version} is already installed"))
+        }
         ExtensionError::DowngradeRefused(id, have, wanted) => ApiError::Conflict(format!(
             "addon {id} is at {have}; refusing downgrade to {wanted}"
         )),
@@ -284,9 +281,9 @@ fn map_error(error: ExtensionError) -> ApiError {
              no approval can override this"
                 .to_owned(),
         ),
-        ExtensionError::SurfaceCollision { surface, owner } => ApiError::Conflict(format!(
-            "page surface {surface} collides with {owner}"
-        )),
+        ExtensionError::SurfaceCollision { surface, owner } => {
+            ApiError::Conflict(format!("page surface {surface} collides with {owner}"))
+        }
         ExtensionError::DependencyUnsatisfied(dep) => ApiError::validation(
             format!("dependency {dep} is not satisfied by any installed package"),
             "dependencies",
@@ -299,9 +296,10 @@ fn map_error(error: ExtensionError) -> ApiError {
             format!("the addon requires zim {wanted}, this engine is {have}"),
             "engines.zim",
         ),
-        ExtensionError::UnknownPermission(name) => {
-            ApiError::validation(format!("{name} is not in the permission vocabulary"), "permissions")
-        }
+        ExtensionError::UnknownPermission(name) => ApiError::validation(
+            format!("{name} is not in the permission vocabulary"),
+            "permissions",
+        ),
         ExtensionError::BadPackage(package) => {
             ApiError::validation(format!("package rejected: {package}"), "package")
         }

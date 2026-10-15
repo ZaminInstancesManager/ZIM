@@ -81,8 +81,8 @@ pub async fn upload(
                 }),
             )
             .await;
-            let mut response = Json(serde_json::to_value(&summary).unwrap_or_default())
-                .into_response();
+            let mut response =
+                Json(serde_json::to_value(&summary).unwrap_or_default()).into_response();
             *response.status_mut() = axum::http::StatusCode::CREATED;
             Ok(response)
         }
@@ -128,9 +128,7 @@ fn map_error(error: ThemeError) -> ApiError {
         ThemeError::BadArchive(message) => {
             ApiError::validation(format!("package rejected: {message}"), "package")
         }
-        ThemeError::BadTheme(message) => {
-            ApiError::validation(message, "zim.theme.json")
-        }
+        ThemeError::BadTheme(message) => ApiError::validation(message, "zim.theme.json"),
         ThemeError::AlreadyExists(name) => {
             ApiError::Conflict(format!("a theme named {name} is already installed"))
         }

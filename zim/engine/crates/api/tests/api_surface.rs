@@ -92,7 +92,8 @@ impl TestEngine {
         // M11 + M24: the frontend loader, the addon system, and the
         // theme registry over one fresh temp data dir (the bundled
         // defaults seed on first boot).
-        let data_dir = std::env::temp_dir().join(format!("zim-api-surface-{}", uuid::Uuid::new_v4()));
+        let data_dir =
+            std::env::temp_dir().join(format!("zim-api-surface-{}", uuid::Uuid::new_v4()));
         let frontend = Arc::new(zim_engine_frontend_loader::FrontendService::new(
             data_dir.clone(),
             semver::Version::new(0, 0, 1),
@@ -2595,7 +2596,11 @@ async fn extension_family_lifecycle_end_to_end() {
         .expect("member login");
 
     // Install (admin, application/zip): 201 + the summary.
-    let archive = addon_zip("org.example.addon.itest", "0.1.0", "zim://servers/{id}/pane");
+    let archive = addon_zip(
+        "org.example.addon.itest",
+        "0.1.0",
+        "zim://servers/{id}/pane",
+    );
     let response = engine
         .client
         .post(engine.url("/extensions"))
@@ -2638,7 +2643,11 @@ async fn extension_family_lifecycle_end_to_end() {
     );
 
     // Same version again → 409.
-    let archive = addon_zip("org.example.addon.itest", "0.1.0", "zim://servers/{id}/pane");
+    let archive = addon_zip(
+        "org.example.addon.itest",
+        "0.1.0",
+        "zim://servers/{id}/pane",
+    );
     let response = engine
         .client
         .post(engine.url("/extensions"))
@@ -2652,7 +2661,11 @@ async fn extension_family_lifecycle_end_to_end() {
 
     // A surface colliding with the default frontend → 409, and
     // nothing was installed.
-    let archive = addon_zip("org.example.addon.collide", "0.1.0", "zim://servers/{id}/console");
+    let archive = addon_zip(
+        "org.example.addon.collide",
+        "0.1.0",
+        "zim://servers/{id}/console",
+    );
     let response = engine
         .client
         .post(engine.url("/extensions"))
@@ -2775,7 +2788,11 @@ async fn extension_family_lifecycle_end_to_end() {
     assert!(!ids.contains(&"org.example.addon.itest"));
 
     // Non-admin install is 403 (§10.12's admin column).
-    let archive = addon_zip("org.example.addon.member", "0.1.0", "zim://servers/{id}/member");
+    let archive = addon_zip(
+        "org.example.addon.member",
+        "0.1.0",
+        "zim://servers/{id}/member",
+    );
     let response = engine
         .client
         .post(engine.url("/extensions"))
@@ -2818,10 +2835,7 @@ async fn theme_upload_list_and_delete() {
     {
         let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut archive));
         writer
-            .start_file(
-                "zim.theme.json",
-                zip::write::SimpleFileOptions::default(),
-            )
+            .start_file("zim.theme.json", zip::write::SimpleFileOptions::default())
             .unwrap();
         std::io::Write::write_all(&mut writer, theme.to_string().as_bytes()).unwrap();
         writer.finish().unwrap();
@@ -2861,10 +2875,7 @@ async fn theme_upload_list_and_delete() {
     {
         let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut archive));
         writer
-            .start_file(
-                "zim.theme.json",
-                zip::write::SimpleFileOptions::default(),
-            )
+            .start_file("zim.theme.json", zip::write::SimpleFileOptions::default())
             .unwrap();
         std::io::Write::write_all(&mut writer, bad.to_string().as_bytes()).unwrap();
         writer.finish().unwrap();

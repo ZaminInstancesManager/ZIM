@@ -167,8 +167,9 @@ impl ThemeService {
         if file.exists() {
             return Err(ThemeError::AlreadyExists(summary.name.clone()));
         }
-        std::fs::create_dir_all(&self.themes_dir)
-            .map_err(|e| ThemeError::Storage(format!("creating {}: {e}", self.themes_dir.display())))?;
+        std::fs::create_dir_all(&self.themes_dir).map_err(|e| {
+            ThemeError::Storage(format!("creating {}: {e}", self.themes_dir.display()))
+        })?;
         std::fs::write(&file, serde_json::to_vec(&summary).unwrap_or_default())
             .map_err(|e| ThemeError::Storage(format!("writing {}: {e}", file.display())))?;
         self.themes
@@ -326,16 +327,19 @@ mod tests {
         assert!(service.list().is_empty());
 
         let archive = theme_zip(
-            r#"{
+            r##"{
                 "manifest_version": 1,
                 "name": "Ember Dusk",
                 "description": "A warm dark theme.",
                 "tokens": { "color.background": "#171310", "color.accent": "#e07b39" }
-            }"#,
+            }"##,
         );
         let summary = service.upload(&archive).expect("upload");
         assert_eq!(summary.id, "ember-dusk");
-        assert_eq!(summary.overrides, vec!["color.accent".to_owned(), "color.background".to_owned()]);
+        assert_eq!(
+            summary.overrides,
+            vec!["color.accent".to_owned(), "color.background".to_owned()]
+        );
         assert_eq!(summary.tokens.get("color.accent").map(String::as_str), Some("#e07b39"));
 
         assert_eq!(service.list().len(), 1);
@@ -362,7 +366,7 @@ mod tests {
         let service = ThemeService::new(&temp_dir());
 
         let archive = theme_zip(
-            r#"{ "manifest_version": 1, "name": "Bad", "tokens": { "color.brand-new": "#fff" } }"#,
+            r##"{ "manifest_version": 1, "name": "Bad", "tokens": { "color.brand-new": "#fff" } }"##,
         );
         assert!(matches!(
             service.upload(&archive),
