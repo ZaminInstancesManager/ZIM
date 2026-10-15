@@ -23,6 +23,7 @@ pub mod engine;
 pub mod state;
 pub mod tray;
 pub mod trust;
+pub mod updater;
 pub mod windows;
 pub mod zim_url;
 
@@ -52,6 +53,10 @@ pub fn run() {
     });
 
     tauri::Builder::default()
+        // M25 (AD-31): the update channel's Rust-side half — the
+        // updater speaks the channel; the relaunch after an install
+        // is core's AppHandle::restart.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Arc::new(Shared::new(options)))
         .invoke_handler(tauri::generate_handler![
             commands::engine_status,

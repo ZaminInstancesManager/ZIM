@@ -1,0 +1,19 @@
+{
+  "name": "zim-e2e",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "The ZIM end-to-end suite (M25): drives the real engine binary (embedded frontend, real TLS, real runtime) through a headless Chromium, plus the offline migration flow. Tier model: 'docker' where a Docker daemon answers (full lifecycle), 'null' elsewhere (boot/login/UI/session/extensions/files/backups/schedules/themes/migration + degraded-runtime behavior).",
+  "license": "Apache-2.0",
+  "scripts": {
+    "check": "tsc --project tsconfig.json --noEmit",
+    "build": "tsc --project tsconfig.json && node scripts/fix-imports.mjs .build",
+    "test": "npm run build && node --test .build/tests/*.test.js",
+    "test:filter": "npm run build && node --test --test-name-pattern"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "playwright": "^1.49.0",
+    "typescript": "~5.7.2"
+  }
+}

@@ -3,6 +3,7 @@
   "productName": "ZIM",
   "version": "0.1.0",
   "identifier": "org.zaminmc.zim.shell",
+  "mainBinaryName": "zim_shell",
   "build": {
     "frontendDist": "ui"
   },
@@ -28,6 +29,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -35,5 +37,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVDNDYxNzhGRTc1NkMwNUIKUldSYndGYm5qeGRHN0hJZ2ptVTNYbElDY3VZU00wTi96SFd4QUFTcmtXUStYSFR5cjN4Zm02SmYK",
+      "endpoints": [
+        "https://github.com/ZaminInstancesManager/ZIM/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

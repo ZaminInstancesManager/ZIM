@@ -378,9 +378,16 @@ fidelity pass (M25's E2E is where window flows get pressed).
    properties — the dependency-free surface stays the mitigation,
    and CI verifies the bytes (type-check, unit tests, fresh dist)
    rather than webview matrix behavior, which needs the packaged
-   app (M25's E2E suite owns the real matrix: WebKitGTK ≥ 2.40,
-   WebView2 Evergreen, macOS 13+ WKWebView).
-4. Shell auto-update channel mechanics (deferred to M25 packaging).
+   app. **M25 resolution:** the matrix is covered in layers (AD-30)
+   — the Linux packaged-app smoke under Xvfb drives real WebKitGTK
+   on every tagged build; WebView2 Evergreen and macOS WKWebView
+   live-driving is M26 release validation, recorded in the
+   roadmap rather than claimed here.
+4. Shell auto-update channel mechanics (deferred to M25
+   packaging). **M25 resolution:** delivered as AD-31 — the
+   consent-shaped GitHub-Releases channel with minisign
+   signatures; the normative contract is
+   `docs/architecture/UPDATES.md`.
 
 ### M21 resolution notes (recorded for M22)
 

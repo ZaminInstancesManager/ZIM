@@ -47,17 +47,31 @@ ZIM uses five test types:
    - (The pre-correction plan called for Chromium `browser_tests`
    on a C++ integration layer — cancelled with AD-20; the
    dependency-free frontend keeps this layer small and honest.)
-4. **End-to-end (E2E) tests** (a separate test runner that drives
-   the full ZIM product).
-   - Cover user-visible scenarios: install, create instance, start,
-   console, files, backups, schedules, extensions, migration.
-   - Run in seconds-to-minutes per test.
-   - Require a built ZIM product (engine + browser) and Docker.
+4. **End-to-end (E2E) tests** (delivered by M25: the Node/Playwright
+   runner in `zim/e2e/`, per AD-30).
+   - Cover user-visible scenarios: install (first boot + bootstrap
+     admin + UI login), create instance, start, console, stop,
+     files (today's honest 501 contract), backups, schedules,
+     extensions, themes, migration, fault injection (engine
+     SIGKILL → reconciliation; renderer crash → engine
+     unaffected).
+   - Drive the **real `zim_engine` binary** (embedded frontend,
+     real loopback TLS, port learned from `engine.json`) and the
+     **real product UI in a real browser** (Playwright's
+     Chromium; the page surface, login card, tab strip, console
+     view, extensions page).
+   - **Two runtime tiers** (AD-30): with a Docker daemon the
+     lifecycle scenarios run real containers (busybox ticker);
+     without one (Windows/macOS runners) the engine boots in its
+     degraded API-only mode and tier-dependent tests skip with
+     their reason printed — never silently green.
+   - Run in seconds-to-minutes per test; in CI on every push over
+     the 3-OS matrix (`.github/workflows/e2e-ci.yml`).
 5. **Fault-injection tests** (a subset of integration and E2E
    tests).
    - Cover failure scenarios: engine crash, renderer crash, node
-   disconnect, disk full, DB transaction failure, partial
-   transfers, etc.
+     disconnect, disk full, DB transaction failure, partial
+     transfers, etc.
    - Use a documented fault-injection harness.
 
 ## 2. Invariant test inventory
@@ -69,10 +83,10 @@ Each lifecycle invariant from `docs/architecture/ZIM_ARCHITECTURE.md`
 |--------------|--------------------------------------------------------|-----------------------|--------------------------------------------------------|--------|
 | 1            | Persisted `running` flag is not proof of liveness      | Engine integration    | `engine_integration::reconcile_after_restart`           | Delivered (M6) — application tests/supervision.rs + runtime-docker tests (reconcile) |
 | 2            | Accepted start request is not proof that server started | Engine integration    | `engine_integration::start_job_state_machine`           | Delivered (M6) — supervision + api lifecycle tests (202 accepted) |
-| 3            | Tab's existence is not proof that server should run     | E2E                    | `e2e::tab_does_not_imply_running`                       | In progress — M22: chrome logic delivered (tabs are views; the TabModel has no lifecycle surface at all); the packaged-app E2E run is M25 |
-| 4            | Closing a tab does not stop its server                  | E2E                    | `e2e::close_tab_keeps_server_running`                  | In progress — M22: close only unsubscribes the pane's stream (engine `ZimStream.close`); packaged-app E2E is M25 |
-| 5            | Restoring a session does not issue lifecycle commands   | E2E                    | `e2e::session_restore_no_lifecycle`                    | In progress — M22: session restore is views-only by construction + unit-tested (`tests/tabs.test.ts`); packaged-app E2E is M25 |
-| 6            | Multiple tabs cannot create multiple server processes  | E2E                    | `e2e::three_tabs_one_process`                          | In progress — M22: duplicate tabs tolerated by the session format (views, not processes); packaged-app E2E is M25 |
+| 3            | Tab's existence is not proof that server should run     | E2E                    | `e2e::tab_does_not_imply_running`                       | Delivered (M25) — `zim/e2e/src/tests/tabs-invariants.test.ts`: a never-started server's tab renders its stopped state and the audit log carries zero power commands |
+| 4            | Closing a tab does not stop its server                  | E2E                    | `e2e::close_tab_keeps_server_running`                  | Delivered (M25) — tabs-invariants.test.ts: close via the real tab strip; still running, one container, no stop in the audit log (docker tier) |
+| 5            | Restoring a session does not issue lifecycle commands   | E2E                    | `e2e::session_restore_no_lifecycle`                    | Delivered (M25) — session-restore.test.ts: browser relaunch with the same profile restores the tab set; the audit log is the arbiter (docker tier) |
+| 6            | Multiple tabs cannot create multiple server processes  | E2E                    | `e2e::three_tabs_one_process`                          | Delivered (M25) — tabs-invariants.test.ts: three tabs of one server, one container, exactly one start event (docker tier) |
 | 7            | Lifecycle operations cannot race into undefined states  | Engine fault-injection | `engine_integration::power_action_race`                | Delivered (M6) — application tests/supervision.rs |
 | 8            | Native process runner is not equivalent to container    | Engine integration    | `engine_integration::host_runtime_requires_consent`    | Planned |
 | 9            | Per-instance operation serialization                    | Engine integration    | `engine_integration::power_queue_serializes`           | Delivered (M6) — application tests/supervision.rs |
@@ -82,7 +96,7 @@ Each lifecycle invariant from `docs/architecture/ZIM_ARCHITECTURE.md`
 | 13           | Stale event protection                                  | Engine fault-injection | `engine_integration::stale_event_protection`           | Delivered (M6, poll-form) — generation counter + discard guard |
 | 14           | Crash-loop protection                                   | Engine integration    | `engine_integration::crash_loop_protection`           | Delivered (M6) — mock + real-Docker crash-loop tests |
 | 15           | Capability checks at the engine boundary                | Engine integration    | `engine_integration::capability_enforcement`           | Planned |
-| 16           | Restoration of default frontend on custom frontend failure | E2E                  | `e2e::custom_frontend_failure_recovers`                | Planned |
+| 16           | Restoration of default frontend on custom frontend failure | E2E                  | `e2e::custom_frontend_failure_recovers`                | Delivered (M25, user-visible halves) — custom-frontend-recovery.test.ts: signed package upload→activate→serve; failing-smoke and missing-entrypoint packages refused with the active frontend untouched; reset restores the default. The boot-recovery path (persisted active package failing on the next boot) is covered by the engine's frontend-loader integration tests |
 
 Each test name resolves to a real test file once written; the
 "Status" column reflects the verification discipline (§7).
@@ -94,8 +108,8 @@ failure scenarios. Each is a test:
 
 | Scenario                                  | Test type                  | Test name                                                  | Status |
 |--------------------------------------------|----------------------------|-------------------------------------------------------------|--------|
-| Engine restart                              | Engine fault-injection     | `engine_integration::restart_reconciles_state`              | Delivered (M6) |
-| Renderer crash                              | Browser test / E2E          | `e2e::renderer_crash_engine_unaffected`                     | Planned |
+| Engine restart                              | Engine fault-injection     | `engine_integration::restart_reconciles_state`              | Delivered (M6); E2E delivered (M25) — fault-injection.test.ts: SIGKILL mid-flight → relaunch → running container re-adopted |
+| Renderer crash                              | Browser test / E2E          | `e2e::renderer_crash_engine_unaffected`                     | Delivered (M25) — fault-injection.test.ts: `chrome://crash` kills a pane's renderer; health, API, and the healthy page unaffected |
 | Duplicate requests                          | Engine integration         | `engine_integration::idempotency_key_dedupes`               | Planned |
 | Delayed process-exit events                 | Engine fault-injection     | `engine_integration::delayed_exit_event_ordering`           | Planned |
 | Interrupted backups                         | Engine fault-injection     | `engine_integration::interrupted_backup_recovers`          | Planned |
@@ -159,18 +173,28 @@ own integration tests reproduce the behavior in Rust.
 
 ## 6. Test environment requirements
 
-The full test suite requires:
+Since M25 the suite runs where it is designed to run — GitHub
+Actions (`.github/workflows/`):
 
-- Rust toolchain (`rustc`, `cargo`) — not in current workspace.
-- Docker Engine (for container runtime tests).
-- A Chromium build environment (`depot_tools`, `gn`, `ninja`,
-  sufficient disk/memory) — not in current workspace.
-- A Linux test environment for fault-injection (some scenarios are
-  Linux-specific; documented in §4).
+- **Engine CI** (ubuntu): cargo fmt/clippy/build/test + the
+  Docker-integration family against the runner's real daemon.
+- **E2E CI** (ubuntu + windows + macos): the real engine binary
+  + Playwright Chromium on every platform; the docker tier on
+  Linux, the degraded tier elsewhere (AD-30).
+- **Shell CI** (ubuntu + windows + macos): the Tauri shell's
+  build/clippy/fmt matrix + the engine-attach integration test.
+- **Addon CI** (ubuntu): the SDK + addon packaging pipeline.
+- **App Release** (tag-driven): the 3-platform bundles, the
+  update-channel artifacts, and the Linux packaged-app smoke
+  (real deb under Xvfb).
 
-The current workspace cannot run any of these tests; they are
-planned, not executed. This is recorded in
-`docs/audits/UPSTREAM_AUDIT.md` §verification status.
+A local run needs: Rust toolchain, Node 20+ (`zim/e2e` uses
+Node 24 features), `npx playwright install chromium`, and a
+Docker daemon for the full tier (without one the lifecycle tests
+skip, honestly). The pre-AD-20 note about a Chromium build
+environment is historical: no Chromium is built anywhere in the
+post-AD-20 product (the upstream tree remains vendored for
+reference only).
 
 ## 7. Verification discipline
 
@@ -205,29 +229,45 @@ is claimed as "Verified"*.
 
 ## 8. Test-runner CI integration
 
-When the implementation phase reaches the point of running tests,
-ZIM's CI runs:
+The implementation reality (delivered through M25):
 
-- On every push: engine unit tests + engine integration tests
-  (fast).
-- On every merge to main: + E2E tests + fault-injection tests
-  (slower).
-- On every Chromium re-pin: + upstream-protected tests.
-- Nightly: full cross-platform test matrix (where runners are
-  available for each platform).
+- On every push (main + milestone branches): Engine CI (fmt,
+  clippy, build, unit + integration tests, Docker-integration
+  family on ubuntu), Shell CI (3-OS matrix), Addon CI, and
+  **E2E CI (3-OS matrix, both tiers)** — an honest deviation from
+  the original "E2E on merge-to-main only": the milestone-branch
+  iteration loop is where E2E earns its keep, so it runs on every
+  push it could affect (path-filtered).
+- On tags: App Release (the 3-platform bundles + update-channel
+  artifacts + the Linux packaged-app smoke).
+- On every Chromium re-pin: + upstream-protected tests (historical:
+  the upstream tree is reference-only post-AD-20; no re-pins
+  occur).
+- Nightly full matrix: not scheduled yet — the push-triggered
+  3-OS matrix already runs on every relevant push; a nightly
+  failure-scenario sweep is M26 scope.
 
-CI configuration is in `.github/workflows/` (TBD in implementation).
+CI configuration lives in `.github/workflows/` (engine-ci.yml,
+shell-ci.yml, addon-ci.yml, e2e-ci.yml, app-release.yml,
+engine-release.yml, plus the milestone-parity workflows).
 
 ## 9. Test data and fixtures
 
-- Migration E2E tests use a fixture Pterodactyl Panel + Wings
-  Docker Compose deployment (in `tests/fixtures/pterodactyl/`).
-- Egg compatibility tests use a curated set of fixture eggs (in
-  `tests/fixtures/eggs/`), one per parser variant.
-- Fault-injection tests use a fault-injection harness
-  (`tests/fault_injection/`) that can inject: container exits,
-  network partitions, disk-full simulation, DB transaction
-  failures, etc.
+- Migration E2E tests use the fixture Pterodactyl Panel JSON dump
+  (`zim/engine/crates/migrate-pterodactyl/tests/fixtures/panel_fixture.json`)
+  through the real `zim_engine migrate pterodactyl --panel-fixture`
+  CLI, then boot a real engine on the migrated database. (The
+  original plan's Docker Compose panel deployment is M26 scope —
+  the fixture path covers the importer + boot contract today.)
+- Egg compatibility tests use a curated set of fixture eggs, one
+  per parser variant (delivered with the eggs milestone; see
+  `zim/engine/crates/eggs/`).
+- Fault injection in the E2E suite uses *real* faults, not a
+  harness: SIGKILL on the engine process, `chrome://crash` on a
+  renderer, a missing data dir for the backup executor. Deeper
+  injection (network partitions, disk-full simulation, DB
+  transaction failures) remains engine-integration territory
+  (planned rows in §3).
 
 ## 11. Coverage discipline
 
@@ -252,16 +292,16 @@ produces a passing test.
 | E1 | A workload's required capabilities must be a subset of its runtime's declared capabilities.   | Engine integration         | `engine_integration::placement_capability_check`         | Planned |
 | E2 | A workload placed on an incompatible runtime is rejected at creation time.                  | Engine integration         | `engine_integration::placement_rejects_incompatible`     | Planned |
 | E3 | A capability call on a runtime that does not implement the trait returns `Unsupported`.     | Engine integration         | `engine_integration::unsupported_returns_error`         | Planned |
-| E4 | A workload's tab is a view; closing the tab does not stop the workload (generalized invariant 4 for all kinds). | E2E                        | `e2e::close_tab_keeps_workload_running`                  | Planned |
-| E5 | Multiple tabs of the same workload are multiple views, not multiple workloads (generalized invariant 6). | E2E                        | `e2e::three_tabs_one_workload`                           | Planned |
-| E6 | Restoring a session does not issue workload lifecycle commands (generalized invariant 5).  | E2E                        | `e2e::session_restore_no_lifecycle_workload`            | Planned |
+| E4 | A workload's tab is a view; closing the tab does not stop the workload (generalized invariant 4 for all kinds). | E2E                        | `e2e::close_tab_keeps_workload_running`                  | Delivered (M25) for the game_server kind via tabs-invariants.test.ts (the only modeled kind; other kinds are 501 at the API per §10.15) |
+| E5 | Multiple tabs of the same workload are multiple views, not multiple workloads (generalized invariant 6). | E2E                        | `e2e::three_tabs_one_workload`                           | Delivered (M25) for the game_server kind via tabs-invariants.test.ts |
+| E6 | Restoring a session does not issue workload lifecycle commands (generalized invariant 5).  | E2E                        | `e2e::session_restore_no_lifecycle_workload`            | Delivered (M25) for the game_server kind via session-restore.test.ts |
 | E7 | A workload in `Recovering` state is shown yellow with a "recovering" tooltip, not green.    | E2E                        | `e2e::recovering_state_visual_mapping`                  | Planned |
 | E8 | A workload in `CrashLoop` state is shown red with a glyph, not solid red.                    | E2E                        | `e2e::crash_loop_visual_mapping`                        | Planned |
 | E9 | A workload on a disconnected remote node is shown gray with an "unknown" tooltip, not red. | E2E                        | `e2e::disconnected_node_visual_mapping`                 | Planned |
 | E10 | A workload integration's `WorkloadKind` scope is enforced at the API boundary.           | Engine integration         | `engine_integration::integration_kind_scope_enforced`    | Planned |
 | E11 | A `Migratable::migration_plan` for a database returns `requires_quiesce: true`.           | Engine integration         | `engine_integration::database_migration_quiesces`       | Planned |
 | E12 | An interrupted migration can be rolled back to a `MigrationCheckpoint`.                    | Engine fault-injection     | `engine_integration::migration_rollback`                | Planned |
-| E13 | A workload tab remains meaningful when its workload is stopped (shows the stopped state, not an error). | E2E                        | `e2e::stopped_workload_tab_meaningful`                  | Planned |
+| E13 | A workload tab remains meaningful when its workload is stopped (shows the stopped state, not an error). | E2E                        | `e2e::stopped_workload_tab_meaningful`                  | Delivered (M25) for the game_server kind — tabs-invariants.test.ts: the console page of a never-started server renders its stopped state with the Start control enabled |
 | E14 | A workload tab remains meaningful when its workload is on an unreachable remote node.      | E2E                        | `e2e::unreachable_node_tab_meaningful`                  | Planned |
 | E15 | The legacy `/api/v1/instances` surface produces the same responses as `/api/v1/workloads` for `GameServer` workloads. | Engine integration         | `engine_integration::legacy_instances_alias`            | Planned |
 | E16 | The `/api/v1/workloads/{id}/console/input` endpoint returns `409 unsupported` for a non-`ConsoleCapable` workload. | Engine integration         | `engine_integration::console_unsupported_for_website`   | Planned |

@@ -21,8 +21,9 @@
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, copyFileSync, rmSync, readdirSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 
@@ -270,7 +271,9 @@ function payloadFiles(addonDir) {
 function buildPackage(addonDir, outputPath) {
   // The repo's zim/ root is two levels above this script
   // (zim/extensions/scripts/), independent of the addon's depth.
-  const zimRoot = resolve(new URL("..", import.meta.url).pathname, "..");
+  // fileURLToPath keeps this honest on Windows (a file:// URL's
+  // .pathname is not a path there).
+  const zimRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
   const sdkDist = join(zimRoot, "sdk", "addon", "dist", "zim.js");
   if (!existsSync(sdkDist)) {
     return fail(basename(addonDir), `the SDK build is missing (${sdkDist}); run zim/sdk/addon's build first`);
@@ -296,12 +299,121 @@ function buildPackage(addonDir, outputPath) {
   // assets — the honest author-time check is just: pages exist.
   mkdirSync(join(outputPath, ".."), { recursive: true });
   try {
-    execFileSync("zip", ["-q", "-X", "-r", resolve(outputPath), "."], { cwd: staging, stdio: "inherit" });
+    zipStaging(staging, resolve(outputPath));
     const size = statSync(outputPath).size;
     process.stdout.write(`✓ ${basename(addonDir)} → ${outputPath} (${size} bytes)\n`);
   } finally {
     rmSync(staging, { recursive: true, force: true });
   }
+}
+
+/**
+ * Zip the staging dir into the output archive. Prefers the local
+ * `zip` tool (deflate); falls back to a pure-Node STORED writer
+ * when the tool is absent (Windows runners, minimal containers).
+ * Both are well-formed ZIPs — the engine's reader takes either.
+ */
+function zipStaging(staging, outputPath) {
+  try {
+    execFileSync("zip", ["-q", "-X", "-r", outputPath, "."], { cwd: staging, stdio: "inherit" });
+    return;
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+    process.stdout.write("… no `zip` on PATH; using the built-in STORED writer\n");
+  }
+  const entries = [];
+  const walk = (dir, prefix) => {
+    for (const name of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, name.name);
+      const path = prefix === "" ? name.name : `${prefix}/${name.name}`;
+      if (name.isDirectory()) {
+        walk(full, path);
+      } else {
+        entries.push({ path, data: readFileSync(full) });
+      }
+    }
+  };
+  walk(staging, "");
+  writeFileSync(outputPath, buildStoredZip(entries));
+}
+
+/** CRC-32 (IEEE, reflected), table-driven. */
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let index = 0; index < 256; index += 1) {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = (value & 1) !== 0 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+    table[index] = value >>> 0;
+  }
+  return table;
+})();
+
+/** A STORED-entry ZIP archive (local headers + central dir + EOCD). */
+function buildStoredZip(entries) {
+  const chunks = [];
+  const central = [];
+  let offset = 0;
+  for (const entry of entries) {
+    const name = Buffer.from(entry.path, "utf8");
+    const data = Buffer.isBuffer(entry.data) ? entry.data : Buffer.from(entry.data);
+    const crc = crc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0, 6);
+    local.writeUInt16LE(0, 8); // stored
+    local.writeUInt16LE(0, 10);
+    local.writeUInt16LE(0x21, 12);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(name.length, 26);
+    local.writeUInt16LE(0, 28);
+    chunks.push(local, name, data);
+    const entryCentral = Buffer.alloc(46);
+    entryCentral.writeUInt32LE(0x02014b50, 0);
+    entryCentral.writeUInt16LE(20, 4);
+    entryCentral.writeUInt16LE(20, 6);
+    entryCentral.writeUInt16LE(0, 8);
+    entryCentral.writeUInt16LE(0, 10);
+    entryCentral.writeUInt16LE(0, 12);
+    entryCentral.writeUInt16LE(0x21, 14);
+    entryCentral.writeUInt32LE(crc, 16);
+    entryCentral.writeUInt32LE(data.length, 20);
+    entryCentral.writeUInt32LE(data.length, 24);
+    entryCentral.writeUInt16LE(name.length, 28);
+    entryCentral.writeUInt16LE(0, 30);
+    entryCentral.writeUInt16LE(0, 32);
+    entryCentral.writeUInt16LE(0, 34);
+    entryCentral.writeUInt16LE(0, 36);
+    entryCentral.writeUInt32LE(0, 38);
+    entryCentral.writeUInt32LE(offset, 42);
+    central.push(entryCentral, name);
+    offset += 30 + name.length + data.length;
+  }
+  const centralBuffer = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(0, 4);
+  end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(centralBuffer.length, 12);
+  end.writeUInt32LE(offset, 16);
+  end.writeUInt16LE(0, 20);
+  return Buffer.concat([...chunks, centralBuffer, end]);
 }
 
 const [mode, ...args] = process.argv.slice(2);
