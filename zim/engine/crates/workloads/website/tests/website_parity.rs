@@ -322,9 +322,14 @@ async fn the_health_check_family() {
     let deadline = Instant::now() + Duration::from_secs(60);
     let verdict = loop {
         match workload2.health_async().await.expect("health call") {
-            Health::Unhealthy { reason } => break reason,
+            // A status-shaped verdict is the answer to keep: the
+            // server spoke HTTP and named its status. Transport-
+            // shaped reasons (the proxy's boot-window resets, the
+            // refused listener) keep polling — the carrier is
+            // still coming up.
+            Health::Unhealthy { reason } if reason.contains("answered") => break reason,
             _ if Instant::now() > deadline => {
-                panic!("the missing-path check never answered Unhealthy")
+                panic!("the missing-path check never answered with a status")
             }
             _ => {}
         }
@@ -480,10 +485,17 @@ async fn the_access_log_lands_on_stdout() {
         .expect("one binding")
         .host_port;
 
-    let _ = http_get(port, "/").expect("the placeholder serves");
-
     // The access log carries the request (nginx writes it to
-    // /dev/stdout; the container's log surface carries it).
+    // /dev/stdout; the container's log surface carries it). The
+    // first request rides the retry window — docker's proxy
+    // resets forwarded connections until the carrier's listener
+    // binds (the same boot race every through-the-port probe in
+    // this suite retries through).
+    assert!(
+        wait_for_http(port, "/", "placeholder", Duration::from_secs(60)),
+        "the placeholder page never served"
+    );
+
     let deadline = Instant::now() + Duration::from_secs(30);
     let logged = loop {
         let logs = docker_logs(&docker, &name).await;

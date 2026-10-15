@@ -354,16 +354,22 @@ async fn eval_ok_retrying(workload: &DatabaseWorkload, statement: &str) -> Strin
         // temporary server before exec-ing the real one, so a
         // readiness probe that passed against the temporary
         // server can leave the next statement racing that
-        // shutdown window (M19's dev loop hit both forms: "the
-        // database system is shutting down" and the mid-statement
-        // "administrator command" termination). The statements the
-        // suite runs are either idempotent or crash-window safe
-        // (an uncommitted statement rolls back with the
-        // connection), so the retry is the honest posture.
+        // handover window. The window's forms, in order: the
+        // temporary server shutting down, the socket gone (and
+        // the real one not yet created — psql's "No such file or
+        // directory" / "Is the server running locally"), the
+        // real server starting up, and the mid-statement
+        // termination. The statements the suite runs are either
+        // idempotent or crash-window safe (an uncommitted
+        // statement rolls back with the connection), so the
+        // retry is the honest posture.
         let connection_shaped = stderr.contains("could not connect")
             || stderr.contains("Connection refused")
             || stderr.contains("Can't connect")
             || stderr.contains("is shutting down")
+            || stderr.contains("is starting up")
+            || stderr.contains("No such file or directory")
+            || stderr.contains("Is the server running locally")
             || stderr.contains("administrator command")
             || stderr.contains("server closed the connection unexpectedly")
             || stdout.contains("Connection refused");
