@@ -556,6 +556,15 @@ impl DatabaseEngine {
     /// it only runs when the chain got there, and its output (the
     /// archive's byte size) is the snapshot's success contract.
     ///
+    /// The archive's member list is the top-level entries minus the
+    /// snapshot store, spelled as an explicit `$(ls -A | grep -v)`
+    /// list rather than `tar --exclude`: the exclusion patterns
+    /// match *any* path component (GNU and busybox alike), which
+    /// silently dropped Postgres's internal `pg_logical/snapshots/`
+    /// — the WAL replay's recovery checkpoint then died on the
+    /// missing directory. The list form selects exactly the
+    /// top-level store, at any depth below.
+    ///
     /// The archive runs *container-side on purpose*: the engines'
     /// entrypoints take ownership of the data directory (Postgres
     /// `chown`s + `chmod 700`s it, the MySQL family `chown -R`s it),
@@ -566,8 +575,9 @@ impl DatabaseEngine {
     /// `docker cp` API) is how the archive ships between nodes.
     pub fn archive_shell(&self, data_dir: &str, archive_path: &str) -> String {
         format!(
-            "mkdir -p {data_dir}/{} && (tar -czf {data_dir}/{archive_path} \
-             --exclude={} -C {data_dir} . || true) && stat -c %s {data_dir}/{archive_path}",
+            "mkdir -p {data_dir}/{} && cd {data_dir} \
+             && (tar -czf {data_dir}/{archive_path} $(ls -A | grep -v '^{}$') || true) \
+             && stat -c %s {data_dir}/{archive_path}",
             Self::SNAPSHOT_DIR,
             Self::SNAPSHOT_DIR,
         )
@@ -838,10 +848,14 @@ mod tests {
             .next()
             .unwrap();
         assert!(!shell.contains(';'), "shell command: {shell:?}");
-        // The archive excludes the store and verifies with stat.
-        assert!(shell.contains("--exclude=snapshots"));
+        // The archive lists the top level minus the store (the
+        // grep form, not --exclude) and verifies with stat.
+        assert!(shell.contains("grep -v '^snapshots$'"));
         assert!(shell.contains("tar -czf /var/lib/mysql/snapshots/pre-migrate.tar.gz"));
         assert!(shell.contains("stat -c %s"));
+        // The dangerous exclude form is gone (it matched any path
+        // component and dropped pg_logical/snapshots).
+        assert!(!shell.contains("--exclude"));
 
         // The separate-quiesce engines run the shell line directly.
         let argv = DatabaseEngine::Postgres.snapshot_exec_argv(
@@ -852,7 +866,9 @@ mod tests {
         assert_eq!(argv[0], "/bin/sh");
         assert_eq!(argv[1], "-c");
         assert!(argv[2].starts_with("mkdir -p /pgdata/snapshots"));
-        assert!(argv[2].contains("|| true) && stat -c %s"));
+        assert!(argv[2].contains("grep -v '^snapshots$'"));
+        assert!(argv[2].contains("|| true)"));
+        assert!(argv[2].contains("&& stat -c %s"));
     }
 
     #[test]
