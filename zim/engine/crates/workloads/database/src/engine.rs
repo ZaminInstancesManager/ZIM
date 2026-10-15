@@ -389,6 +389,11 @@ impl DatabaseEngine {
                         .clone()
                         .unwrap_or_else(|| "postgres".to_owned()),
                     "-X".to_owned(),
+                    // Tuples-only, unaligned: the eval surface's
+                    // answers are bare values (the caller's
+                    // assertions and the marker extraction read
+                    // them verbatim — no table furniture).
+                    "-At".to_owned(),
                     "-v".to_owned(),
                     "ON_ERROR_STOP=1".to_owned(),
                 ];
