@@ -1,0 +1,185 @@
+name: M19 Parity (dev loop)
+
+# The M19 iteration loop: the Website / DevProcess /
+# GenericContainer parity suites (the static carrier's real nginx
+# container, the busybox dev-process stand-in with the
+# notify-backed watch-restart, the busybox generic container with
+# the placement negotiation) on demand, on any ref — the fast
+# path for fixing the suites without pushing to main.
+# engine-ci.yml runs the same suites on main pushes; this
+# workflow exists so the dev branch gets the same signal (the
+# main workflow's branch filter only fires on main).
+#
+# The resolve job keeps the workspace lockfile honest: the M19
+# batch adds the `notify` dependency to the workspace manifest,
+# and this environment (GitHub Actions) is the only build
+# environment — so the resolution happens here, is committed
+# back to the branch as the milestone's own author, and merges
+# to main with the batch.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [m19-dev]
+
+concurrency:
+  group: m19-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_BACKTRACE: 1
+  RUSTFLAGS: "-D warnings"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  resolve:
+    # Resolve the workspace lockfile for the M19 manifest changes
+    # (the notify dependency) and commit it back, so the repo
+    # carries a lockfile that matches its manifest — the same
+    # hygiene a local dev environment would provide.
+    name: Resolve the lockfile
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: zim/engine
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Resolve
+        # `cargo fetch` resolves the manifest against the existing
+        # lockfile — adding only the new entries (notify and its
+        # transitive deps) without bumping anything already
+        # pinned — and writes the updated lockfile.
+        run: cargo fetch
+
+      - name: Commit the resolved lockfile (when it changed)
+        run: |
+          git config user.name "Abasing"
+          git config user.email "140362885+Abasing@users.noreply.github.com"
+          if git diff --quiet -- Cargo.lock; then
+            echo "the lockfile is already resolved"
+          else
+            git add Cargo.lock
+            git commit -m "M19: resolve the workspace lockfile (notify)"
+            git push
+          fi
+
+  parity:
+    name: M19 parity suites
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: zim/engine
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker sanity (daemon version + network room)
+        run: |
+          docker version
+          docker network ls
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: zim/engine
+          prefix-key: engine-docker-integration
+
+      - name: cargo fmt --check
+        # On drift, print the full diff before failing so a remote
+        # iteration can replicate the exact `cargo fmt` fix without
+        # a local toolchain (the same posture engine-ci.yml takes).
+        run: |
+          if ! cargo fmt --check; then
+            echo "::error::formatting drift — the full diff follows (apply with 'cargo fmt')"
+            cargo fmt
+            git --no-pager diff -- .
+            exit 1
+          fi
+
+      - name: cargo clippy
+        run: cargo clippy -p zim_engine_workloads_website -p zim_engine_workloads_dev_process -p zim_engine_workloads_generic_container --all-targets -- -D warnings
+
+      - name: cargo test -p zim_engine_workloads_website
+        # The §M19 website parity suite: the static carrier's real
+        # nginx container — install/serve, the deploy family's
+        # atomic switch, rollback, retention, the HTTP/TCP health
+        # checks, and the network endpoint family.
+        run: cargo test -p zim_engine_workloads_website --all-targets
+
+      - name: cargo test -p zim_engine_workloads_dev_process
+        # The §M19 dev-process parity suite: the busybox stand-in
+        # — the notify-backed watch-restart supervision, the
+        # console surface, and the policy posture.
+        run: cargo test -p zim_engine_workloads_dev_process --all-targets
+
+      - name: cargo test -p zim_engine_workloads_generic_container
+        # The §M19 generic-container parity suite: the busybox
+        # carrier — the placement negotiation and the exec /
+        # network / health / filesystem capability family.
+        run: cargo test -p zim_engine_workloads_generic_container --all-targets
+
+      - name: cargo test -p zim_engine_workloads_sdk
+        # The SDK's own unit tests (the shared health-check
+        # executor's probes run here too — the TCP/HTTP loopback
+        # listeners need no daemon).
+        run: cargo test -p zim_engine_workloads_sdk --all-targets
+
+  workspace-build:
+    # The whole workspace must still build + test green with the
+    # three new crates' code (they were already members; the M19
+    # batch fills them in) — the same gate engine-ci.yml applies
+    # on main, applied to the branch so surprises surface before
+    # the merge.
+    name: Workspace build + test
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: zim/engine
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable + clippy + rustfmt
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy rustfmt
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: zim/engine
+          prefix-key: engine-ci
+
+      - name: cargo clippy --workspace
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo build --workspace
+        run: cargo build --workspace --all-targets
+
+      - name: cargo test --workspace
+        run: cargo test --workspace --all-targets
+
+      - name: cargo build --features workloads-all
+        run: cargo build -p zim_engine_main --features workloads-all

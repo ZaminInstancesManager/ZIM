@@ -63,18 +63,33 @@ subsequent implementation work will follow.
   the `/api/v1/stream` WebSocket endpoint with per-tab capability
   token auth, supervision-published `instance.state_change` and
   `instance.resource_usage` events, and the console/metrics read
-  endpoints), and the full durable-jobs milestone (M8 — the
+  endpoints), the full durable-jobs milestone (M8 — the
   `zim_engine_jobs` executor, the `zim_engine_backups`
   create/restore pipeline, the `zim_engine_transfers`
   two-phase-commit node move, and the `zim_engine_installs`
   constrained-container install pipeline over the `InstallRunner`
-  port), plus the egg importer and per-instance cron scheduler
-  (M9 — `zim_engine_eggs` and `zim_engine_scheduler`). Remaining:
-  the Pterodactyl migration importer (M10), the frontend loader +
-  default frontend (M11), the Chromium import (M12), and the
-  integration milestones. Operations that need those milestones
-  answer `501 not_implemented` per the API spec's transitional
-  vocabulary.
+  port), the egg importer and per-instance cron scheduler (M9 —
+  `zim_engine_eggs` and `zim_engine_scheduler`), the Pterodactyl
+  Panel migration importer (M10 —
+  `zim_engine_migrate_pterodactyl`), the frontend loader +
+  default frontend (M11 — `zim_engine_frontend_loader` and the
+  vanilla-TS/Web-Components package under `zim/frontend/`), the
+  workload integration SDK + the five first-party integration
+  crates (M16), the Minecraft integration at egg parity (M17 —
+  the real file API, the egg-derived GameServerSpec, the console
+  convention, the fakemc parity suite), the Database integration
+  (M18 — Postgres / MariaDB / MySQL / Redis: the engine table,
+  the readiness probes, the quiesced snapshot/restore family,
+  the multi-step migration plan, and the real-container parity
+  suite), and the remaining three first-party integrations (M19
+  — the Website kind's static nginx carrier with the
+  release-directory deploy family and the HTTP/TCP health
+  checks, the DevProcess kind's `notify`-backed file-watch
+  restart supervision, and the GenericContainer kind's
+  placement-time capability negotiation). Remaining: the Chromium
+  import (M12) and the integration milestones (M13-M15, gated on
+  it). Operations that need those milestones answer `501
+  not_implemented` per the API spec's transitional vocabulary.
 - A re-skinned Pterodactyl. The Panel's PHP/Laravel backend and Wings's Go
   daemon are preserved in `upstream/` as audit references and behavioral
   contracts; they are not part of ZIM's runtime architecture.

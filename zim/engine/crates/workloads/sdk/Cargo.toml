@@ -28,3 +28,8 @@ toml = { workspace = true }
 semver = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
+# M19: the shared health-check executor (sdk/src/health.rs) runs
+# TCP/HTTP probes over tokio's net surface; the executor lives in
+# the SDK so the Website and GenericContainer integrations share
+# one probe implementation instead of forking it.
+tokio = { workspace = true, features = ["net", "time", "macros", "rt", "io-util"] }

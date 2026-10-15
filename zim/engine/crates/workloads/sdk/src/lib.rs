@@ -49,11 +49,13 @@
 
 pub mod capabilities;
 pub mod errors;
+pub mod health;
 pub mod manifest;
 pub mod traits;
 
 pub use capabilities::{Capability, CapabilitySet};
 pub use errors::{IntegrationError, SpecError};
+pub use health::{run_health_probe, HealthCheckKind, HealthCheckSpec};
 pub use manifest::{IntegrationManifest, ManifestError, RuntimeKindRef, MANIFEST_VERSION};
 pub use traits::{ArchiveFormat, ArchiveRef, Health, Readiness, WorkloadIntegration};
 

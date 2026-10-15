@@ -16,6 +16,25 @@ path = "src/lib.rs"
 [dependencies]
 # The workload-kind discriminator this integration registers.
 zim_engine_domain = { workspace = true }
-# The integration SDK (trait + manifest + the declaration macro,
-# re-exported).
+# The integration SDK (trait + manifest).
 zim_engine_workloads_sdk = { workspace = true }
+# The runtime abstraction the workload handle bridges (Runtime,
+# InstanceConfig, ConsoleAttachment, ResourceUsage).
+zim_engine_application = { workspace = true }
+# Spec (de)serialization.
+serde = { workspace = true }
+serde_json = { workspace = true }
+# The §M19 file-watch restart's watcher backend (inotify on
+# Linux, FSEvents on macOS, ReadDirectoryChangesW on Windows).
+notify = { workspace = true }
+# The handle's sync→async bridge (a runtime Handle carried per
+# workload; capability calls block on it from worker threads).
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
+
+[dev-dependencies]
+# Unique watch roots and container names per test run.
+uuid = { workspace = true }
+# The Docker runtime factory + adapter the parity tests drive.
+zim_engine_runtime_docker = { workspace = true }
+# The docker client (the parity suite's container inspection).
+bollard = { workspace = true }

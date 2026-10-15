@@ -110,7 +110,18 @@ jobs:
     # minutes-scale (initdb / mariadb-install-db / mysqld
     # --initialize), so this job runs longer than the rest — by
     # design, not by accident.
-    name: Docker integration (runtime-docker + minecraft + database)
+    #
+    # M19: the Website / DevProcess / GenericContainer parity
+    # suites join — the static carrier's real nginx container
+    # (install/serve/deploy/rollback/retention + the HTTP/TCP
+    # health checks), the busybox dev-process stand-in (the
+    # notify-backed watch-restart supervision + the console
+    # surface), and the busybox generic container (the
+    # placement negotiation + the exec/network/health/
+    # filesystem capability family). The website's nginx boot is
+    # seconds-scale; the whole M19 family fits the job's own
+    # budget alongside its siblings.
+    name: Docker integration (runtime-docker + minecraft + database + website + dev_process + generic_container)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -151,6 +162,25 @@ jobs:
         # Redis containers (pulled by the runtime on first use — the
         # images land in the job's Docker cache together).
         run: cargo test -p zim_engine_workloads_database --all-targets
+
+      - name: cargo test -p zim_engine_workloads_website
+        # The §M19 website parity suite: the static carrier's real
+        # nginx container (pulled on first use) — install/serve,
+        # the deploy family's atomic switch, rollback, retention,
+        # and the HTTP/TCP health checks.
+        run: cargo test -p zim_engine_workloads_website --all-targets
+
+      - name: cargo test -p zim_engine_workloads_dev_process
+        # The §M19 dev-process parity suite: the busybox stand-in
+        # — the notify-backed watch-restart supervision, the
+        # console surface, and the policy posture.
+        run: cargo test -p zim_engine_workloads_dev_process --all-targets
+
+      - name: cargo test -p zim_engine_workloads_generic_container
+        # The §M19 generic-container parity suite: the busybox
+        # carrier — the placement negotiation and the exec /
+        # network / health / filesystem capability family.
+        run: cargo test -p zim_engine_workloads_generic_container --all-targets
 
       - name: cargo test -p zim_engine_files
         # The file API's §2.6/§2.7 attack suite is pure host-filesystem

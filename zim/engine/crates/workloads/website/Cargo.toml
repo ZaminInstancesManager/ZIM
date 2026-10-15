@@ -16,6 +16,29 @@ path = "src/lib.rs"
 [dependencies]
 # The workload-kind discriminator this integration registers.
 zim_engine_domain = { workspace = true }
-# The integration SDK (trait + manifest + the declaration macro,
-# re-exported).
+# The integration SDK (trait + manifest + the shared health-check
+# executor).
 zim_engine_workloads_sdk = { workspace = true }
+# The runtime abstraction the workload handle bridges (Runtime,
+# InstanceConfig, ResourceUsage).
+zim_engine_application = { workspace = true }
+# The Wings-parity file API (the FilesystemCapable implementation's
+# engine; the deploy family's release writes go through its
+# validated paths).
+zim_engine_files = { workspace = true }
+# Spec (de)serialization.
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Release ids for the deploy family's engine-controlled names.
+uuid = { workspace = true }
+# The handle's sync→async bridge (a runtime Handle carried per
+# workload; capability calls block on it from worker threads).
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
+
+[dev-dependencies]
+# The Docker runtime factory + adapter the parity tests drive.
+zim_engine_runtime_docker = { workspace = true }
+# The docker client (the parity suite's container inspection).
+bollard = { workspace = true }
+# Stream draining for the docker log surfaces.
+futures-util = { workspace = true }
