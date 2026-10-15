@@ -344,7 +344,14 @@ mod tests {
         // M22: the declared per-instance surfaces route (one shared
         // stub entrypoint, six surfaces; the metrics view renders
         // real samples, the rest are honest placeholders).
-        for surface in ["files", "settings", "backups", "schedules", "subusers", "metrics"] {
+        for surface in [
+            "files",
+            "settings",
+            "backups",
+            "schedules",
+            "subusers",
+            "metrics",
+        ] {
             let path = format!("servers/0a1b2c3d-0000-0000-0000-000000000000/{surface}");
             let (file, params) = package
                 .resolve_surface(&path)
