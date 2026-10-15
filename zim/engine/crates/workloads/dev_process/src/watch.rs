@@ -39,7 +39,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use notify::{Event, EventKind, RecursiveMode, Watcher as _};
 
@@ -131,7 +131,7 @@ impl FileWatcher {
             .name("zim-dev-watch".to_owned())
             .spawn(move || {
                 let mut pending: Vec<String> = Vec::new();
-                let mut last_event: Option<SystemTime> = None;
+                let mut last_event: Option<Instant> = None;
                 loop {
                     // The trailing debounce: consume every event
                     // as it arrives (updating the burst's last-event
@@ -146,9 +146,9 @@ impl FileWatcher {
                             if let Some(relative) =
                                 matching_paths(&event, &consumer_root, &patterns)
                             {
-                                let now = SystemTime::now();
+                                let now = Instant::now();
                                 if let Ok(mut last) = consumer_shared.last_event.lock() {
-                                    *last = Some(now);
+                                    *last = Some(SystemTime::now());
                                 }
                                 last_event = Some(now);
                                 for path in relative {
@@ -163,15 +163,12 @@ impl FileWatcher {
                     }
                     // Fire when the burst has settled: something
                     // is pending and the quiet window since its
-                    // last matching event has passed.
+                    // last matching event has passed (monotonic
+                    // time — a wall-clock adjustment must never
+                    // stall a dev loop's restart).
                     if !pending.is_empty() {
                         let settled = last_event
-                            .map(|last| {
-                                SystemTime::now()
-                                    .duration_since(last)
-                                    .unwrap_or(Duration::ZERO)
-                                    >= debounce
-                            })
+                            .map(|last| last.elapsed() >= debounce)
                             .unwrap_or(false);
                         if settled {
                             let request = RestartRequest {

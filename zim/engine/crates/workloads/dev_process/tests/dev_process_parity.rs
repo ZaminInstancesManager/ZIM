@@ -188,20 +188,6 @@ async fn wait_for_console_line(workload: &DevProcessWorkload, needle: &str) -> b
     }
 }
 
-/// Wait until the restart counter reaches `want`.
-async fn wait_for_restarts(workload: &DevProcessWorkload, want: u32) -> bool {
-    let deadline = Instant::now() + Duration::from_secs(60);
-    loop {
-        if workload.restarts() >= want {
-            return true;
-        }
-        if Instant::now() > deadline {
-            return false;
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
-}
-
 /// The suite gate: one suite at a time (the same posture the
 /// M18/M19 sibling parity suites take).
 static SUITE_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -238,11 +224,38 @@ async fn the_watch_restart_supervision() {
     assert_eq!(workload.restarts(), 0);
 
     // A matching write under the data root: the restart fires.
+    // (A second write rides along after a grace window — the
+    // watcher's diagnostics below pinpoint which link of the
+    // chain broke if neither fires a restart.)
     std::fs::create_dir_all(data_dir.join("src")).expect("create src");
     std::fs::write(data_dir.join("src/main.rs"), b"fn main() {}").expect("write the watched file");
-
+    let mut wrote_twice = false;
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        if workload.restarts() >= 1 {
+            break;
+        }
+        if !wrote_twice && deadline - Instant::now() < Duration::from_secs(50) {
+            wrote_twice = true;
+            std::fs::write(data_dir.join("src/lib.rs"), b"pub fn lib() {}")
+                .expect("write the watched file again");
+        }
+        if Instant::now() > deadline {
+            let (events_seen, requests_fired) = workload.watch_counters();
+            panic!(
+                "the matching write never restarted the process \
+                 (restarts: {}, events seen: {}, requests fired: {}, \
+                 watch state: {:?}, wrote twice: {wrote_twice})",
+                workload.restarts(),
+                events_seen,
+                requests_fired,
+                workload.watch_state(),
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
     assert!(
-        wait_for_restarts(&workload, 1).await,
+        workload.restarts() >= 1,
         "the matching write never restarted the process (restarts: {})",
         workload.restarts()
     );
