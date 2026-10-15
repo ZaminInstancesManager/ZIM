@@ -462,6 +462,13 @@ impl WebsiteWorkload {
 
     /// Point `current` at one release, atomically.
     ///
+    /// The link's target is *relative* — `releases/<id>` from the
+    /// link's own directory — so it resolves identically host-side
+    /// (where the deploy family writes) and container-side (where
+    /// the server's document root follows it through the bind
+    /// mount). An absolute host path would dangle inside the
+    /// container's mount namespace.
+    ///
     /// The engine-controlled names (the release id, the link
     /// name) are the only inputs to the symlink dance; user
     /// paths never reach it.
@@ -475,7 +482,8 @@ impl WebsiteWorkload {
                 "the release {release_id:?} does not exist under the releases directory"
             )));
         }
-        atomic_symlink_switch(&root, deploy::CURRENT_LINK, &target)
+        let relative_target = format!("{}/{}", deploy::RELEASES_DIR, release_id);
+        atomic_symlink_switch(&root, deploy::CURRENT_LINK, &relative_target)
     }
 
     /// Delete the oldest releases beyond the retention count.
@@ -705,7 +713,8 @@ fn new_release_id() -> String {
     format!("{millis:016x}-{}", uuid::Uuid::new_v4().simple())
 }
 
-/// The atomic symlink switch: point `link_name` at `target`
+/// The atomic symlink switch: point `link_name` at
+/// `link_target` (a path *relative to the link's own directory*)
 /// through a temp link + `rename(2)` — the rename replaces the
 /// link in one step, so a reader sees either the old target or
 /// the new one, never a missing link.
@@ -719,12 +728,12 @@ fn new_release_id() -> String {
 fn atomic_symlink_switch(
     root: &std::path::Path,
     link_name: &str,
-    target: &std::path::Path,
+    link_target: &str,
 ) -> Result<(), IntegrationError> {
     let link = root.join(link_name);
     let temp = root.join(format!(".{link_name}.switching"));
     let _ = std::fs::remove_file(&temp);
-    std::os::unix::fs::symlink(target, &temp).map_err(io_err)?;
+    std::os::unix::fs::symlink(link_target, &temp).map_err(io_err)?;
     std::fs::rename(&temp, &link).map_err(io_err)?;
     Ok(())
 }
@@ -736,7 +745,7 @@ fn atomic_symlink_switch(
 fn atomic_symlink_switch(
     _root: &std::path::Path,
     _link_name: &str,
-    _target: &std::path::Path,
+    _link_target: &str,
 ) -> Result<(), IntegrationError> {
     Err(IntegrationError::Runtime(
         "the release-switch symlink family is unix-only in M19 (the \
@@ -842,5 +851,26 @@ mod tests {
         // Creation order is lexical order (the rollback family's
         // "previous" depends on it).
         assert!(first < second, "{first} should sort before {second}");
+    }
+
+    #[test]
+    fn the_current_link_is_relative_so_it_resolves_on_both_sides() {
+        // The link must resolve host-side AND container-side: a
+        // relative target (releases/<id>) does — an absolute host
+        // path would dangle inside the container's mount
+        // namespace.
+        let root =
+            std::env::temp_dir().join(format!("zim-web-link-{}", uuid::Uuid::new_v4().simple()));
+        let releases = root.join(deploy::RELEASES_DIR);
+        std::fs::create_dir_all(releases.join("abc")).expect("create the release");
+        atomic_symlink_switch(&root, deploy::CURRENT_LINK, "releases/abc").expect("switch");
+        let link = root.join(deploy::CURRENT_LINK);
+        let target = std::fs::read_link(&link).expect("the link reads");
+        assert_eq!(target, std::path::Path::new("releases/abc"));
+        // And it resolves: the directory exists through the link.
+        assert!(link.join("anything").parent().is_some());
+        let resolved = std::fs::canonicalize(&link).expect("the link resolves");
+        assert!(resolved.ends_with("releases/abc"));
+        std::fs::remove_dir_all(&root).ok();
     }
 }

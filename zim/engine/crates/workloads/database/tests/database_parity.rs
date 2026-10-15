@@ -347,9 +347,25 @@ async fn eval_ok_retrying(workload: &DatabaseWorkload, statement: &str) -> Strin
         }
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        // The retryable family: the connection-level failures a
+        // first boot (or a mid-statement server transition) can
+        // answer while the engine is coming up or handing over —
+        // the official images' entrypoints stop their init-phase
+        // temporary server before exec-ing the real one, so a
+        // readiness probe that passed against the temporary
+        // server can leave the next statement racing that
+        // shutdown window (M19's dev loop hit both forms: "the
+        // database system is shutting down" and the mid-statement
+        // "administrator command" termination). The statements the
+        // suite runs are either idempotent or crash-window safe
+        // (an uncommitted statement rolls back with the
+        // connection), so the retry is the honest posture.
         let connection_shaped = stderr.contains("could not connect")
             || stderr.contains("Connection refused")
             || stderr.contains("Can't connect")
+            || stderr.contains("is shutting down")
+            || stderr.contains("administrator command")
+            || stderr.contains("server closed the connection unexpectedly")
             || stdout.contains("Connection refused");
         if !connection_shaped || tokio::time::Instant::now() >= deadline {
             panic!("statement {statement:?} failed: {stdout}{stderr}");

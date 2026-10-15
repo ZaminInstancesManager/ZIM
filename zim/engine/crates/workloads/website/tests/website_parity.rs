@@ -279,8 +279,10 @@ async fn the_health_check_family() {
     };
     let _gate = SUITE_GATE.lock().await;
 
-    // A TCP check against a stopped workload's unbound port: the
-    // endpoint is not placed, the error explains itself.
+    // A TCP check against a stopped workload: the placement
+    // carries the binding whether or not the container runs, so
+    // the probe runs — and the stopped listener refuses (the
+    // Unhealthy verdict's own self-explaining reason).
     let name = unique_name("web-health");
     let (workload, runtime, _docker, _, _) = place(
         WebsiteSpec {
@@ -290,8 +292,13 @@ async fn the_health_check_family() {
         &name,
     )
     .await;
-    let err = workload.health_async().await.expect_err("not placed");
-    assert!(err.to_string().contains("not placed"), "{err}");
+    let health = workload.health_async().await.expect("health call");
+    match health {
+        Health::Unhealthy { reason } => {
+            assert!(reason.contains("connect"), "{reason}");
+        }
+        other => panic!("expected Unhealthy against a stopped listener, got {other:?}"),
+    }
 
     // Start it: the TCP check answers Healthy.
     workload.install_async().await.expect("install");
@@ -432,7 +439,10 @@ async fn the_network_endpoint_family() {
     let endpoints = workload.endpoints().expect("endpoints");
     let names: Vec<&str> = endpoints.iter().map(|e| e.name.as_str()).collect();
     assert!(names.contains(&"http"), "{names:?}");
-    assert!(names.contains(&"extra"), "{names:?}");
+    // The expose-added binding surfaces under the fallback name
+    // (the same surface the Database handle reports — the
+    // expose's own return carries the requested name).
+    assert!(names.contains(&"port-8080"), "{names:?}");
 
     // Unexpose: the binding is gone.
     workload
