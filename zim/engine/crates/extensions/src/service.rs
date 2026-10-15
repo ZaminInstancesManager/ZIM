@@ -345,7 +345,9 @@ impl ExtensionsService {
 
     /// The shared install path (uploads and bundled seeds).
     fn install_package(&self, package: AddonPackage) -> Result<AddonSummary, ExtensionError> {
-        let manifest = package.manifest;
+        // Clone the manifest out (the package stays whole for the
+        // file-map borrow below — `files()` takes `&self`).
+        let manifest = package.manifest.clone();
 
         // Generation + engine compatibility. The API-generation
         // check follows the frontend loader's smoke-gate discipline:
