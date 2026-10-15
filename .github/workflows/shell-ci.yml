@@ -106,10 +106,9 @@ jobs:
 
       # M25 diagnostic: on Windows the shell's test binary has hit
       # STATUS_ENTRYPOINT_NOT_FOUND at load (a missing DLL export).
-      # Compile the test binary without running it, probe THE exact
-      # executable cargo test would run, and dump its import table
-      # (dumpbin via vswhere — the loader's own message is silent in
-      # CI, so the import list is the evidence trail).
+      # Compile the test binary, dump its import table, and resolve
+      # EVERY (dll, symbol) pair live via LoadLibrary/GetProcAddress
+      # — the pair that fails to resolve IS the missing entry point.
       - name: Probe the Windows test binary load
         if: runner.os == 'Windows'
         shell: pwsh
@@ -126,21 +125,40 @@ jobs:
           $output = cmd /c "`"$exe`" --list 2>&1"
           Write-Host $output
           $vswhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
-          if (Test-Path $vswhere) {
-            $installPath = & $vswhere -latest -property installationPath
-            $dumpbin = Get-ChildItem "$installPath\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" -ErrorAction SilentlyContinue |
-              Select-Object -First 1
-            if ($dumpbin) {
-              Write-Host "== dumpbin /imports of $exe"
-              & $dumpbin.FullName /imports $exe |
-                Select-String -Pattern '^\s+\S+\.dll' |
-                ForEach-Object { $_.Line.Trim() }
-            } else {
-              Write-Host 'dumpbin not found under the VS installation'
+          if (-not (Test-Path $vswhere)) { Write-Host 'vswhere not found'; exit 0 }
+          $installPath = & $vswhere -latest -property installationPath
+          $dumpbin = Get-ChildItem "$installPath\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $dumpbin) { Write-Host 'dumpbin not found'; exit 0 }
+          Write-Host "== resolving every import of $exe"
+          $lines = & $dumpbin.FullName /imports $exe
+          $member = '[DllImport("kernel32", SetLastError=true, CharSet=CharSet.Ansi)] public static extern IntPtr LoadLibrary(string name); [DllImport("kernel32", SetLastError=true, CharSet=CharSet.Ansi)] public static extern IntPtr GetProcAddress(IntPtr module, string name);'
+          $probe = Add-Type -MemberDefinition $member -Name NativeProbe -Namespace Zim -PassThru
+          $currentDll = $null
+          $missing = 0
+          $checked = 0
+          foreach ($line in $lines) {
+            $trimmed = $line.Trim()
+            if ($trimmed -match '^(\S+\.dll)$') {
+              $currentDll = $Matches[1]
+              continue
             }
-          } else {
-            Write-Host 'vswhere not found'
+            if ($null -ne $currentDll -and $trimmed -match '^[A-Za-z_][A-Za-z0-9_@]*$' -and $trimmed.Length -gt 2) {
+              $checked += 1
+              $module = $probe::LoadLibrary($currentDll)
+              if ($module -eq [IntPtr]::Zero) {
+                Write-Host "MISSING DLL: $currentDll (LoadLibrary failed: $([System.Runtime.InteropServices.Marshal]::GetLastWin32Error()))"
+                $missing += 1
+                continue
+              }
+              $proc = $probe::GetProcAddress($module, $trimmed)
+              if ($proc -eq [IntPtr]::Zero) {
+                Write-Host "MISSING EXPORT: $currentDll ! $trimmed"
+                $missing += 1
+              }
+            }
           }
+          Write-Host "== checked $checked imports, $missing missing"
           exit 0
 
       - name: cargo test
