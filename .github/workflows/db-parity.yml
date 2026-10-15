@@ -1,0 +1,59 @@
+name: DB Parity (M18 dev loop)
+
+# The M18 iteration loop: the database parity suite (real
+# Postgres / MariaDB / MySQL / Redis containers) on demand, on any
+# ref — the fast path for fixing the suite without pushing to
+# main. engine-ci.yml runs the same suite on main pushes; this
+# workflow exists so the dev branches get the same signal (the
+# main workflow's branch filter only fires on main).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [m18-dev]
+
+concurrency:
+  group: db-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_BACKTRACE: 1
+  RUSTFLAGS: "-D warnings"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  db-parity:
+    name: Database parity suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: zim/engine
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker sanity (daemon version + network room)
+        run: |
+          docker version
+          docker network ls
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: zim/engine
+          prefix-key: engine-docker-integration
+
+      - name: cargo test -p zim_engine_workloads_database
+        # The §M18 parity suite, serialized by its own suite gate
+        # (the engines' first boots are minutes-scale); every
+        # readiness failure dumps the container's own logs, so the
+        # run's log is the diagnosis.
+        run: cargo test -p zim_engine_workloads_database --all-targets

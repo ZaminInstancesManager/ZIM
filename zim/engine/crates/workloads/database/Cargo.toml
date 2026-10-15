@@ -42,6 +42,13 @@ zim_engine_runtime_docker = { workspace = true }
 bollard = { workspace = true }
 # Unique container names and temp data dirs per test run.
 uuid = { workspace = true }
+# The docker-archive unpack for the migration ship (the daemon's
+# file-transfer blob lands host-side as a tar).
+tar = { workspace = true }
+# Stream draining for the docker log/transfer surfaces.
+futures-util = { workspace = true }
+# Byte buffers for the transfer body.
+bytes = "1"
 # The parity tests run on a multi-thread runtime (the spawn_blocking
 # ↔ Handle::block_on bridge requires workers to drive IO/timers
 # while a blocking thread awaits a capability call).

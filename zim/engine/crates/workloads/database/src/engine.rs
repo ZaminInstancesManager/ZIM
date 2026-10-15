@@ -398,7 +398,11 @@ impl DatabaseEngine {
                     argv.push("-a".to_owned());
                     argv.push(creds.password.clone());
                 }
-                argv.push(statement.to_owned());
+                // redis-cli's native argv shape: the command and
+                // its arguments are separate words (the SQL
+                // engines take one statement string; redis takes
+                // words).
+                argv.extend(statement.split_whitespace().map(str::to_owned));
                 argv
             }
         }
@@ -489,19 +493,110 @@ impl DatabaseEngine {
         }
     }
 
-    /// The engine's snapshot mode (how
-    /// [`DatabaseWorkload::snapshot_async`][crate::DatabaseWorkload]
-    /// produces the archive).
-    pub fn snapshot_mode(&self) -> SnapshotMode {
-        match self {
-            // The snapshot tree inside the data directory (the
-            // snapshot store itself) is excluded from every
-            // archive.
-            DatabaseEngine::Postgres | DatabaseEngine::Redis => SnapshotMode::HostArchive {
-                exclude: "snapshots".to_owned(),
-            },
-            DatabaseEngine::MySql | DatabaseEngine::MariaDb => SnapshotMode::ContainerTarUnderLock,
+    /// The snapshot store's name inside the engine's data
+    /// directory (the container-side archive target; every archive
+    /// excludes it so an archive never contains itself).
+    pub const SNAPSHOT_DIR: &str = "snapshots";
+
+    /// Whether the engine's running-state snapshot holds
+    /// `FLUSH TABLES WITH READ LOCK` across the archive (the MySQL
+    /// family's online form; the other engines quiesce with their
+    /// own command first).
+    pub fn uses_lock_held_snapshot(&self) -> bool {
+        matches!(self, DatabaseEngine::MySql | DatabaseEngine::MariaDb)
+    }
+
+    /// The container-side archive shell line (the `sh -c` body that
+    /// produces one snapshot archive inside the engine's data
+    /// directory).
+    ///
+    /// The line is `&&`-chained with no `;` (the MySQL family embeds
+    /// it inside a client `SYSTEM` command, and the client's `-e`
+    /// parser splits on semicolons), `tar`'s warnings are swallowed
+    /// (`|| true` — a flushing InnoDB may legitimately change files
+    /// mid-archive), and the trailing `stat` is the verification:
+    /// it only runs when the chain got there, and its output (the
+    /// archive's byte size) is the snapshot's success contract.
+    ///
+    /// The archive runs *container-side on purpose*: the engines'
+    /// entrypoints take ownership of the data directory (Postgres
+    /// `chown`s + `chmod 700`s it, the MySQL family `chown -R`s it),
+    /// so the host-side actor — non-root in CI, the engine user in
+    /// production — cannot rely on reading through it. The
+    /// container-side `tar` (as the root entrypoint user) reads any
+    /// ownership, and the daemon's own file-transfer surface (the
+    /// `docker cp` API) is how the archive ships between nodes.
+    pub fn archive_shell(&self, data_dir: &str, archive_path: &str) -> String {
+        format!(
+            "mkdir -p {data_dir}/{} && (tar -czf {data_dir}/{archive_path} \
+             --exclude={} -C {data_dir} . || true) && stat -c %s {data_dir}/{archive_path}",
+            Self::SNAPSHOT_DIR,
+            Self::SNAPSHOT_DIR,
+        )
+    }
+
+    /// The exec argv for one running-state snapshot (per engine: the
+    /// MySQL family folds the archive into the lock-held client
+    /// session; the others run the shell line directly after their
+    /// own quiesce command).
+    pub fn snapshot_exec_argv(
+        &self,
+        creds: &DatabaseCredentials,
+        data_dir: &str,
+        archive_path: &str,
+    ) -> Vec<String> {
+        let shell = self.archive_shell(data_dir, archive_path);
+        if self.uses_lock_held_snapshot() {
+            let binary = if matches!(self, DatabaseEngine::MySql) {
+                "mysql"
+            } else {
+                "mariadb"
+            };
+            let statement = format!("FLUSH TABLES WITH READ LOCK; SYSTEM {shell}; UNLOCK TABLES;");
+            let mut argv = vec![
+                binary.to_owned(),
+                "--protocol=tcp".to_owned(),
+                "-h".to_owned(),
+                "127.0.0.1".to_owned(),
+                "-u".to_owned(),
+                creds.username.clone().unwrap_or_else(|| "root".to_owned()),
+            ];
+            if !creds.password.is_empty() {
+                argv.push(format!("-p{}", creds.password));
+            }
+            argv.push("-e".to_owned());
+            argv.push(statement);
+            argv
+        } else {
+            vec!["/bin/sh".to_owned(), "-c".to_owned(), shell]
         }
+    }
+
+    /// The restore shell script (the one-shot restore container's
+    /// body): clear the data directory except the snapshot store,
+    /// then extract the snapshot archive into place.
+    ///
+    /// The clear uses the `ls | grep | xargs` pipeline — the most
+    /// portable form across the images' shells (busybox ash on the
+    /// alpine images, bash on the debian-family ones) — and `xargs
+    /// -r` keeps an empty directory a no-op.
+    pub fn restore_script(&self, data_dir: &str, archive_path: &str) -> String {
+        format!(
+            "cd {data_dir} && ls -A | grep -v '^{}$' | xargs -r rm -rf \
+             && tar -xzf {data_dir}/{archive_path} -C {data_dir}",
+            Self::SNAPSHOT_DIR,
+        )
+    }
+
+    /// The one-shot restore container's command (the entrypoints
+    /// pass non-server commands straight through to `exec`, as
+    /// root, which is exactly what a data-directory rewrite needs).
+    pub fn restore_exec_argv(&self, data_dir: &str, archive_path: &str) -> Vec<String> {
+        vec![
+            "/bin/sh".to_owned(),
+            "-c".to_owned(),
+            self.restore_script(data_dir, archive_path),
+        ]
     }
 
     /// The migration-marker argv (the point-in-time statement in
@@ -583,24 +678,6 @@ impl std::str::FromStr for DatabaseEngine {
             )),
         }
     }
-}
-
-/// How one engine's snapshot is produced.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SnapshotMode {
-    /// Quiesce via the engine command, then archive the data
-    /// directory host-side (the file API's archive over the
-    /// top-level entries, minus the `exclude` tree).
-    HostArchive {
-        /// The data-directory-internal tree archives never contain
-        /// (the snapshot store itself).
-        exclude: String,
-    },
-    /// The MySQL family: one exec whose client session holds
-    /// `FLUSH TABLES WITH READ LOCK` across the container-side
-    /// `tar` (the `SYSTEM` trick) writing the archive into the
-    /// bind-mounted snapshot tree.
-    ContainerTarUnderLock,
 }
 
 #[cfg(test)]
@@ -694,22 +771,25 @@ mod tests {
     }
 
     #[test]
-    fn the_mysql_family_quiesces_with_the_lock_held_archive() {
+    fn the_mysql_family_snapshots_with_the_lock_held_archive() {
         let creds = DatabaseCredentials {
             username: Some("root".to_owned()),
             password: "pw".to_owned(),
             database: None,
             app_password: None,
         };
-        let argv = DatabaseEngine::MariaDb
-            .quiesce_archive_argv(&creds, "/var/lib/mysql", "snapshots/pre-migrate.tar.gz")
-            .expect("mariadb quiesce argv");
+        let argv = DatabaseEngine::MariaDb.snapshot_exec_argv(
+            &creds,
+            "/var/lib/mysql",
+            "snapshots/pre-migrate.tar.gz",
+        );
         let statement = argv.last().unwrap();
         assert!(statement.starts_with("FLUSH TABLES WITH READ LOCK"));
         assert!(statement.contains("SYSTEM "));
         assert!(statement.ends_with("UNLOCK TABLES;"));
-        // The shell command has no semicolons (the client's -e
-        // parser would split them into separate statements).
+        // The shell line embedded in the SYSTEM command has no
+        // semicolons (the client's -e parser would split them into
+        // separate statements).
         let shell = statement
             .split("SYSTEM ")
             .nth(1)
@@ -718,21 +798,38 @@ mod tests {
             .next()
             .unwrap();
         assert!(!shell.contains(';'), "shell command: {shell:?}");
+        // The archive excludes the store and verifies with stat.
         assert!(shell.contains("--exclude=snapshots"));
         assert!(shell.contains("tar -czf /var/lib/mysql/snapshots/pre-migrate.tar.gz"));
+        assert!(shell.contains("stat -c %s"));
 
-        // The host-archive engines have no lock-held form.
-        assert!(DatabaseEngine::Postgres
-            .quiesce_archive_argv(&postgres_creds(), "/pgdata", "x.tar.gz")
-            .is_none());
-        // And vice versa.
-        assert!(DatabaseEngine::MySql.quiesce_argv(&creds).is_none());
-        assert!(DatabaseEngine::Postgres
-            .quiesce_argv(&postgres_creds())
-            .is_some());
-        assert!(DatabaseEngine::Redis
-            .quiesce_argv(&DatabaseCredentials::default())
-            .is_some());
+        // The separate-quiesce engines run the shell line directly.
+        let argv = DatabaseEngine::Postgres.snapshot_exec_argv(
+            &postgres_creds(),
+            "/pgdata",
+            "snapshots/x.tar.gz",
+        );
+        assert_eq!(argv[0], "/bin/sh");
+        assert_eq!(argv[1], "-c");
+        assert!(argv[2].starts_with("mkdir -p /pgdata/snapshots"));
+        assert!(argv[2].contains("|| true) && stat -c %s"));
+    }
+
+    #[test]
+    fn the_restore_script_clears_and_extracts() {
+        for engine in DatabaseEngine::ALL {
+            let script = engine.restore_script("/data", "snapshots/pre.tar.gz");
+            assert!(script.starts_with("cd /data && ls -A"), "{engine}");
+            assert!(script.contains("grep -v '^snapshots$'"), "{engine}");
+            assert!(script.contains("xargs -r rm -rf"), "{engine}");
+            assert!(
+                script.contains("tar -xzf /data/snapshots/pre.tar.gz -C /data"),
+                "{engine}"
+            );
+            let argv = engine.restore_exec_argv("/data", "snapshots/pre.tar.gz");
+            assert_eq!(argv[0], "/bin/sh");
+            assert_eq!(argv[1], "-c");
+        }
     }
 
     #[test]
@@ -825,21 +922,9 @@ mod tests {
 
     #[test]
     fn the_snapshot_modes_split_by_family() {
-        assert!(matches!(
-            DatabaseEngine::Postgres.snapshot_mode(),
-            SnapshotMode::HostArchive { .. }
-        ));
-        assert!(matches!(
-            DatabaseEngine::Redis.snapshot_mode(),
-            SnapshotMode::HostArchive { .. }
-        ));
-        assert_eq!(
-            DatabaseEngine::MySql.snapshot_mode(),
-            SnapshotMode::ContainerTarUnderLock
-        );
-        assert_eq!(
-            DatabaseEngine::MariaDb.snapshot_mode(),
-            SnapshotMode::ContainerTarUnderLock
-        );
+        assert!(!DatabaseEngine::Postgres.uses_lock_held_snapshot());
+        assert!(!DatabaseEngine::Redis.uses_lock_held_snapshot());
+        assert!(DatabaseEngine::MySql.uses_lock_held_snapshot());
+        assert!(DatabaseEngine::MariaDb.uses_lock_held_snapshot());
     }
 }

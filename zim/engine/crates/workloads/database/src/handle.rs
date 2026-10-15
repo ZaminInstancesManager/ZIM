@@ -55,7 +55,7 @@ use std::time::Duration;
 
 use zim_engine_application::supervision::{
     ExecCommand as RuntimeExecCommand, ExecOutput as RuntimeExecOutput, InstanceConfig,
-    ResourceUsage as RuntimeUsage, Runtime, RuntimeError,
+    ObservedState, ResourceUsage as RuntimeUsage, Runtime, RuntimeError,
 };
 use zim_engine_files::{FileError, Filesystem};
 use zim_engine_workloads_sdk::errors::IntegrationError;
@@ -65,13 +65,16 @@ use zim_engine_workloads_sdk::traits::{
     ReadyProbeCapable, ResourceUsage as SdkUsage, SnapshotCapable, SnapshotRef,
 };
 
-use crate::engine::{DatabaseEngine, SnapshotMode};
+use crate::engine::DatabaseEngine;
 use crate::lifecycle::DEFAULT_STOP_DEADLINE;
 use crate::probe::classify_probe;
 use crate::spec::DatabaseSpec;
 
 /// How often readiness polls.
 const READINESS_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+/// How often the one-shot containers' exit is polled.
+const EXIT_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 /// How often the Redis BGSAVE completion poll runs.
 const BGSAVE_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -326,8 +329,18 @@ impl DatabaseWorkload {
 
     // ── The snapshot family ─────────────────────────────────────
 
-    /// The snapshot store's data-directory-relative tree.
+    /// The snapshot store's data-directory-relative tree (the
+    /// engine table's own constant, re-declared for the archive
+    /// path helper).
     const SNAPSHOT_DIR: &'static str = "snapshots";
+
+    /// How long one container-side archive (the snapshot exec or
+    /// the one-shot archive container) may run.
+    const ARCHIVE_TIMEOUT: Duration = Duration::from_secs(300);
+
+    /// How long the one-shot containers (archive, restore) may take
+    /// to run to exit.
+    const ONE_SHOT_DEADLINE: Duration = Duration::from_secs(120);
 
     /// The archive path (data-directory-relative) one label maps
     /// onto.
@@ -357,94 +370,112 @@ impl DatabaseWorkload {
     }
 
     /// Take one snapshot: quiesce the engine its own way, then
-    /// archive the data directory (§M18's `SnapshotCapable`).
+    /// archive the data directory container-side (§M18's
+    /// `SnapshotCapable`).
     ///
     /// The quiesce-then-archive sequence per engine:
     ///
     /// - **Postgres** — `CHECKPOINT` (flush + checkpoint record),
-    ///   then the host-side archive of the data directory minus
-    ///   the snapshot store. The image is crash-consistent; the
-    ///   WAL inside it replays on restore.
+    ///   then the container-side `tar` of the data directory minus
+    ///   the snapshot store. The image is crash-consistent; the WAL
+    ///   inside it replays on restore.
     /// - **MySQL / MariaDB** — one exec whose client session holds
     ///   `FLUSH TABLES WITH READ LOCK` across a container-side
-    ///   `tar` of the data directory (the `SYSTEM` trick) writing
-    ///   the archive directly into the snapshot store. The
+    ///   `tar` of the data directory (the `SYSTEM` trick). Writes
+    ///   are blocked for the archive's whole duration; the
     ///   session's nonzero exit is tolerated while the archive
     ///   itself verifies (tar's "file changed as we read it"
     ///   warning on a flushing InnoDB is expected).
     /// - **Redis** — `BGSAVE`, polled until the RDB write
-    ///   completes, then the host-side archive of the data
-    ///   directory minus the snapshot store.
+    ///   completes, then the container-side `tar`.
+    ///
+    /// A **stopped** workload snapshots through the one-shot
+    /// container: the stop *was* the quiesce (Postgres's fast
+    /// shutdown checkpoints and exits; Redis's shutdown-save
+    /// persists), so the archive container runs the same shell line
+    /// without any engine quiesce — the migration flow's
+    /// snapshot-after-prepare rides exactly this path.
+    ///
+    /// The verification is the shell line's own trailing `stat`
+    /// (the archive's byte size in the exec's output) — the
+    /// host-side actor cannot stat through the engines'
+    /// ownership-taken data directories, so the in-container
+    /// `stat` is the honest contract.
     pub async fn snapshot_async(&self, label: &str) -> Result<SnapshotRef, IntegrationError> {
         Self::validate_label(label)?;
         let creds = self.spec.resolved_credentials();
-        match self.spec.engine.snapshot_mode() {
-            SnapshotMode::HostArchive { .. } => {
-                // A stopped engine is quiesced by construction (the
-                // stop *was* the consistency step — Postgres's fast
-                // shutdown checkpoints and exits, Redis's
-                // shutdown-save persists), so the migration flow's
-                // snapshot-after-quiesce skips the exec and archives
-                // directly. A running engine takes its own quiesce
-                // step first (§M18: CHECKPOINT / BGSAVE).
-                match self.runtime.state().await {
-                    Ok(state) if state.is_running() => {
-                        self.quiesce_host_archive_async(&creds).await?;
-                    }
-                    Ok(_) => {}
-                    Err(err) => return Err(runtime_err(err)),
-                }
-                self.archive_data_dir_async(label).await
+        let archive_path = Self::archive_path(label);
+        let data_dir = self
+            .cfg
+            .read()
+            .expect("the instance-config lock is only held briefly")
+            .container_data_dir
+            .to_string_lossy()
+            .into_owned();
+
+        let running = self
+            .runtime
+            .state()
+            .await
+            .map_err(runtime_err)?
+            .is_running();
+        if running {
+            if !self.spec.engine.uses_lock_held_snapshot() {
+                self.quiesce_async(&creds).await?;
             }
-            SnapshotMode::ContainerTarUnderLock => {
-                // The store must exist host-side before the
-                // container-side tar writes into it (the bind mount
-                // carries it).
-                let root = self.files.root().to_path_buf();
-                std::fs::create_dir_all(root.join(Self::SNAPSHOT_DIR)).map_err(|e| {
-                    IntegrationError::File(format!("cannot create snapshot store: {e}"))
-                })?;
-                let archive_path = Self::archive_path(label);
-                let argv = self
-                    .spec
-                    .engine
-                    .quiesce_archive_argv(
-                        &creds,
-                        &self
-                            .cfg
-                            .read()
-                            .expect("the instance-config lock is only held briefly")
-                            .container_data_dir
-                            .to_string_lossy(),
-                        &archive_path,
-                    )
-                    .expect("the mysql family quiesce form");
-                // The client's exit is advisory here: the lock-held
-                // tar's warnings (file-changed) surface as a nonzero
-                // client exit while the archive is still produced;
-                // the verification below is the contract.
-                let output = self
-                    .exec_argv_async(&argv, Duration::from_secs(120))
-                    .await?;
-                let exit = output.exit_code.unwrap_or(-1);
-                if exit != 0 {
-                    eprintln!(
-                        "zim: the {} lock-held snapshot's client exited {exit} \
-                         (tolerated while the archive verifies): {}",
-                        self.spec.engine,
-                        String::from_utf8_lossy(&output.stderr).trim()
-                    );
-                }
-                self.verify_archive_async(&archive_path).await?;
-                Ok(SnapshotRef {
-                    label: label.to_owned(),
-                })
+            let argv = self
+                .spec
+                .engine
+                .snapshot_exec_argv(&creds, &data_dir, &archive_path);
+            let output = self.exec_argv_async(&argv, Self::ARCHIVE_TIMEOUT).await?;
+            let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+            let exit = output.exit_code.unwrap_or(-1);
+            // The stat line at the output's tail is the success
+            // contract (a positive byte size); the exit code is
+            // strict for the direct-shell engines and advisory for
+            // the lock-held family (a warning-exiting tar inside
+            // the client session is tolerated while the archive
+            // verifies).
+            let size = stdout
+                .lines()
+                .rev()
+                .find(|line| !line.trim().is_empty())
+                .and_then(|line| line.trim().parse::<u64>().ok())
+                .unwrap_or(0);
+            let tolerated_exit = self.spec.engine.uses_lock_held_snapshot();
+            if size == 0 || (!tolerated_exit && exit != 0) {
+                return Err(IntegrationError::Runtime(format!(
+                    "the {} snapshot archive did not verify (exit {exit}, \
+                     size {size}): {}{}",
+                    self.spec.engine,
+                    stdout.trim(),
+                    stderr.trim()
+                )));
             }
+            if tolerated_exit && exit != 0 {
+                eprintln!(
+                    "zim: the {} lock-held snapshot's client exited {exit} \
+                     (tolerated; the archive verified at {size} bytes): {}",
+                    self.spec.engine,
+                    stderr.trim()
+                );
+            }
+        } else {
+            // The stopped path: a one-shot archive container (the
+            // stop was the quiesce).
+            let script = self.spec.engine.archive_shell(&data_dir, &archive_path);
+            self.run_one_shot_container(&script, Self::ONE_SHOT_DEADLINE)
+                .await?;
         }
+        Ok(SnapshotRef {
+            label: label.to_owned(),
+        })
     }
 
-    /// The host-archive engines' quiesce step.
-    async fn quiesce_host_archive_async(
+    /// The running engines' quiesce step (Postgres's CHECKPOINT;
+    /// Redis's BGSAVE polled to completion).
+    async fn quiesce_async(
         &self,
         creds: &crate::spec::DatabaseCredentials,
     ) -> Result<(), IntegrationError> {
@@ -498,7 +529,7 @@ impl DatabaseWorkload {
             }
             DatabaseEngine::MySql | DatabaseEngine::MariaDb => Err(IntegrationError::unsupported(
                 "org.zaminmc.workload.database",
-                "quiesce_host_archive_async",
+                "quiesce_async",
             )),
         }
     }
@@ -517,121 +548,102 @@ impl DatabaseWorkload {
             .any(|line| line.trim().starts_with("rdb_bgsave_in_progress:0")))
     }
 
-    /// Archive the data directory host-side (the file API's
-    /// archive over the top-level entries minus the snapshot
-    /// store) into `snapshots/<label>.tar.gz`.
-    async fn archive_data_dir_async(&self, label: &str) -> Result<SnapshotRef, IntegrationError> {
-        let entries = self.files.list_dir(".").map_err(file_err)?;
-        let allow: Vec<String> = entries
-            .iter()
-            .map(|entry| entry.name.clone())
-            .filter(|name| name != Self::SNAPSHOT_DIR)
-            .collect();
-        if allow.is_empty() {
-            return Err(IntegrationError::File(
-                "the data directory is empty; nothing to archive".to_owned(),
-            ));
-        }
-        let allow_refs: Vec<&str> = allow.iter().map(String::as_str).collect();
-        self.files.mkdir(Self::SNAPSHOT_DIR).map_err(file_err)?;
-        let dest = Self::archive_path(label);
-        let bytes = self
-            .files
-            .archive(&dest, &allow_refs, zim_engine_files::ArchiveFormat::TarGz)
-            .map_err(file_err)?;
-        let _ = bytes;
-        self.verify_archive_async(&dest).await?;
-        Ok(SnapshotRef {
-            label: label.to_owned(),
-        })
-    }
-
-    /// Verify one archive exists in the snapshot store with
-    /// content (the lock-held path's contract, run for both modes).
-    async fn verify_archive_async(&self, archive_path: &str) -> Result<(), IntegrationError> {
-        // The path is handle-built (validated label), so the stat
-        // cannot be a traversal; a missing/empty archive is the
-        // failure vocabulary.
-        let stat = self
-            .files
-            .stat(archive_path)
-            .map_err(|e| IntegrationError::File(format!("the snapshot archive is absent: {e}")))?;
-        if stat.is_dir || stat.size == 0 {
-            return Err(IntegrationError::File(format!(
-                "the snapshot archive {archive_path:?} is empty"
-            )));
-        }
-        Ok(())
-    }
-
-    /// Restore one snapshot (§M18): stop the workload, clear the
-    /// data directory (keeping the snapshot store), extract the
-    /// archive, and relaunch — ready when the engine's probe says
-    /// so (the recovery log replays on the way up).
+    /// Restore one snapshot (§M18): stop the workload, run the
+    /// one-shot restore container (clear the data directory except
+    /// the snapshot store, extract the archive), and relaunch —
+    /// ready when the engine's probe says so (the recovery log
+    /// replays on the way up).
+    ///
+    /// The one-shot container is the engine's own entrypoint
+    /// running a shell command instead of the server binary: the
+    /// entrypoints pass non-server commands straight to `exec` as
+    /// the root entrypoint user, which is exactly the privilege the
+    /// data-directory rewrite needs (the engines' entrypoints
+    /// `chown` the restored files on the next real start).
     pub async fn restore_snapshot_async(
         &self,
         snapshot: &SnapshotRef,
     ) -> Result<(), IntegrationError> {
         Self::validate_label(&snapshot.label)?;
         let archive_path = Self::archive_path(&snapshot.label);
-        self.verify_archive_async(&archive_path).await?;
+        let data_dir = self
+            .cfg
+            .read()
+            .expect("the instance-config lock is only held briefly")
+            .container_data_dir
+            .to_string_lossy()
+            .into_owned();
 
         // 1. Stop (an already-offline workload is fine — the
         //    runtime's 404 tolerance).
         self.stop_async().await?;
 
-        // 2. Clear the data directory, keeping the snapshot store
-        //    (the restore's own source).
-        let entries = self.files.list_dir(".").map_err(file_err)?;
-        for entry in entries {
-            if entry.name != Self::SNAPSHOT_DIR {
-                self.files.delete(&entry.name).map_err(file_err)?;
-            }
-        }
+        // 2. The one-shot restore container (clear + extract,
+        //    exit 0 required).
+        let script = self.spec.engine.restore_script(&data_dir, &archive_path);
+        self.run_one_shot_container(&script, Self::ONE_SHOT_DEADLINE)
+            .await?;
 
-        // 3. Extract into a staging tree inside the snapshot store
-        //    (the file API's extract takes a destination directory;
-        //    the archive's entries then move up into the root —
-        //    same-filesystem renames, one level deep).
-        let staging = format!(
-            "{}/.restore-{}",
-            Self::SNAPSHOT_DIR,
-            snapshot
-                .label
-                .chars()
-                .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                    c
-                } else {
-                    '_'
-                })
-                .collect::<String>()
-        );
-        self.files
-            .extract(&archive_path, &staging)
-            .map(|_| ())
-            .map_err(file_err)?;
-        let staging_entries = self.files.list_dir(&staging).map_err(file_err)?;
-        let root = self.files.root().to_path_buf();
-        let staging_abs = root.join(&staging);
-        for entry in staging_entries {
-            let from = staging_abs.join(&entry.name);
-            let to = root.join(&entry.name);
-            std::fs::rename(&from, &to).map_err(|e| {
-                IntegrationError::File(format!(
-                    "cannot move the restored entry {:?} into place: {e}",
-                    entry.name
-                ))
-            })?;
-        }
-        std::fs::remove_dir_all(&staging_abs).map_err(|e| {
-            IntegrationError::File(format!("cannot remove the restore staging tree: {e}"))
-        })?;
-
-        // 4. Relaunch and wait for readiness (the engine's own
-        //    recovery replay finishes the restore).
+        // 3. Relaunch and wait for readiness (the engine's own
+        //    recovery replay completes the restore).
         self.start_async().await?;
         self.wait_until_ready_async(self.restore_ready_timeout)
             .await
+    }
+
+    /// Run one shell script as the workload's container, to exit:
+    /// swap the carried command for `/bin/sh -c script`, start
+    /// (the runtime's recreate-on-start applies it), await the
+    /// exit, and restore the real command — including on failure.
+    async fn run_one_shot_container(
+        &self,
+        script: &str,
+        deadline: Duration,
+    ) -> Result<(), IntegrationError> {
+        let restore_command: Vec<String> = {
+            let mut cfg = self
+                .cfg
+                .write()
+                .expect("the instance-config lock is only held briefly");
+            std::mem::replace(
+                &mut cfg.command,
+                vec!["/bin/sh".to_owned(), "-c".to_owned(), script.to_owned()],
+            )
+        };
+
+        let outcome = async {
+            self.start_async().await?;
+            let started = tokio::time::Instant::now();
+            loop {
+                if let ObservedState::Offline { exit_code, .. } =
+                    self.runtime.state().await.map_err(runtime_err)?
+                {
+                    if exit_code == Some(0) {
+                        return Ok(());
+                    }
+                    return Err(IntegrationError::Runtime(format!(
+                        "the one-shot container exited with {exit_code:?} \
+                         (expected 0)"
+                    )));
+                }
+                if started.elapsed() >= deadline {
+                    return Err(IntegrationError::Limit(format!(
+                        "the one-shot container did not exit within {deadline:?}"
+                    )));
+                }
+                tokio::time::sleep(EXIT_POLL_INTERVAL).await;
+            }
+        }
+        .await;
+
+        // The carried command always returns to the server's real
+        // argv (a failed one-shot must not poison the next start).
+        self.cfg
+            .write()
+            .expect("the instance-config lock is only held briefly")
+            .command = restore_command;
+
+        outcome
     }
 
     // ── The migration family ────────────────────────────────────

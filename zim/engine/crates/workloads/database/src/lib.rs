@@ -52,7 +52,7 @@ use zim_engine_workloads_sdk::{
     Capability, IntegrationManifest, RuntimeKindRef, WorkloadIntegration,
 };
 
-pub use engine::{DatabaseEngine, SnapshotMode};
+pub use engine::DatabaseEngine;
 pub use handle::DatabaseWorkload;
 pub use install::{build_install_plan, DatabaseInstallPlan, InstallStep};
 pub use lifecycle::{lifecycle_plan, migration_steps, DatabaseLifecyclePlan, MigrationStep};

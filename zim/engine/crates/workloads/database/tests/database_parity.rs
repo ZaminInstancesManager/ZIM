@@ -38,6 +38,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bollard::Docker;
+use futures_util::StreamExt;
 use zim_engine_application::supervision::{
     InstanceConfig, ObservedState, PortBinding, PortProtocol, Runtime, RuntimeFactory,
 };
@@ -239,6 +240,74 @@ async fn eval_ok(workload: &DatabaseWorkload, statement: &str) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
+/// The suite's serialization gate: the four engines' first boots
+/// (initdb, mariadb-install-db, mysqld --initialize) are heavy
+/// enough that running them concurrently starves a shared runner's
+/// CPU and turns the readiness windows into deadline flakes — the
+/// suite runs one container at a time, deterministically.
+static SUITE_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// The container's log tail (the failure diagnostics' payload).
+async fn docker_log_tail(docker: &Docker, name: &str) -> String {
+    use futures_util::StreamExt;
+    let options = bollard::query_parameters::LogsOptionsBuilder::new()
+        .stdout(true)
+        .stderr(true)
+        .tail("120")
+        .timestamps(false)
+        .build();
+    let mut stream = docker.logs(name, Some(options));
+    let mut out = String::new();
+    while let Some(chunk) = stream.next().await {
+        let Ok(log) = chunk else { break };
+        let message: &[u8] = match &log {
+            bollard::container::LogOutput::StdOut { message } => message,
+            bollard::container::LogOutput::StdErr { message } => message,
+            other => other.as_ref(),
+        };
+        out.push_str(&String::from_utf8_lossy(message));
+    }
+    out
+}
+
+/// Wait for readiness, recording the probe reasons; on failure,
+/// dump the container's log tail (the engine's own startup
+/// diagnostics — the entrypoint's errors, the recovery's pace)
+/// before the panic, so a CI failure is diagnosable from the log
+/// alone.
+async fn wait_ready_logged(
+    workload: &DatabaseWorkload,
+    docker: &Docker,
+    name: &str,
+    deadline: Duration,
+) {
+    let started = tokio::time::Instant::now();
+    let mut reasons: Vec<String> = Vec::new();
+    loop {
+        match workload.probe_async().await.expect("probe runs") {
+            Readiness::Ready => return,
+            other => {
+                let reason = match &other {
+                    Readiness::NotReady { reason } => reason.clone(),
+                    Readiness::Unknown => "Unknown".to_owned(),
+                    Readiness::Ready => unreachable!(),
+                };
+                if reasons.last().map(String::as_str) != Some(reason.as_str()) {
+                    reasons.push(reason);
+                }
+            }
+        }
+        if started.elapsed() >= deadline {
+            let logs = docker_log_tail(docker, name).await;
+            panic!(
+                "the workload did not become ready within {deadline:?}; \
+                 probe reasons seen: {reasons:?}\n--- container logs ---\n{logs}"
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
 /// The container's published container-port keys (the docker
 /// inspect view of the port surface).
 async fn published_ports(docker: &Docker, name: &str) -> Vec<String> {
@@ -269,6 +338,7 @@ async fn the_postgres_acceptance_install_start_query_snapshot_restore() {
     let name = unique_name("pg-acc");
     remove_quietly(&docker, &name).await;
     let (workload, runtime, docker, name, data_dir) = place(spec, &name).await;
+    let _serial = SUITE_GATE.lock().await;
 
     // Install + start: the first boot runs the image's own
     // installer (`initdb` — seconds of it), which the readiness
@@ -280,10 +350,7 @@ async fn the_postgres_acceptance_install_start_query_snapshot_restore() {
         matches!(initial, Readiness::NotReady { .. }),
         "the probe must report NotReady during initialization, got {initial:?}"
     );
-    workload
-        .wait_until_ready_async(Duration::from_secs(120))
-        .await
-        .expect("the workload becomes ready");
+    wait_ready_logged(&workload, &docker, &name, Duration::from_secs(180)).await;
 
     // Query via the SQL client (psql over the container's socket,
     // the engine's own client — the acceptance's "queried via a
@@ -362,13 +429,11 @@ async fn the_postgres_recovery_readiness_and_durability() {
     let name = unique_name("pg-rec");
     remove_quietly(&docker, &name).await;
     let (workload, runtime, docker, name, data_dir) = place(spec, &name).await;
+    let _serial = SUITE_GATE.lock().await;
 
     workload.start_async().await.expect("start");
     wait_until_running(runtime.as_ref()).await;
-    workload
-        .wait_until_ready_async(Duration::from_secs(120))
-        .await
-        .expect("ready");
+    wait_ready_logged(&workload, &docker, &name, Duration::from_secs(180)).await;
 
     // Enough committed data that the kill leaves real WAL to
     // replay (a durable window the recovery poll can observe).
@@ -400,7 +465,7 @@ async fn the_postgres_recovery_readiness_and_durability() {
     // recovery and Ready after).
     workload.start_async().await.expect("restart");
     wait_until_running(runtime.as_ref()).await;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(180);
     let mut saw_not_ready = false;
     let readiness = loop {
         let readiness = probe_now(&workload).await;
@@ -411,10 +476,13 @@ async fn the_postgres_recovery_readiness_and_durability() {
         if readiness == Readiness::Ready {
             break readiness;
         }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the workload never became ready after the kill; last probe: {readiness:?}"
-        );
+        if tokio::time::Instant::now() >= deadline {
+            let logs = docker_log_tail(&docker, &name).await;
+            panic!(
+                "the workload never became ready after the kill; \
+                 last probe: {readiness:?}\n--- container logs ---\n{logs}"
+            );
+        }
     };
     assert_eq!(readiness, Readiness::Ready);
     assert!(
@@ -445,14 +513,12 @@ async fn the_postgres_migration_to_a_second_node() {
     let node_b = unique_name("pg-mig-b");
     remove_quietly(&docker, &node_a).await;
     remove_quietly(&docker, &node_b).await;
+    let _serial = SUITE_GATE.lock().await;
 
     let (source, runtime_a, _docker_a, node_a, data_a) = place(spec.clone(), &node_a).await;
     source.start_async().await.expect("node A start");
     wait_until_running(runtime_a.as_ref()).await;
-    source
-        .wait_until_ready_async(Duration::from_secs(120))
-        .await
-        .expect("node A ready");
+    wait_ready_logged(&source, &docker, &node_a, Duration::from_secs(180)).await;
 
     eval_ok(&source, "CREATE TABLE zim_migration (note text NOT NULL)").await;
     eval_ok(
@@ -510,14 +576,39 @@ async fn the_postgres_migration_to_a_second_node() {
         .expect("the migration snapshot");
 
     // Step 4: ship — the archive transfers to node B's snapshot
-    // store (the transfer engine's file-copy family, stood in by
-    // the host-side copy).
+    // store through the daemon's own file-transfer surface (the
+    // `docker cp` API): download the archive from node A (the
+    // daemon reads the ownership-taken data directory), then
+    // unpack it into node B's still-runner-owned data directory.
+    // This is the transfer engine's file-copy family, stood in by
+    // the daemon.
     let (dest, runtime_b, docker, node_b, data_b) = place(spec, &node_b).await;
+    let download = bollard::query_parameters::DownloadFromContainerOptionsBuilder::new()
+        .path(&format!(
+            "{}/snapshots/migration-ship.tar.gz",
+            "/var/lib/postgresql/data"
+        ))
+        .build();
+    let mut stream = docker.download_from_container(&node_a, Some(download));
+    let mut blob = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        blob.extend_from_slice(&chunk.expect("the archive download"));
+    }
+    assert!(!blob.is_empty(), "the archive downloaded");
     let ship_to = data_b.join("snapshots");
     std::fs::create_dir_all(&ship_to).expect("node B snapshot store");
-    let archive_from = data_a.join("snapshots").join("migration-ship.tar.gz");
-    let archive_to = ship_to.join("migration-ship.tar.gz");
-    std::fs::copy(&archive_from, &archive_to).expect("the snapshot ships");
+    {
+        // The blob is the docker-archive tar wrapping the file;
+        // unpack it into node B's snapshot store host-side (the
+        // directory is still runner-owned before B's first start).
+        let cursor = std::io::Cursor::new(&blob);
+        let mut archive = tar::Archive::new(cursor);
+        archive.unpack(&ship_to).expect("the snapshot ships");
+    }
+    assert!(
+        ship_to.join("migration-ship.tar.gz").is_file(),
+        "the archive landed"
+    );
 
     // Steps 5-6: restore + catch-up — the extract, the relaunch,
     // the WAL replay to the marker's LSN. The downtime clock ends
@@ -561,9 +652,7 @@ async fn the_postgres_migration_to_a_second_node() {
         .await
         .expect("blocking join")
         .expect("finalize_migration");
-    dest.wait_until_ready_async(Duration::from_secs(120))
-        .await
-        .expect("node B ready after finalize");
+    wait_ready_logged(&dest, &docker, &node_b, Duration::from_secs(180)).await;
 
     let abort_checkpoint = zim_engine_workloads_sdk::traits::MigrationCheckpoint {
         marker: checkpoint.marker.clone(),
@@ -595,6 +684,8 @@ async fn the_mariadb_snapshot_under_flush_tables_with_read_lock() {
     let name = unique_name("mdb-snap");
     remove_quietly(&docker, &name).await;
     let (workload, runtime, docker, name, data_dir) = place(spec, &name).await;
+    let _serial = SUITE_GATE.lock().await;
+    let workload = workload.with_restore_ready_timeout(Duration::from_secs(300));
 
     // First boot: the image's initializer (`mariadb-install-db`)
     // is the readiness window.
@@ -605,10 +696,7 @@ async fn the_mariadb_snapshot_under_flush_tables_with_read_lock() {
         matches!(initial, Readiness::NotReady { .. }),
         "the probe must report NotReady during the bootstrap, got {initial:?}"
     );
-    workload
-        .wait_until_ready_async(Duration::from_secs(240))
-        .await
-        .expect("mariadb becomes ready");
+    wait_ready_logged(&workload, &docker, &name, Duration::from_secs(300)).await;
 
     // The workload's data.
     eval_ok(&workload, "CREATE DATABASE IF NOT EXISTS zim").await;
@@ -669,6 +757,7 @@ async fn the_mysql_endpoints_readiness_and_expose() {
     let name = unique_name("my-net");
     remove_quietly(&docker, &name).await;
     let (workload, runtime, docker, name, data_dir) = place(spec, &name).await;
+    let _serial = SUITE_GATE.lock().await;
 
     workload.start_async().await.expect("start");
     wait_until_running(runtime.as_ref()).await;
@@ -677,10 +766,7 @@ async fn the_mysql_endpoints_readiness_and_expose() {
         matches!(initial, Readiness::NotReady { .. }),
         "the probe must report NotReady during the bootstrap, got {initial:?}"
     );
-    workload
-        .wait_until_ready_async(Duration::from_secs(240))
-        .await
-        .expect("mysql becomes ready");
+    wait_ready_logged(&workload, &docker, &name, Duration::from_secs(420)).await;
 
     // The declared endpoints: primary (3306) and mysqlx (33060),
     // each resolved to its placed host port.
@@ -758,13 +844,11 @@ async fn the_redis_snapshot_restore_and_marker() {
     let name = unique_name("redis-snap");
     remove_quietly(&docker, &name).await;
     let (workload, runtime, docker, name, data_dir) = place(spec, &name).await;
+    let _serial = SUITE_GATE.lock().await;
 
     workload.start_async().await.expect("start");
     wait_until_running(runtime.as_ref()).await;
-    workload
-        .wait_until_ready_async(Duration::from_secs(30))
-        .await
-        .expect("redis becomes ready");
+    wait_ready_logged(&workload, &docker, &name, Duration::from_secs(60)).await;
 
     eval_ok(&workload, "SET zim:key snapshot-era").await;
     let value = eval_ok(&workload, "GET zim:key").await;
@@ -811,10 +895,7 @@ async fn the_redis_snapshot_restore_and_marker() {
         .await
         .expect("blocking join")
         .expect("finalize_migration");
-    workload
-        .wait_until_ready_async(Duration::from_secs(30))
-        .await
-        .expect("redis relaunches");
+    wait_ready_logged(&workload, &docker, &name, Duration::from_secs(60)).await;
     let value = eval_ok(&workload, "GET zim:key").await;
     assert_eq!(value.trim(), "snapshot-era");
 
