@@ -44,7 +44,9 @@ const TRUSTED_SCHEMA: u8 = 1;
 const CERT_COPY: &str = "engine-loopback.pem";
 
 /// The certificate's platform file name inside the CA directory
-/// (Linux only).
+/// (Linux only — the other platforms' commands reference the staged
+/// PEM copy directly).
+#[cfg(all(unix, not(target_os = "macos")))]
 const CA_FILE_NAME: &str = "zim-engine-loopback.crt";
 
 #[derive(Debug, Serialize, Deserialize)]
