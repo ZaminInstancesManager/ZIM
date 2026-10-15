@@ -248,6 +248,13 @@ jobs:
       - name: Type-check the sources
         run: npm run check
 
+      - name: Unit-test the frontend logic (node:test)
+        # M22: the pure frontend logic (zim:// grammar, tab model +
+        # session format, omnibox ranking) runs under node:test —
+        # DOM-layer behavior stays covered by the engine's page
+        # tests and the shell's engine-attach integration.
+        run: npm test
+
       - name: Verify the committed compiled output is fresh
         run: |
           npm run build

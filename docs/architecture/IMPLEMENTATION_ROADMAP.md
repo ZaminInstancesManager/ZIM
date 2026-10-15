@@ -818,7 +818,7 @@ described as complete and valid; the corrected path forward
 
 **Estimated effort:** 1-2 weeks.
 
-### M22: Chrome-UX parity I — tab strip, address bar, navigation
+### M22: Chrome-UX parity I — tab strip, address bar, navigation — COMPLETE (2026-10-15)
 
 **Goal:** Replicate the Chrome tab-strip and omnibox interaction
 model in the frontend's own TypeScript.
@@ -839,6 +839,83 @@ model in the frontend's own TypeScript.
 - The UX-parity checklist (tab strip + omnibox sections) passes.
 - Indicators track live engine state in real time over WSS.
 - Session restore re-opens views with zero lifecycle side effects.
+
+**What shipped:**
+- `zim://app` — the application chrome (AD-24): a declared frontend
+  surface (`pages/app.html` + `src/app.ts`) hosting tab panes as
+  same-origin iframes. Works in any browser, not just the shell.
+- Tab strip (`src/app.ts` + `src/tabs.ts`): click/middle-click
+  close, Enter/Space and arrow-key keyboard operation, pointer-drag
+  reorder with FLIP glide and sibling shifting, drag-down tear-off,
+  open/close animations on Chrome's curve
+  (`cubic-bezier(0.2, 0, 0, 1)` @ 167 ms), tabs flex to the 54 px
+  Chrome minimum with chevron + wheel overflow, new-tab button at
+  the strip's right, and the one-tab-stays-open policy.
+- Per-tab indicators: the §4 mapping fully realized in
+  `<zim-status-dot>` (pulsing transient states, conic progress ring
+  from `instance.install_progress`, crash-loop glyph, small
+  favicon-slot variant); the chrome holds one §11 events stream per
+  server tab — `instance.state_change` updates the dot in real
+  time, gaps re-fetch over HTTP, fatal streams degrade to one HTTP
+  fallback. Engine's `visual_color` aligned: Suspended → gray.
+- Omnibox (`src/omnibox.ts`): canonical `zim://` display form
+  (AD-23's obligation), `zim://`-fixed scheme prefix, select-on-
+  focus, suggestion dropdown (address-first ranking, §3 surfaces,
+  instance consoles, error rows for unsafe input), keyboard
+  navigation, and the engine-identity chip (health version, port,
+  signed-in user) where Chrome shows site identity.
+- Tab context menu (§5): Open console/files/settings/backups/
+  metrics, Start/Stop/Restart state-gated with the engine's
+  structured permission errors surfaced (missing grants listed),
+  Copy server URL, Reload, Duplicate; "Open in split view" is
+  present-but-disabled and honestly labeled (M23).
+- Session persistence (§7): `zim.session.v1` = `{v, tabs, active}`
+  of `zim://` paths, debounced writes + unload flush, corruption
+  rejects to the default session, `?tab=` deep links (tear-off
+  targets) replace the session; restoration re-opens views only.
+- The six per-instance §3 surfaces declared and served (one shared
+  stub page, honest per-surface notes; the metrics surface renders
+  real recent samples from `GET /instances/{id}/metrics`).
+- Auth UX: the login form (new-tab page inside a pane) relays
+  `zim:authenticated`/`zim:signed-out` to the chrome via
+  same-origin postMessage; the chip, suggestions, and instance
+  titles refresh. Tab tokens stay unissued (session cookie is not
+  tab-scoped; per-tab counting waits for M24 extension panes —
+  engine `stream.rs` documents the reasoning).
+- Shell: default target `zim://app`; tray "New tab — zim://app"
+  navigates to `/zim/app?newtab=1` (the chrome restores the session
+  plus one new tab; the identifier grammar has no query strings, so
+  the shell builds the HTTP form directly).
+- Engine: page CSP gains `frame-src 'self'`/`frame-ancestors
+  'self'` with `X-Frame-Options: SAMEORIGIN` (AD-24's framing
+  posture); page tests cover the new directives and surfaces.
+- Fixed on the way: the compiled assets' extensionless import
+  specifiers never resolved in real ES-module hosts — the build now
+  post-processes specifiers (`scripts/fix-imports.mjs`) and CI's
+  freshness gate catches drift.
+- Tests: 33 frontend unit tests (node:test — the zim:// grammar,
+  tab model + session format, omnibox ranking; `npm test` in the
+  CI frontend job), engine page-test additions (CSP, `/zim/app`,
+  stub surface), shell `zim_url` inventory row + the attach
+  integration fetching `/zim/app` over real TLS.
+
+**Acceptance status (honest):**
+- UX-parity checklist (tab strip + omnibox rows of §12): the
+  interaction model is implemented and unit-tested where the logic
+  is pure; visual/animation fidelity is authored to Chrome's
+  documented motion values but needs a human pass in the packaged
+  shell (expected during M23 bring-up, like M21's pending render
+  pass).
+- Indicators over WSS: implemented end to end; the stream
+  client's reconnect/gap/fatal paths are exercised engine-side, and
+  the integration test fetches the chrome page over real TLS.
+- Session restore with zero lifecycle side effects: enforced by
+  construction (pages are view-only; the chrome issues reads
+  only) and covered by the session-format unit tests.
+- Tear-off: works where `window.open` works (plain browsers);
+  inside the desktop shell it reports that multi-window arrives
+  with M23 (which owns tear-out/merge natively) — the §12 row is
+  deliberately split across M22/M23 rather than faked.
 
 **Estimated effort:** 2-3 weeks.
 

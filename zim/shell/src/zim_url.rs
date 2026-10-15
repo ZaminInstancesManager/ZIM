@@ -108,6 +108,9 @@ mod tests {
         // BROWSER_INTEGRATION.md §3, row by row.
         let cases = [
             ("zim://newtab", format!("{ORIGIN}/zim/")),
+            // M22: the application chrome surface (tab strip +
+            // omnibox hosting the panes).
+            ("zim://app", format!("{ORIGIN}/zim/app")),
             ("zim://servers", format!("{ORIGIN}/zim/servers")),
             (
                 "zim://servers/9f2c/console",

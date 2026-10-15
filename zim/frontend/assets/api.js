@@ -129,7 +129,12 @@ export async function power(id, operation) {
 export async function frontendActive() {
     return api("/frontend/active");
 }
-/** Map an engine status string onto the §3 visual model. */
+/** The recent resource-usage samples for one instance (M7). */
+export async function metricsSnapshot(id) {
+    return api(`/instances/${encodeURIComponent(id)}/metrics`);
+}
+/** Map an engine status string onto the §4 visual model (the
+ * engine's canonical `visual_color`, mirrored). */
 export function visualStatus(status) {
     switch (status) {
         case "running":
@@ -149,7 +154,7 @@ export function visualStatus(status) {
         case "offline":
             return { color: "blue", label: "offline" };
         case "suspended":
-            return { color: "blue", label: "suspended" };
+            return { color: "gray", label: "suspended" };
         default:
             return { color: "gray", label: status || "unknown" };
     }

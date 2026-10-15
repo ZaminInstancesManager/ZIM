@@ -43,3 +43,9 @@ chromium-inspect/
 *.dylib
 *.dll
 *.exe
+
+# --- Frontend test build output (node:test via compiled JS) ---
+zim/frontend/.test-build/
+
+# --- Frontend dependencies ---
+zim/frontend/node_modules/

@@ -6,9 +6,9 @@
  * controls, console output appends to the log, and input is sent via
  * the HTTP endpoint (the v1 WS contract has no client→server frames).
  */
-import { ApiError, consoleBuffer, consoleInput, getInstance, getState, power } from "./api";
-import { ZimStream } from "./stream";
-import "./components";
+import { ApiError, consoleBuffer, consoleInput, getInstance, getState, power } from "./api.js";
+import { ZimStream } from "./stream.js";
+import "./components.js";
 /** Where the instance id lives: `/zim/servers/{id}/console`. */
 function instanceIdFromPath() {
     const match = window.location.pathname.match(/^\/zim\/servers\/([^/]+)\/console\/?$/);

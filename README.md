@@ -93,10 +93,14 @@ abstraction, and the roadmap that subsequent implementation work will follow.
   independence, `zim://` loopback-origin mapping (AD-23), OS
   trust-store installation of the engine's persistent loopback
   certificate, tray, and a 3-platform Shell CI workflow with a
-  real-engine integration job). Remaining: the desktop UX
-  milestones (M22-M26: Chrome-UX parity — tab strip, address bar,
-  split views, session restore — the addon system, packaging,
-  and the first alpha release).
+  real-engine integration job), and the application chrome (M22 —
+  `zim://app`: the Chrome-style tab strip and omnibox in the
+  frontend's own TypeScript, same-origin iframe panes per AD-24,
+  live §4 status indicators over the event stream, the §5 tab
+  context menu, view-only session persistence, and a frontend
+  unit-test layer in CI). Remaining: the desktop UX milestones
+  (M23-M26: split views, multi-window, NTP completion, themes —
+  the addon system, packaging, and the first alpha release).
 - A re-skinned Pterodactyl. The Panel's PHP/Laravel backend and Wings's Go
   daemon are preserved in `upstream/` as audit references and behavioral
   contracts; they are not part of ZIM's runtime architecture.
@@ -118,6 +122,10 @@ ZIM/
 │   │   ├── icons/                #   app icons (png / ico / icns)
 │   │   └── src/                  #   cli / zim_url / engine / trust / tray / state
 │   └── frontend/                 # Default frontend package (engine-served)
+│       │                         #   (M22: the zim://app chrome — tab strip +
+│       │                         #   omnibox + panes — newtab, servers, console,
+│       │                         #   and the declared per-instance surfaces;
+│       │                         #   src/ TypeScript, tests/ node:test suite)
 ├── docs/
 │   ├── audits/                   # Upstream audits, baseline, dispositions
 │   ├── architecture/             # ZIM architecture, Rust engine, desktop frontend
@@ -132,7 +140,10 @@ ZIM/
 ## Building and running the desktop app (M21+)
 
 The engine and the shell are separate cargo workspaces (the engine
-stays free of GUI dependencies). Build and run in a dev layout:
+stays free of GUI dependencies), and the UI the shell loads is the
+engine-served frontend package (`zim/frontend/` — its compiled
+output is committed because the engine embeds it at build time).
+Build and run in a dev layout:
 
 ```bash
 # 1. The engine (its own workspace):
@@ -145,8 +156,12 @@ cd ../shell && ZIM_ENGINE_PATH=../engine/target/debug/zim_engine cargo run
 The shell attaches to an engine already serving the same data dir,
 or spawns a detached one (its default data dir is the per-OS
 app-data dir + `engine/`; override with `--data-dir`). Closing the
-shell never stops the engine. Linux prerequisites are the Tauri 2
-system stack (`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
+shell never stops the engine. The shell's window opens the
+application chrome — `zim://app`: a tab strip and an omnibox
+hosting the engine's pages as panes; the same chrome (and every
+surface beneath it) also works in an ordinary browser at
+`https://127.0.0.1:{engine-port}/zim/app`. Linux prerequisites are
+the Tauri 2 system stack (`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
 `libayatana-appindicator3-dev`, `librsvg2-dev`, `libxdo-dev`); the
 `Shell CI` workflow installs the exact set it builds with.
 

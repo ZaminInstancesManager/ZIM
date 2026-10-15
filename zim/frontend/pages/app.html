@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ZIM</title>
+  <link rel="stylesheet" href="/zim/assets/main.css">
+  <script type="module" src="/zim/assets/app.js"></script>
+</head>
+<body class="app-root">
+  <!-- The application chrome (M22): tab strip + omnibox + panes.
+       Pane content is the engine's own pages, one same-origin
+       iframe per tab (AD-24). -->
+  <div class="app-chrome" id="chrome">
+    <div class="tabstrip-frame">
+      <div id="tabstrip" class="tabstrip" role="tablist" aria-label="Server tabs" aria-orientation="horizontal"></div>
+      <button id="newtab-btn" class="newtab-btn" type="button" title="New tab (zim://newtab)" aria-label="Open a new tab">+</button>
+      <div id="strip-overflow" class="strip-overflow" hidden>
+        <button id="scroll-left" class="strip-chevron" type="button" title="Scroll tabs left" aria-label="Scroll the tab strip left">‹</button>
+        <button id="scroll-right" class="strip-chevron" type="button" title="Scroll tabs right" aria-label="Scroll the tab strip right">›</button>
+      </div>
+    </div>
+    <div class="omnibox-row">
+      <button id="engine-chip" class="engine-chip" type="button" title="ZIM engine identity">
+        <span id="chip-dot" class="chip-dot" data-state="anon" aria-hidden="true"></span>
+        <span id="chip-text" class="chip-text">engine…</span>
+      </button>
+      <div class="omnibox" id="omnibox">
+        <span class="omnibox-scheme mono" aria-hidden="true">zim://</span>
+        <input id="omnibox-input" class="omnibox-input" type="text" role="combobox"
+               aria-label="Address bar — navigate zim:// surfaces"
+               aria-expanded="false" aria-controls="suggest"
+               autocomplete="off" autocapitalize="off" spellcheck="false">
+        <div id="suggest" class="suggest" role="listbox" aria-label="Address suggestions" hidden></div>
+      </div>
+      <div class="omnibox-actions" aria-hidden="true">
+        <span class="chrome-hint">drag tabs to reorder · drag one down to tear off · right-click a tab for the server menu</span>
+      </div>
+    </div>
+  </div>
+  <div id="panes" class="panes" aria-live="off"></div>
+  <div id="ctxmenu" class="ctxmenu" role="menu" hidden></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

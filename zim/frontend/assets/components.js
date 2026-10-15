@@ -6,7 +6,23 @@
  * every rule in a same-origin stylesheet — the zim:// CSP forbids
  * inline `<style>` and `style=` attributes.
  */
-import { ApiError, frontendActive, login, logout, whoami } from "./api";
+import { ApiError, frontendActive, login, logout, whoami } from "./api.js";
+/** Relay a `zim:*` happening to the embedding app chrome (M22), if
+ * this page runs inside one. CustomEvents stop at the document
+ * boundary — iframes are separate documents — so the same-origin
+ * parent gets a structured postMessage instead. Targets this
+ * origin only; a cross-origin parent gets nothing. */
+function relayToParent(type, detail) {
+    if (window.parent === window) {
+        return;
+    }
+    try {
+        window.parent.postMessage({ type, detail }, window.location.origin);
+    }
+    catch {
+        // A cross-origin parent (embedding ZIM pages elsewhere) — drop.
+    }
+}
 /** Shared constructable stylesheet for the shadow roots. */
 const shadowCss = new CSSStyleSheet();
 shadowCss.replaceSync(`
@@ -20,6 +36,7 @@ shadowCss.replaceSync(`
     vertical-align: middle;
     margin-right: 6px;
     background: #9ca3af;
+    flex: none;
   }
   .dot-green  { background: #22c55e; }
   .dot-yellow { background: #f59e0b; }
@@ -39,6 +56,28 @@ shadowCss.replaceSync(`
     margin-left: 3px;
     vertical-align: middle;
   }
+  /* The §4 transient states pulse (starting, stopping, installing,
+   * restoring, transferring) — the tab-strip and page dots share
+   * this animation. Chrome's throbber slot, repurposed. */
+  .dot-pulse {
+    animation: zim-dot-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes zim-dot-pulse {
+    0%   { opacity: 1;   transform: scale(1); }
+    50%  { opacity: 0.45; transform: scale(0.82); }
+    100% { opacity: 1;   transform: scale(1); }
+  }
+  /* The §4 progress overlay: a yellow ring that fills as the
+   * install/restore/transfer progresses (the "progress" attribute
+   * maps onto --progress via the CSSOM — CSP forbids style
+   * attributes in markup, not CSSOM writes). */
+  .dot-progress {
+    background: conic-gradient(#f59e0b calc(var(--progress, 0) * 360deg), #24282f 0);
+  }
+  /* The small tab-strip variant (favicon-slot sized). */
+  :host([data-size="sm"]) .dot { width: 8px; height: 8px; margin-right: 0; }
+  :host([data-size="sm"]) .dot-label { display: none; }
+  :host([data-size="sm"]) .dot-crash::after { font-size: 9px; margin-left: 1px; }
 
   /* login form */
   form { display: flex; flex-direction: column; gap: 8px; margin: 0; }
@@ -103,12 +142,14 @@ function adopt(root) {
 }
 // ── <zim-status-dot> ──────────────────────────────────────────────
 /**
- * The §3 status indicator: a colored dot plus label, driven by the
- * `status` attribute (an engine lifecycle status string).
+ * The §4 status indicator: a colored dot plus label, driven by the
+ * `status` attribute (an engine lifecycle status string). The
+ * transient yellow states pulse; `progress` (0–1) adds the §4
+ * progress ring for installing/restoring/transferring.
  */
 export class ZimStatusDot extends HTMLElement {
     static get observedAttributes() {
-        return ["status", "data-label"];
+        return ["status", "data-label", "progress", "data-size"];
     }
     constructor() {
         super();
@@ -120,7 +161,11 @@ export class ZimStatusDot extends HTMLElement {
         label.className = "dot-label";
         root.append(dot, label);
     }
-    attributeChangedCallback() {
+    attributeChangedCallback(name) {
+        if (name === "progress") {
+            this.applyProgress();
+            return;
+        }
         this.render();
     }
     connectedCallback() {
@@ -138,16 +183,42 @@ export class ZimStatusDot extends HTMLElement {
         }
         const status = this.getAttribute("status") ?? "unknown";
         const color = visualClass(status);
-        dot.className = `dot dot-${color}`;
+        const transient = status === "starting" ||
+            status === "stopping" ||
+            status === "installing" ||
+            status === "restoring_backup" ||
+            status === "transferring";
+        dot.className = `dot dot-${color}${transient ? " dot-pulse" : ""}`;
         if (status === "crash_loop") {
             dot.classList.add("dot-crash");
         }
+        this.applyProgress();
         label.textContent = this.getAttribute("data-label") ?? status;
         this.setAttribute("role", "img");
         this.setAttribute("aria-label", `status: ${this.getAttribute("data-label") ?? status}`);
     }
+    /** Map the `progress` attribute (0–1) onto the ring's custom
+     * property; out-of-range values simply drop the ring. */
+    applyProgress() {
+        const dot = this.shadowRoot?.querySelector(".dot");
+        if (!(dot instanceof HTMLElement)) {
+            return;
+        }
+        const raw = this.getAttribute("progress");
+        const value = raw !== null ? Number.parseFloat(raw) : Number.NaN;
+        if (Number.isFinite(value) && value > 0 && value < 1) {
+            dot.classList.add("dot-progress");
+            dot.style.setProperty("--progress", String(value));
+        }
+        else {
+            dot.classList.remove("dot-progress");
+            dot.style.removeProperty("--progress");
+        }
+    }
 }
-/** The §3 color for a status string. */
+/** The §4 color for a status string (the engine's canonical
+ * `visual_color`, kept in lockstep with `api.ts` and
+ * `domain::InstanceStatus`). */
 function visualClass(status) {
     switch (status) {
         case "running":
@@ -161,8 +232,9 @@ function visualClass(status) {
         case "crash_loop":
             return "red";
         case "offline":
-        case "suspended":
             return "blue";
+        case "suspended":
+            return "gray";
         default:
             return "gray";
     }
@@ -339,6 +411,7 @@ export class ZimLoginForm extends HTMLElement {
                 composed: true,
                 detail: me,
             }));
+            relayToParent("zim:authenticated", me);
         }
         catch (error) {
             const message = error instanceof ApiError ? error.message : String(error);
@@ -363,6 +436,7 @@ export class ZimLoginForm extends HTMLElement {
         this.signingOut = false;
         this.applyUser(null);
         this.dispatchEvent(new CustomEvent("zim:signed-out", { bubbles: true, composed: true }));
+        relayToParent("zim:signed-out");
     }
 }
 // ── <zim-console> ─────────────────────────────────────────────────

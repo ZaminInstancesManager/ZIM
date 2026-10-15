@@ -14,7 +14,7 @@ use tauri::{AppHandle, Manager, WebviewWindow};
 /// Build and attach the tray for the app.
 pub fn init(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Show ZIM", true, None::<&str>)?;
-    let newtab = MenuItem::with_id(app, "newtab", "Open zim://newtab", true, None::<&str>)?;
+    let newtab = MenuItem::with_id(app, "newtab", "New tab — zim://app", true, None::<&str>)?;
     let quit = MenuItem::with_id(
         app,
         "quit",
@@ -34,7 +34,7 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_main(app),
             "newtab" => {
-                if let Err(e) = crate::navigate_to_zim_url(app, "zim://newtab") {
+                if let Err(e) = crate::open_new_tab(app) {
                     eprintln!("zim_shell: tray new-tab navigation failed: {e}");
                 }
             }
@@ -71,7 +71,9 @@ fn show_main(app: &AppHandle) {
         }
         None => {
             // M21 keeps a single window; M22 (multiple windows and
-            // session restore) generalizes this.
+            // session restore) generalizes this — the chrome page
+            // restores its own tab set, and M23 owns real
+            // multi-window.
             let _ = WebviewWindow::builder(app, "main", tauri::WebviewUrl::App("boot.html".into()))
                 .title("ZIM")
                 .inner_size(1280.0, 800.0)

@@ -7,7 +7,7 @@
  * both; actually executing it in a renderer is the browser side of
  * the gate (M13+).
  */
-import { whoami } from "./api";
+import { whoami } from "./api.js";
 const result = document.getElementById("smoke-result");
 async function run() {
     if (result === null) {

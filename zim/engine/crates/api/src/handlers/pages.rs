@@ -3,10 +3,11 @@
 //! origin.
 //!
 //! This is the engine half of the `zim://` URL inventory
-//! (BROWSER_INTEGRATION.md §2): the Chromium WebUI bridge (M13+)
-//! will ask the engine for a `zim://` surface's content; until then
-//! the same content is directly reachable at `https://127.0.0.1:{port}/zim/…`
-//! so the default frontend is usable in any browser today.
+//! (BROWSER_INTEGRATION.md §3): the desktop shell's webview loads
+//! these pages through the AD-23 loopback-origin mapping, and the
+//! same content is directly reachable at
+//! `https://127.0.0.1:{port}/zim/…` so the default frontend is
+//! usable in any browser today.
 //!
 //! # Security posture
 //!
@@ -18,7 +19,13 @@
 //!   scripts/styles/connect only from the same origin, no inline
 //!   anything), `X-Content-Type-Options: nosniff`, and
 //!   `Referrer-Policy: no-referrer`.
-//! - The host guard (loopback-only) applies as everywhere else.
+//! - M22 framing posture (AD-24): the app chrome (`zim://app`) hosts
+//!   tab content in same-origin iframes, so the CSP additionally
+//!   allows `frame-src 'self'` (a page may embed same-origin panes)
+//!   and `frame-ancestors 'self'` (a page may be embedded by the
+//!   chrome) — `X-Frame-Options: SAMEORIGIN` matches. Cross-origin
+//!   embedding stays blocked, and the loopback host guard (below)
+//!   already confines who can even talk to this origin.
 //! - Paths are routed through the loader's confinement checks; a
 //!   traversal attempt answers 404, never a filesystem read.
 
@@ -32,9 +39,14 @@ use crate::state::AppState;
 use zim_engine_frontend_loader::Resolution;
 
 /// The §3.8 content security policy every `/zim/` response carries.
+///
+/// `frame-src`/`frame-ancestors 'self'` (M22, AD-24): the app chrome
+/// embeds tab panes as same-origin iframes — same-origin only, in
+/// both directions, so a foreign page can neither embed ZIM surfaces
+/// nor be embedded by them.
 pub const ZIM_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; \
      connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; \
-     form-action 'none'; frame-ancestors 'none'";
+     form-action 'none'; frame-src 'self'; frame-ancestors 'self'";
 
 /// `GET /zim` and `GET /zim/` — the package root routes to the
 /// `newtab` entrypoint (the NTP-replacement rule, §8).
@@ -154,5 +166,9 @@ fn security_headers(headers: &mut HeaderMap) {
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
     );
-    headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    // M22 (AD-24): the chrome's same-origin iframes require
+    // SAMEORIGIN framing; cross-origin embedding stays denied (the
+    // CSP's `frame-ancestors 'self'` says the same thing, and both
+    // headers are enforced).
+    headers.insert("x-frame-options", HeaderValue::from_static("SAMEORIGIN"));
 }

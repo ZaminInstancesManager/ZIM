@@ -336,9 +336,39 @@ mod tests {
         let (file, _) = package.resolve_surface("").expect("root routes");
         assert_eq!(file, "pages/newtab.html");
 
+        // M22: the application chrome surface routes.
+        let (file, params) = package.resolve_surface("app").expect("app routes");
+        assert_eq!(file, "pages/app.html");
+        assert!(params.is_empty());
+
+        // M22: the declared per-instance surfaces route (one shared
+        // stub entrypoint, six surfaces; the metrics view renders
+        // real samples, the rest are honest placeholders).
+        for surface in [
+            "files",
+            "settings",
+            "backups",
+            "schedules",
+            "subusers",
+            "metrics",
+        ] {
+            let path = format!("servers/0a1b2c3d-0000-0000-0000-000000000000/{surface}");
+            let (file, params) = package
+                .resolve_surface(&path)
+                .unwrap_or_else(|| panic!("{surface} routes"));
+            assert_eq!(file, "pages/server_stub.html");
+            assert_eq!(
+                params,
+                vec![(
+                    "id".to_owned(),
+                    "0a1b2c3d-0000-0000-0000-000000000000".to_owned()
+                )]
+            );
+        }
+
         // Undeclared surface → None (the 404 path).
         assert!(package.resolve_surface("settings").is_none());
-        assert!(package.resolve_surface("servers/x/files").is_none());
+        assert!(package.resolve_surface("servers/x/undeclared").is_none());
     }
 
     #[test]

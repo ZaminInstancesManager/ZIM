@@ -78,17 +78,19 @@ impl InstanceStatus {
     }
 
     /// Returns the visual status color name per
-    /// `docs/architecture/BROWSER_INTEGRATION.md` §3.
+    /// `docs/architecture/BROWSER_INTEGRATION.md` §4.
     ///
     /// The four primary visual statuses are:
     /// - `green` — running
     /// - `yellow` — starting / stopping / installing / etc.
     /// - `red` — crashed (with caution glyph for `CrashLoop`)
-    /// - `blue` — stopped / idle
+    /// - `blue` — stopped / idle (`Offline`)
     ///
-    /// `Unknown` (runtime unreachable / node disconnected) is shown as
-    /// `gray` per the failure-behavior matrix in
-    /// `docs/architecture/ZIM_ARCHITECTURE.md` §5.
+    /// `Suspended` is `gray` (M22 aligned the engine's mirror with
+    /// the §4 table — a paused workload reads as "idle-muted", not
+    /// "crashed-to-rest"), and `Unknown` (runtime unreachable /
+    /// node disconnected) is `gray` per the failure-behavior matrix
+    /// in `docs/architecture/ZIM_ARCHITECTURE.md` §5.
     pub fn visual_color(&self) -> &'static str {
         match self {
             Self::Running => "green",
@@ -97,9 +99,9 @@ impl InstanceStatus {
             | Self::Installing
             | Self::RestoringBackup
             | Self::Transferring => "yellow",
-            Self::Offline | Self::Suspended => "blue",
+            Self::Offline => "blue",
+            Self::Suspended | Self::Unknown => "gray",
             Self::CrashLoop => "red",
-            Self::Unknown => "gray",
         }
     }
 }
@@ -243,9 +245,23 @@ mod tests {
         assert_eq!(InstanceStatus::RestoringBackup.visual_color(), "yellow");
         assert_eq!(InstanceStatus::Transferring.visual_color(), "yellow");
         assert_eq!(InstanceStatus::Offline.visual_color(), "blue");
-        assert_eq!(InstanceStatus::Suspended.visual_color(), "blue");
+        assert_eq!(InstanceStatus::Suspended.visual_color(), "gray");
         assert_eq!(InstanceStatus::CrashLoop.visual_color(), "red");
         assert_eq!(InstanceStatus::Unknown.visual_color(), "gray");
+    }
+
+    #[test]
+    fn suspended_is_the_gray_idle_muted_pair_of_unknown() {
+        // M22 / §4 alignment: Suspended reads as gray (paused), not
+        // blue (offline-after-crash); Offline keeps the blue.
+        assert_eq!(
+            InstanceStatus::Suspended.visual_color(),
+            InstanceStatus::Unknown.visual_color()
+        );
+        assert_ne!(
+            InstanceStatus::Suspended.visual_color(),
+            InstanceStatus::Offline.visual_color()
+        );
     }
 
     #[test]

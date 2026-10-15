@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ZIM — Server</title>
+  <link rel="stylesheet" href="/zim/assets/main.css">
+  <script type="module" src="/zim/assets/server_stub.js"></script>
+</head>
+<body>
+  <main class="page page-stub">
+    <zim-recovery-notice></zim-recovery-notice>
+
+    <header class="page-header">
+      <a class="backlink" href="/zim/servers" title="Servers">←</a>
+      <h1 id="server-name">Server</h1>
+      <span id="server-id" class="pill pill-muted mono">…</span>
+      <span id="surface-name" class="pill pill-muted mono">…</span>
+    </header>
+
+    <section class="card" aria-label="Observed state">
+      <div class="console-toolbar">
+        <zim-status-dot id="status-dot" status="unknown" data-label="unknown"></zim-status-dot>
+        <span id="state-label" class="state-label">state: unknown</span>
+      </div>
+    </section>
+
+    <section class="card card-login" id="auth-gate" aria-label="Sign in" hidden>
+      <h2 class="card-title">Sign in to ZIM</h2>
+      <zim-login-form id="login"></zim-login-form>
+    </section>
+
+    <section class="card" aria-label="This surface">
+      <h2 class="card-title">This surface</h2>
+      <p id="surface-note" class="empty">…</p>
+      <nav class="quicklinks" aria-label="Server surfaces">
+        <a class="quicklink" id="nav-console" href="/zim/servers">
+          <span class="quicklink-icon" aria-hidden="true">&gt;_</span>
+          <span class="quicklink-label">Console</span>
+        </a>
+        <a class="quicklink" href="/zim/servers">
+          <span class="quicklink-icon" aria-hidden="true">▤</span>
+          <span class="quicklink-label">All servers</span>
+        </a>
+      </nav>
+    </section>
+
+    <section class="card" id="metrics-card" aria-label="Recent resource usage" hidden>
+      <h2 class="card-title">Recent resource usage</h2>
+      <dl class="status-grid" id="metrics-body"></dl>
+    </section>
+  </main>
+</body>
+</html>
