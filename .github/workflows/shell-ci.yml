@@ -106,23 +106,31 @@ jobs:
 
       # M25 diagnostic: on Windows the shell's test binary has hit
       # STATUS_ENTRYPOINT_NOT_FOUND at load (a missing DLL export).
-      # Probe the freshly built test exe with --list and let the
-      # loader's own message (which names the DLL) land in the log.
+      # Compile the test binary without running it, probe THE exact
+      # executable cargo test would run, and let the loader's own
+      # message (which names the DLL) land in the log; dumpbin's
+      # import list rides along as the backup.
       - name: Probe the Windows test binary load
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $exe = Get-ChildItem -Path target\debug\deps -Filter 'zim_shell-*.exe' |
-            Where-Object { $_.Name -notmatch 'build-script' } |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 1
+          cargo test --workspace --no-run 2>&1 | Tee-Object -FilePath test-build.log | Write-Host
+          $exe = Select-String -Path test-build.log -Pattern 'Executable unittests src\\lib\.rs \((.+?\.exe)\)' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value } |
+            Select-Object -Last 1
           if (-not $exe) {
-            Write-Host 'no test binary found to probe'
+            Write-Host 'no unittest executable found to probe'
             exit 0
           }
-          Write-Host "== probing $($exe.Name)"
-          $output = cmd /c "`"$($exe.FullName)`" --list 2>&1"
+          Write-Host "== probing $exe"
+          $output = cmd /c "`"$exe`" --list 2>&1"
           Write-Host $output
+          $dumpbin = Get-ChildItem 'C:\Program Files\Microsoft Visual Studio\2022\*\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe' -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if ($dumpbin) {
+            Write-Host "== dumpbin /imports"
+            & $dumpbin.FullName /imports $exe | Select-String -Pattern '\.dll' | ForEach-Object { $_.Line.Trim() }
+          }
           exit 0
 
       - name: cargo test
