@@ -88,7 +88,9 @@ impl AddonPackage {
             // backslashes, no drive letters).
             if name.starts_with('/')
                 || name.contains('\\')
-                || name.split('/').any(|s| s.is_empty() || s == "." || s == "..")
+                || name
+                    .split('/')
+                    .any(|s| s.is_empty() || s == "." || s == "..")
                 || (name.len() > 2 && name.as_bytes()[1] == b':')
             {
                 return Err(PackageError::BadArchive(format!(
@@ -165,8 +167,7 @@ mod tests {
                             .compression_method(zip::CompressionMethod::Deflated),
                     )
                     .expect("start entry");
-                    std::io::Write::write_all(&mut writer, contents.as_bytes())
-                        .expect("write entry");
+                std::io::Write::write_all(&mut writer, contents.as_bytes()).expect("write entry");
             }
             writer.finish().expect("finish archive");
         }
@@ -227,7 +228,10 @@ mod tests {
         let archive = write_zip(&[(MANIFEST_FILE, &manifest_json())]);
         assert!(matches!(
             AddonPackage::from_zip(&archive),
-            Err(PackageError::MissingFile { field: "entrypoints", .. })
+            Err(PackageError::MissingFile {
+                field: "entrypoints",
+                ..
+            })
         ));
     }
 

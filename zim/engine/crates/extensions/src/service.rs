@@ -63,13 +63,13 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use zim_engine_application::ports::Persistence;
 use zim_engine_domain::{
-    ExtensionId, ExtensionManifest, ExtensionRegistration, ExtensionSignature, InstanceScope as
-    DomainInstanceScope, PermissionGrant, PermissionSet, SignatureScheme,
+    ExtensionId, ExtensionManifest, ExtensionRegistration, ExtensionSignature,
+    InstanceScope as DomainInstanceScope, PermissionGrant, PermissionSet, SignatureScheme,
 };
+use zim_engine_frontend_loader::manifest::SurfacePattern;
+use zim_engine_frontend_loader::service::mime_of;
 use zim_engine_frontend_loader::signature::SignatureCheck;
 use zim_engine_frontend_loader::{FrontendService, TrustStore};
-use zim_engine_frontend_loader::service::mime_of;
-use zim_engine_frontend_loader::manifest::SurfacePattern;
 
 use crate::manifest::{AddonManifest, ManifestError, MANIFEST_FILE};
 use crate::package::{AddonPackage, PackageError};
@@ -309,10 +309,7 @@ impl ExtensionsService {
 
     /// One addon's extracted tree.
     fn package_dir(&self, manifest_id: &str, version: &str) -> PathBuf {
-        self.root()
-            .join("packages")
-            .join(manifest_id)
-            .join(version)
+        self.root().join("packages").join(manifest_id).join(version)
     }
 
     /// `GET /api/v1/extensions` — every installed addon, bundled
@@ -326,21 +323,14 @@ impl ExtensionsService {
             .cloned()
             .collect::<Vec<_>>();
         let mut summaries: Vec<AddonSummary> = addons.iter().map(|a| a.summary()).collect();
-        summaries.sort_by(|a, b| {
-            b.bundled
-                .cmp(&a.bundled)
-                .then_with(|| a.id.cmp(&b.id))
-        });
+        summaries.sort_by(|a, b| b.bundled.cmp(&a.bundled).then_with(|| a.id.cmp(&b.id)));
         summaries
     }
 
     /// Boot-time notices (seed/reload failures) — surfaced by the
     /// API layer alongside the list.
     pub fn boot_notices(&self) -> Vec<String> {
-        self.boot_notices
-            .lock()
-            .expect("boot notices lock")
-            .clone()
+        self.boot_notices.lock().expect("boot notices lock").clone()
     }
 
     /// `POST /api/v1/extensions` — install (or update) from ZIP
@@ -369,10 +359,7 @@ impl ExtensionsService {
                 self.api_version.clone(),
             ));
         }
-        if !manifest
-            .zim_requirement()
-            .matches(&self.engine_version)
-        {
+        if !manifest.zim_requirement().matches(&self.engine_version) {
             return Err(ExtensionError::EngineIncompatible(
                 manifest
                     .engines
@@ -393,16 +380,14 @@ impl ExtensionsService {
         // Dependencies (§4.9): every specifier must be satisfied by
         // an installed addon or the active frontend package; an
         // unsatisfiable one fails the install with nothing written.
-        let index = self
-            .addons
-            .read()
-            .expect("addon index lock")
-            .clone();
+        let index = self.addons.read().expect("addon index lock").clone();
         for dependency in &manifest.dependencies {
-            let (dep_id, range) = crate::manifest::parse_dependency(dependency)
-                .map_err(|message| ManifestError::Missing {
-                    field: "dependencies",
-                    message,
+            let (dep_id, range) =
+                crate::manifest::parse_dependency(dependency).map_err(|message| {
+                    ManifestError::Missing {
+                        field: "dependencies",
+                        message,
+                    }
                 })?;
             let satisfied = if dep_id == self.frontend.active_info().id {
                 let info = self.frontend.active_info();
@@ -432,8 +417,8 @@ impl ExtensionsService {
             .filter_map(|s| SurfacePattern::parse(s).ok())
             .collect();
         for surface in &manifest.page_surfaces {
-            let candidate = SurfacePattern::parse(surface)
-                .map_err(|message| ManifestError::Missing {
+            let candidate =
+                SurfacePattern::parse(surface).map_err(|message| ManifestError::Missing {
                     field: "page_surfaces",
                     message,
                 })?;
@@ -541,9 +526,8 @@ impl ExtensionsService {
                     ExtensionError::Storage(format!("creating {}: {e}", dir.display()))
                 })?;
             }
-            std::fs::write(&file, bytes).map_err(|e| {
-                ExtensionError::Storage(format!("writing {}: {e}", file.display()))
-            })?;
+            std::fs::write(&file, bytes)
+                .map_err(|e| ExtensionError::Storage(format!("writing {}: {e}", file.display())))?;
         }
         // A stale incoming dir (crashed install) is replaced.
         if target.exists() {
@@ -592,7 +576,11 @@ impl ExtensionsService {
         self.set_enabled(manifest_id, false)
     }
 
-    fn set_enabled(&self, manifest_id: &str, enabled: bool) -> Result<AddonSummary, ExtensionError> {
+    fn set_enabled(
+        &self,
+        manifest_id: &str,
+        enabled: bool,
+    ) -> Result<AddonSummary, ExtensionError> {
         let _guard = self.lifecycle.lock().expect("lifecycle lock");
         let addon = self.find(manifest_id)?;
         let mut registration = addon.registration.clone();
@@ -649,12 +637,8 @@ impl ExtensionsService {
                 ));
             }
         }
-        self.persistence
-            .delete_extension(&addon.registration.id)?;
-        let versions_root = self
-            .root()
-            .join("packages")
-            .join(manifest_id);
+        self.persistence.delete_extension(&addon.registration.id)?;
+        let versions_root = self.root().join("packages").join(manifest_id);
         if versions_root.exists() {
             let _ = std::fs::remove_dir_all(&versions_root);
         }
@@ -867,8 +851,7 @@ impl ExtensionsService {
                 .map(|bytes| bytes != manifest_bytes.as_slice())
                 .unwrap_or(true);
         if needs_extract {
-            self.extract(&manifest, files)
-                .map_err(|e| e.to_string())?;
+            self.extract(&manifest, files).map_err(|e| e.to_string())?;
         }
 
         match existing {
@@ -879,7 +862,8 @@ impl ExtensionsService {
                 // tree. Never silently flip the enabled flag.
                 if row.version != manifest.version
                     && manifest.parsed_version()
-                        > semver::Version::parse(&row.version).unwrap_or(semver::Version::new(0, 0, 0))
+                        > semver::Version::parse(&row.version)
+                            .unwrap_or(semver::Version::new(0, 0, 0))
                 {
                     let mut updated = row.clone();
                     updated.version = manifest.version.clone();
@@ -894,8 +878,8 @@ impl ExtensionsService {
                 }
             }
             None => {
-                let granted = permissions_by_name(&manifest.permissions)
-                    .map_err(|e| e.to_string())?;
+                let granted =
+                    permissions_by_name(&manifest.permissions).map_err(|e| e.to_string())?;
                 let row = ExtensionRegistration {
                     id: ExtensionId::new(),
                     manifest: domain_manifest_of(&manifest),
@@ -1096,7 +1080,10 @@ mod tests {
     use zim_engine_persistence_sqlite::SqlitePersistence;
 
     fn temp_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("zim-ext-{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)));
+        let dir = std::env::temp_dir().join(format!(
+            "zim-ext-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
         std::fs::create_dir_all(&dir).expect("temp dir");
         dir
     }
@@ -1104,8 +1091,7 @@ mod tests {
     fn service() -> (ExtensionsService, PathBuf) {
         let dir = temp_dir();
         let persistence: Arc<dyn Persistence> = {
-            let store =
-                SqlitePersistence::open(&dir.join("engine.db")).expect("sqlite store");
+            let store = SqlitePersistence::open(&dir.join("engine.db")).expect("sqlite store");
             store.migrate().expect("sqlite migrations");
             Arc::new(store)
         };
@@ -1178,7 +1164,11 @@ mod tests {
     fn install_enable_disable_uninstall_round_trip() {
         let (service, _dir) = service();
         let archive = zip_package(
-            &manifest_json("org.example.addon.one", "0.1.0", Some("zim://servers/{id}/one")),
+            &manifest_json(
+                "org.example.addon.one",
+                "0.1.0",
+                Some("zim://servers/{id}/one"),
+            ),
             &[("pages/pane.html", "<p>one</p>")],
         );
 
@@ -1187,7 +1177,10 @@ mod tests {
         assert_eq!(summary.id, "org.example.addon.one");
         assert!(summary.enabled);
         assert!(!summary.bundled);
-        assert_eq!(summary.permissions.granted, vec!["websocket.connect".to_owned()]);
+        assert_eq!(
+            summary.permissions.granted,
+            vec!["websocket.connect".to_owned()]
+        );
 
         // Serving: the declared surface resolves, others don't.
         assert!(service.resolve("servers/abc/one").is_some());
@@ -1205,7 +1198,9 @@ mod tests {
         assert!(service.resolve("servers/abc/one").is_some());
 
         // Uninstall: gone.
-        service.uninstall("org.example.addon.one").expect("uninstall");
+        service
+            .uninstall("org.example.addon.one")
+            .expect("uninstall");
         assert!(service.list().is_empty());
         assert!(service.resolve("servers/abc/one").is_none());
         assert!(matches!(
@@ -1219,7 +1214,11 @@ mod tests {
         let (service, _dir) = service();
         // The default frontend owns zim://servers/{id}/console.
         let archive = zip_package(
-            &manifest_json("org.example.addon.collide", "0.1.0", Some("zim://servers/{id}/console")),
+            &manifest_json(
+                "org.example.addon.collide",
+                "0.1.0",
+                Some("zim://servers/{id}/console"),
+            ),
             &[("pages/pane.html", "<p>x</p>")],
         );
         assert!(matches!(
@@ -1232,12 +1231,20 @@ mod tests {
         // A fresh surface installs, and a second addon colliding with
         // the first is refused.
         let first = zip_package(
-            &manifest_json("org.example.addon.a", "0.1.0", Some("zim://servers/{id}/alpha")),
+            &manifest_json(
+                "org.example.addon.a",
+                "0.1.0",
+                Some("zim://servers/{id}/alpha"),
+            ),
             &[("pages/pane.html", "<p>a</p>")],
         );
         service.install(&first).expect("first installs");
         let second = zip_package(
-            &manifest_json("org.example.addon.b", "0.1.0", Some("zim://servers/{id}/alpha")),
+            &manifest_json(
+                "org.example.addon.b",
+                "0.1.0",
+                Some("zim://servers/{id}/alpha"),
+            ),
             &[("pages/pane.html", "<p>b</p>")],
         );
         assert!(matches!(
@@ -1248,7 +1255,11 @@ mod tests {
         // A wildcard surface overlapping an installed literal one is
         // refused too (param-vs-literal overlaps).
         let wildcard = zip_package(
-            &manifest_json("org.example.addon.c", "0.1.0", Some("zim://servers/{id}/{page}")),
+            &manifest_json(
+                "org.example.addon.c",
+                "0.1.0",
+                Some("zim://servers/{id}/{page}"),
+            ),
             &[("pages/pane.html", "<p>c</p>")],
         );
         assert!(matches!(
@@ -1261,7 +1272,11 @@ mod tests {
     fn updates_and_downgrades() {
         let (service, _dir) = service();
         let v1 = zip_package(
-            &manifest_json("org.example.addon.upd", "0.1.0", Some("zim://servers/{id}/upd")),
+            &manifest_json(
+                "org.example.addon.upd",
+                "0.1.0",
+                Some("zim://servers/{id}/upd"),
+            ),
             &[("pages/pane.html", "<p>v1</p>")],
         );
         service.install(&v1).expect("v1 installs");
@@ -1278,7 +1293,11 @@ mod tests {
 
         // Lower version → DowngradeRefused.
         let v0 = zip_package(
-            &manifest_json("org.example.addon.upd", "0.0.9", Some("zim://servers/{id}/upd")),
+            &manifest_json(
+                "org.example.addon.upd",
+                "0.0.9",
+                Some("zim://servers/{id}/upd"),
+            ),
             &[("pages/pane.html", "<p>v0</p>")],
         );
         assert!(matches!(
@@ -1288,7 +1307,11 @@ mod tests {
 
         // Higher version → update, new bytes served, old tree gone.
         let v2 = zip_package(
-            &manifest_json("org.example.addon.upd", "0.2.0", Some("zim://servers/{id}/upd")),
+            &manifest_json(
+                "org.example.addon.upd",
+                "0.2.0",
+                Some("zim://servers/{id}/upd"),
+            ),
             &[("pages/pane.html", "<p>v2</p>")],
         );
         let summary = service.install(&v2).expect("v2 updates");
@@ -1325,8 +1348,7 @@ mod tests {
             None,
         ))
         .unwrap();
-        manifest["dependencies"] =
-            serde_json::json!(["org.zaminmc.frontend.default@>=1.0.0"]);
+        manifest["dependencies"] = serde_json::json!(["org.zaminmc.frontend.default@>=1.0.0"]);
         let archive = zip_package(&manifest.to_string(), &[]);
         assert!(service.install(&archive).is_ok());
 
@@ -1351,7 +1373,11 @@ mod tests {
     fn corrupt_package_is_disabled_with_notice_not_fatal() {
         let (service, dir) = service();
         let archive = zip_package(
-            &manifest_json("org.example.addon.corrupt", "0.1.0", Some("zim://servers/{id}/crpt")),
+            &manifest_json(
+                "org.example.addon.corrupt",
+                "0.1.0",
+                Some("zim://servers/{id}/crpt"),
+            ),
             &[("pages/pane.html", "<p>ok</p>")],
         );
         service.install(&archive).expect("install");
@@ -1381,8 +1407,7 @@ mod tests {
         let dir = temp_dir();
         {
             let persistence: Arc<dyn Persistence> = {
-                let store =
-                    SqlitePersistence::open(&dir.join("engine.db")).expect("sqlite store");
+                let store = SqlitePersistence::open(&dir.join("engine.db")).expect("sqlite store");
                 store.migrate().expect("sqlite migrations");
                 Arc::new(store)
             };
@@ -1399,17 +1424,22 @@ mod tests {
                 "v1",
             );
             let archive = zip_package(
-                &manifest_json("org.example.addon.persist", "0.1.0", Some("zim://servers/{id}/pers")),
+                &manifest_json(
+                    "org.example.addon.persist",
+                    "0.1.0",
+                    Some("zim://servers/{id}/pers"),
+                ),
                 &[("pages/pane.html", "<p>p</p>")],
             );
             service.install(&archive).expect("install");
-            service.disable("org.example.addon.persist").expect("disable");
+            service
+                .disable("org.example.addon.persist")
+                .expect("disable");
         }
         // A fresh service over the same data dir (a reboot).
         {
             let persistence: Arc<dyn Persistence> = {
-                let store =
-                    SqlitePersistence::open(&dir.join("engine.db")).expect("sqlite store");
+                let store = SqlitePersistence::open(&dir.join("engine.db")).expect("sqlite store");
                 store.migrate().expect("sqlite migrations");
                 Arc::new(store)
             };
@@ -1468,26 +1498,32 @@ mod tests {
     fn grant_extends_permissions() {
         let (service, _dir) = service();
         let archive = zip_package(
-            &manifest_json("org.example.addon.grant", "0.1.0", Some("zim://servers/{id}/grnt")),
+            &manifest_json(
+                "org.example.addon.grant",
+                "0.1.0",
+                Some("zim://servers/{id}/grnt"),
+            ),
             &[("pages/pane.html", "<p>g</p>")],
         );
         service.install(&archive).expect("install");
-        let summary = service
-            .grant(
-                "org.example.addon.grant",
-                &["file.read".to_owned(), "bogus.permission".to_owned()],
-            );
+        let summary = service.grant(
+            "org.example.addon.grant",
+            &["file.read".to_owned(), "bogus.permission".to_owned()],
+        );
         // Unknown permission names are rejected whole.
-        assert!(matches!(
-            summary,
-            Err(ExtensionError::UnknownPermission(_))
-        ));
+        assert!(matches!(summary, Err(ExtensionError::UnknownPermission(_))));
         // The good-only grant applies.
         let summary = service
             .grant("org.example.addon.grant", &["file.read".to_owned()])
             .expect("grant");
-        assert!(summary.permissions.granted.contains(&"file.read".to_owned()));
-        assert!(summary.permissions.granted.contains(&"websocket.connect".to_owned()));
+        assert!(summary
+            .permissions
+            .granted
+            .contains(&"file.read".to_owned()));
+        assert!(summary
+            .permissions
+            .granted
+            .contains(&"websocket.connect".to_owned()));
     }
 
     #[test]
@@ -1541,7 +1577,10 @@ mod tests {
         assert_eq!(summary.sidebar_items.len(), 1);
         assert_eq!(summary.context_menu_items.len(), 1);
         assert_eq!(summary.commands[0].id, "rich-cmd");
-        assert_eq!(summary.event_subscriptions, vec!["job.completed".to_owned()]);
+        assert_eq!(
+            summary.event_subscriptions,
+            vec!["job.completed".to_owned()]
+        );
     }
 
     #[test]
@@ -1549,8 +1588,7 @@ mod tests {
         let dir = temp_dir();
         let build = || -> ExtensionsService {
             let persistence: Arc<dyn Persistence> = {
-                let store =
-                    SqlitePersistence::open(&dir.join("engine.db")).expect("sqlite store");
+                let store = SqlitePersistence::open(&dir.join("engine.db")).expect("sqlite store");
                 store.migrate().expect("sqlite migrations");
                 Arc::new(store)
             };
@@ -1583,7 +1621,14 @@ mod tests {
             Err(ExtensionError::BundledNotRemovable(_))
         ));
         service.disable(&first).expect("bundled can disable");
-        assert!(!service.list().iter().find(|s| s.id == first).unwrap().enabled);
+        assert!(
+            !service
+                .list()
+                .iter()
+                .find(|s| s.id == first)
+                .unwrap()
+                .enabled
+        );
 
         // A reboot keeps the registration and the disable choice,
         // and repairs a missing extracted tree.
@@ -1600,6 +1645,9 @@ mod tests {
         let rebooted = build();
         let still = rebooted.list().iter().find(|s| s.id == id).unwrap().clone();
         assert!(!still.enabled, "the disable choice survives the reboot");
-        assert!(tree.exists(), "the missing tree was re-extracted from the embedded bytes");
+        assert!(
+            tree.exists(),
+            "the missing tree was re-extracted from the embedded bytes"
+        );
     }
 }

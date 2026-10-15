@@ -142,14 +142,20 @@ mod tests {
     #[test]
     fn unsigned_classifies_unsigned() {
         let manifest = unsigned_manifest();
-        assert_eq!(classify(&manifest, &TrustStore::builtin()), SignatureCheck::Unsigned);
+        assert_eq!(
+            classify(&manifest, &TrustStore::builtin()),
+            SignatureCheck::Unsigned
+        );
     }
 
     #[test]
     fn dev_signed_classifies_trusted() {
         let mut manifest = unsigned_manifest();
         dev_sign_manifest(&mut manifest);
-        assert_eq!(classify(&manifest, &TrustStore::builtin()), SignatureCheck::Trusted);
+        assert_eq!(
+            classify(&manifest, &TrustStore::builtin()),
+            SignatureCheck::Trusted
+        );
     }
 
     #[test]
@@ -158,7 +164,10 @@ mod tests {
         dev_sign_manifest(&mut manifest);
         // Tamper: change the name after signing.
         manifest.name = "Tampered".to_owned();
-        assert_eq!(classify(&manifest, &TrustStore::builtin()), SignatureCheck::Invalid);
+        assert_eq!(
+            classify(&manifest, &TrustStore::builtin()),
+            SignatureCheck::Invalid
+        );
     }
 
     #[test]
@@ -166,11 +175,16 @@ mod tests {
         let mut manifest = unsigned_manifest();
         let foreign_seed = [7u8; 32];
         let signing = SigningKey::from_bytes(&foreign_seed);
-        let value = base64::engine::general_purpose::STANDARD
-            .encode(signing.sign(manifest.canonical_json().as_bytes()).to_bytes());
+        let value = base64::engine::general_purpose::STANDARD.encode(
+            signing
+                .sign(manifest.canonical_json().as_bytes())
+                .to_bytes(),
+        );
         manifest.signature = Some(zim_engine_frontend_loader::manifest::SignatureInfo {
             algorithm: "ed25519".to_owned(),
-            public_key: public_key_of(&base64::engine::general_purpose::STANDARD.encode(foreign_seed)),
+            public_key: public_key_of(
+                &base64::engine::general_purpose::STANDARD.encode(foreign_seed),
+            ),
             value,
         });
         assert_eq!(
@@ -179,8 +193,10 @@ mod tests {
         );
         // …but the operator adding that key promotes it to trusted.
         let store = TrustStore::with_extra_keys(
-            [public_key_of(&base64::engine::general_purpose::STANDARD.encode(foreign_seed))]
-                .into_iter(),
+            [public_key_of(
+                &base64::engine::general_purpose::STANDARD.encode(foreign_seed),
+            )]
+            .into_iter(),
         );
         assert_eq!(classify(&manifest, &store), SignatureCheck::Trusted);
     }

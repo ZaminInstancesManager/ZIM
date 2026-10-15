@@ -270,9 +270,7 @@ impl AddonManifest {
             if !vocabulary.contains(&permission.as_str()) {
                 return Err(missing(
                     "permissions",
-                    &format!(
-                        "{permission:?} is not in the engine's permission vocabulary"
-                    ),
+                    &format!("{permission:?} is not in the engine's permission vocabulary"),
                 ));
             }
             if !seen.insert(permission.clone()) {
@@ -336,7 +334,10 @@ impl AddonManifest {
             if !surfaces.contains(&item.page) {
                 return Err(missing(
                     "sidebar_items",
-                    &format!("page {:#?} is not one of this addon's declared surfaces", item.page),
+                    &format!(
+                        "page {:#?} is not one of this addon's declared surfaces",
+                        item.page
+                    ),
                 ));
             }
         }
@@ -371,7 +372,10 @@ impl AddonManifest {
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
             {
-                return Err(missing("commands", "id must be a non-empty slug (letters, digits, -, _)"));
+                return Err(missing(
+                    "commands",
+                    "id must be a non-empty slug (letters, digits, -, _)",
+                ));
             }
             if !command_ids.insert(command.id.clone()) {
                 return Err(missing(
@@ -412,18 +416,14 @@ impl AddonManifest {
         // Dependencies: `id@range`, no self-dependency, no dupes.
         let mut deps = std::collections::BTreeSet::new();
         for dependency in &self.dependencies {
-            let (dep_id, range) = parse_dependency(dependency).map_err(|message| {
-                ManifestError::Missing {
+            let (dep_id, range) =
+                parse_dependency(dependency).map_err(|message| ManifestError::Missing {
                     field: "dependencies",
                     message: format!("{dependency:#?}: {message}"),
-                }
-            })?;
+                })?;
             let _ = range;
             if dep_id == self.id {
-                return Err(missing(
-                    "dependencies",
-                    "an addon cannot depend on itself",
-                ));
+                return Err(missing("dependencies", "an addon cannot depend on itself"));
             }
             if !deps.insert(dependency.clone()) {
                 return Err(missing(
@@ -546,7 +546,10 @@ fn validate_accelerator(accelerator: &str) -> Result<(), String> {
         || (key.len() >= 2
             && key.starts_with('F')
             && key[1..].chars().all(|c| c.is_ascii_digit())
-            && key[1..].parse::<u8>().map(|n| n > 0 && n <= 12).unwrap_or(false));
+            && key[1..]
+                .parse::<u8>()
+                .map(|n| n > 0 && n <= 12)
+                .unwrap_or(false));
     if !valid_key {
         return Err(format!(
             "accelerator key {key:?} must be a letter, digit, or F1-F12"
@@ -721,9 +724,7 @@ mod tests {
 
         // Duplicates are rejected too.
         let mut manifest = valid_manifest();
-        manifest
-            .permissions
-            .push(manifest.permissions[0].clone());
+        manifest.permissions.push(manifest.permissions[0].clone());
         assert!(manifest.validate().is_err());
     }
 
@@ -735,7 +736,10 @@ mod tests {
             .insert("databases".to_owned(), "../escape.html".to_owned());
         assert!(matches!(
             manifest.validate(),
-            Err(ManifestError::PathEscape { field: "entrypoints", .. })
+            Err(ManifestError::PathEscape {
+                field: "entrypoints",
+                ..
+            })
         ));
     }
 
@@ -783,7 +787,13 @@ mod tests {
         }
 
         // Nonsense shapes are rejected.
-        for bad in ["D", "Ctrl+", "Win+L", "Ctrl+Shift+NotAKey", "Ctrl+Alt+Shift+Meta+X"] {
+        for bad in [
+            "D",
+            "Ctrl+",
+            "Win+L",
+            "Ctrl+Shift+NotAKey",
+            "Ctrl+Alt+Shift+Meta+X",
+        ] {
             let mut manifest = valid_manifest();
             manifest.commands[0].accelerator = Some(bad.to_owned());
             assert!(manifest.validate().is_err(), "{bad} must be rejected");
@@ -793,7 +803,9 @@ mod tests {
     #[test]
     fn rejects_unknown_events_and_self_dependencies() {
         let mut manifest = valid_manifest();
-        manifest.event_subscriptions.push("made.up.event".to_owned());
+        manifest
+            .event_subscriptions
+            .push("made.up.event".to_owned());
         assert!(manifest.validate().is_err());
 
         let mut manifest = valid_manifest();

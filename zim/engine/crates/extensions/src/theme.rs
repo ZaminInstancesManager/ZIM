@@ -148,13 +148,11 @@ impl ThemeService {
         let cursor = std::io::Cursor::new(bytes);
         let mut archive =
             zip::ZipArchive::new(cursor).map_err(|e| ThemeError::BadArchive(e.to_string()))?;
-        let manifest_bytes = archive
-            .by_name(THEME_MANIFEST_FILE)
-            .map_err(|_| {
-                ThemeError::BadArchive(format!(
-                    "the archive has no {THEME_MANIFEST_FILE} at its root"
-                ))
-            })?;
+        let manifest_bytes = archive.by_name(THEME_MANIFEST_FILE).map_err(|_| {
+            ThemeError::BadArchive(format!(
+                "the archive has no {THEME_MANIFEST_FILE} at its root"
+            ))
+        })?;
         let mut manifest_bytes = manifest_bytes;
         let mut raw = Vec::new();
         use std::io::Read;
@@ -223,8 +221,8 @@ fn validate_theme(raw: &[u8]) -> Result<ThemeSummary, ThemeError> {
     }
 
     // The closed token vocabulary from the contract.
-    let contract: serde_json::Value = serde_json::from_str(TOKENS_CONTRACT)
-        .expect("the embedded token contract is valid JSON");
+    let contract: serde_json::Value =
+        serde_json::from_str(TOKENS_CONTRACT).expect("the embedded token contract is valid JSON");
     let vocabulary: Vec<&str> = contract
         .get("tokens")
         .and_then(|tokens| tokens.as_object())
@@ -340,7 +338,10 @@ mod tests {
             summary.overrides,
             vec!["color.accent".to_owned(), "color.background".to_owned()]
         );
-        assert_eq!(summary.tokens.get("color.accent").map(String::as_str), Some("#e07b39"));
+        assert_eq!(
+            summary.tokens.get("color.accent").map(String::as_str),
+            Some("#e07b39")
+        );
 
         assert_eq!(service.list().len(), 1);
 
@@ -401,10 +402,7 @@ mod tests {
         {
             let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut buffer));
             writer
-                .start_file(
-                    "readme.txt",
-                    zip::write::SimpleFileOptions::default(),
-                )
+                .start_file("readme.txt", zip::write::SimpleFileOptions::default())
                 .unwrap();
             std::io::Write::write_all(&mut writer, b"not a theme").unwrap();
             writer.finish().unwrap();
