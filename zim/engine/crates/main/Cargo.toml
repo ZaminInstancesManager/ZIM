@@ -55,6 +55,8 @@ semver = { workspace = true }
 serde_json = { workspace = true }
 # M21: the shell-discovery file's descriptor derives.
 serde = { workspace = true }
+# M24: timestamps for the addon boot-notice audit records.
+chrono = { workspace = true }
 # ── M16: the first-party workload integrations (optional) ─────────
 # The engine does not consume the integrations until their
 # implementation milestones (M17+) register them in the kind

@@ -368,7 +368,7 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         &options.data_dir,
         semver::Version::parse(env!("CARGO_PKG_VERSION"))
             .expect("the workspace version is valid semver"),
-        state_api_version(),
+        &state_api_version(),
     ));
     let addon_summaries = extensions.list();
     for notice in extensions.boot_notices() {

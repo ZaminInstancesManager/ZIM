@@ -2688,7 +2688,8 @@ async fn extension_family_lifecycle_end_to_end() {
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
-    assert_eq!(response.json().await.unwrap()["enabled"], false);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["enabled"], false);
     let response = engine
         .client
         .get(engine.url("/zim/servers/abc123/pane"))
