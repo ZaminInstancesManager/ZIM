@@ -315,11 +315,11 @@ mod tests {
         // POSTGRES_DB defaults to the engine's own.
         assert!(env.contains(&("POSTGRES_DB".to_owned(), "postgres".to_owned())));
         let command = spec.resolved_command();
-        assert_eq!(command[0], "postgres");
-        assert!(command.contains(&"unix_socket_directories=/tmp".to_owned()));
+        assert_eq!(command, vec!["postgres".to_owned()]);
         let posture = spec.container_posture();
         assert_eq!(posture.user, "0:0");
-        assert!(posture.readonly_rootfs);
+        // The SQL engines take the writable-rootfs posture.
+        assert!(!posture.readonly_rootfs);
         // The reduced drop list restores the ownership trio.
         assert!(!posture.cap_drop.contains(&"dac_override".to_owned()));
         assert!(!posture.cap_drop.contains(&"fowner".to_owned()));
@@ -328,10 +328,9 @@ mod tests {
         assert!(posture.cap_drop.contains(&"mknod".to_owned()));
         assert!(posture.cap_drop.contains(&"net_raw".to_owned()));
         assert!(posture.cap_drop.contains(&"sys_chroot".to_owned()));
-        // The PGHOST entry rides the bootstrap env.
-        assert!(spec
-            .resolved_env()
-            .contains(&("PGHOST".to_owned(), "/tmp".to_owned())));
+        // No PGHOST (the entrypoint blanks it for its own client;
+        // the socket stays at the compiled-in default).
+        assert!(spec.resolved_env().iter().all(|(key, _)| key != "PGHOST"));
     }
 
     #[test]

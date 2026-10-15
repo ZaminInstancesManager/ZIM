@@ -169,18 +169,16 @@ impl DatabaseEngine {
     /// The default server argv (the image's `CMD` equivalent —
     /// first token must be the binary the entrypoint gates on).
     ///
-    /// Postgres relocates its unix socket into the `/tmp` tmpfs so
-    /// the engine's read-only-rootfs posture holds; MySQL/MariaDB
-    /// do the same for socket and pid file (their images
-    /// additionally get the writable-rootfs posture — see
-    /// [`Self::default_readonly_rootfs`]).
+    /// MySQL/MariaDB relocate socket and pid file into the `/tmp`
+    /// tmpfs (belt and braces for the writable-rootfs posture —
+    /// see [`Self::default_readonly_rootfs`]). Postgres runs its
+    /// stock argv: the entrypoint's own initialization client
+    /// hard-codes the compiled-in socket directory
+    /// (`docker_process_sql` explicitly blanks `PGHOST`/`PGHOSTADDR`),
+    /// so the socket must stay where libpq's default says it is.
     pub fn default_command(&self) -> Vec<String> {
         match self {
-            DatabaseEngine::Postgres => vec![
-                "postgres".to_owned(),
-                "-c".to_owned(),
-                "unix_socket_directories=/tmp".to_owned(),
-            ],
+            DatabaseEngine::Postgres => vec!["postgres".to_owned()],
             DatabaseEngine::MySql => vec![
                 "mysqld".to_owned(),
                 "--socket=/tmp/mysqld.sock".to_owned(),
@@ -233,14 +231,20 @@ impl DatabaseEngine {
         ]
     }
 
-    /// The default rootfs posture: Postgres and Redis keep the
-    /// engine's hardened read-only root filesystem (their writable
-    /// surfaces are the bind mount and the `/tmp` tmpfs); the
-    /// MySQL/MariaDB images write their runtime socket directory
-    /// (`/run/mysqld`) during first-boot initialization and so
-    /// need the writable posture.
+    /// The default rootfs posture.
+    ///
+    /// Redis keeps the engine's hardened read-only root filesystem
+    /// (its only writable surface is the bind-mounted data
+    /// directory). The three SQL engines need the writable
+    /// posture: the MySQL family writes its runtime socket
+    /// directory (`/run/mysqld`) during first-boot initialization,
+    /// and Postgres's entrypoint parks its unix socket — and its
+    /// own initialization client's connection — in
+    /// `/var/run/postgresql`, which the entrypoint hard-codes
+    /// (`docker_process_sql` blanks `PGHOST`/`PGHOSTADDR`, so no
+    /// relocation can reach it).
     pub fn default_readonly_rootfs(&self) -> bool {
-        !matches!(self, DatabaseEngine::MySql | DatabaseEngine::MariaDb)
+        matches!(self, DatabaseEngine::Redis)
     }
 
     /// The environment entries the image needs to bootstrap
@@ -261,18 +265,6 @@ impl DatabaseEngine {
                             .unwrap_or_else(|| "postgres".to_owned()),
                     ),
                     ("POSTGRES_PASSWORD".to_owned(), creds.password.clone()),
-                    // The engine's socket relocation
-                    // (`unix_socket_directories=/tmp`, the
-                    // read-only rootfs's one writable socket
-                    // surface) must reach the entrypoint's *clients*
-                    // too: the initialization temp server is
-                    // reachable only on that socket, and the
-                    // entrypoint's own psql (the CREATE ROLE /
-                    // CREATE DATABASE phase) defaults to the
-                    // compiled-in socket directory — read-only, so
-                    // nothing can ever listen there. PGHOST points
-                    // libpq at the real socket.
-                    ("PGHOST".to_owned(), "/tmp".to_owned()),
                 ];
                 if let Some(database) = &creds.database {
                     env.push(("POSTGRES_DB".to_owned(), database.clone()));
@@ -317,7 +309,7 @@ impl DatabaseEngine {
             DatabaseEngine::Postgres => vec![
                 "pg_isready".to_owned(),
                 "-h".to_owned(),
-                "/tmp".to_owned(),
+                "/var/run/postgresql".to_owned(),
                 "-p".to_owned(),
                 primary_port.to_string(),
                 "-U".to_owned(),
@@ -390,7 +382,7 @@ impl DatabaseEngine {
                 let mut argv = vec![
                     "psql".to_owned(),
                     "-h".to_owned(),
-                    "/tmp".to_owned(),
+                    "/var/run/postgresql".to_owned(),
                     "-U".to_owned(),
                     creds
                         .username
@@ -649,7 +641,7 @@ impl DatabaseEngine {
                 let mut argv = vec![
                     "psql".to_owned(),
                     "-h".to_owned(),
-                    "/tmp".to_owned(),
+                    "/var/run/postgresql".to_owned(),
                     "-U".to_owned(),
                     creds
                         .username
@@ -780,7 +772,9 @@ mod tests {
         let creds = postgres_creds();
         let argv = DatabaseEngine::Postgres.probe_argv(&creds, 5432);
         assert_eq!(argv[0], "pg_isready");
-        assert!(argv.contains(&"/tmp".to_owned()));
+        // The default socket directory (the entrypoint's own client
+        // hard-codes it; the writable-rootfs posture keeps it real).
+        assert!(argv.contains(&"/var/run/postgresql".to_owned()));
         assert!(argv.contains(&"5432".to_owned()));
 
         let mysql_creds = DatabaseCredentials {
@@ -879,28 +873,42 @@ mod tests {
         for engine in DatabaseEngine::ALL {
             assert_eq!(engine.default_container_user(), "0:0");
         }
-        // Postgres and Redis keep the read-only rootfs (their
-        // writable surfaces are the bind mount + /tmp tmpfs).
-        assert!(DatabaseEngine::Postgres.default_readonly_rootfs());
+        // Redis keeps the read-only rootfs (its only writable
+        // surface is the bind-mounted data directory).
         assert!(DatabaseEngine::Redis.default_readonly_rootfs());
-        // The MySQL family needs the writable rootfs.
+        // The three SQL engines need the writable posture: the
+        // MySQL family's /run/mysqld, Postgres's
+        // hard-coded /var/run/postgresql socket.
+        assert!(!DatabaseEngine::Postgres.default_readonly_rootfs());
         assert!(!DatabaseEngine::MySql.default_readonly_rootfs());
         assert!(!DatabaseEngine::MariaDb.default_readonly_rootfs());
+        // And the engine table carries the reduced capability
+        // drop list (the ownership trio restored).
+        {
+            let caps = DatabaseEngine::default_cap_drop();
+            assert!(!caps.contains(&"dac_override"));
+            assert!(!caps.contains(&"fowner"));
+            assert!(!caps.contains(&"fsetid"));
+            assert!(caps.contains(&"mknod"));
+            assert!(caps.contains(&"sys_chroot"));
+            assert_eq!(caps.len(), 7);
+        }
     }
 
     #[test]
     fn the_default_command_gates_on_the_entrypoint_binary() {
         // The images' entrypoints branch on $1: the first argv
         // token must be the server binary they gate on.
-        assert_eq!(DatabaseEngine::Postgres.default_command()[0], "postgres");
+        assert_eq!(
+            DatabaseEngine::Postgres.default_command(),
+            vec!["postgres".to_owned()]
+        );
         assert_eq!(DatabaseEngine::MySql.default_command()[0], "mysqld");
         assert_eq!(DatabaseEngine::MariaDb.default_command()[0], "mariadbd");
         assert_eq!(DatabaseEngine::Redis.default_command()[0], "redis-server");
-        // The socket relocations are in place.
-        assert!(DatabaseEngine::Postgres
-            .default_command()
-            .windows(2)
-            .any(|w| w[0] == "-c" && w[1] == "unix_socket_directories=/tmp"));
+        // The MySQL family's socket relocations are in place
+        // (Postgres keeps its stock argv — the entrypoint's own
+        // client hard-codes the default socket directory).
         assert!(DatabaseEngine::MariaDb
             .default_command()
             .contains(&"--socket=/tmp/mysqld.sock".to_owned()));
