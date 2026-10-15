@@ -114,11 +114,14 @@ fn run_attach(app: &AppHandle, shared: &Arc<Shared>) {
         Phase::Ready => {
             let port = status.port.expect("ready status always carries the port");
             let origin = format!("https://127.0.0.1:{port}");
+            // M22: the default target is the application chrome
+            // (`zim://app`: tab strip + omnibox hosting the tab
+            // panes); `--open` overrides it for deep links.
             let target = shared
                 .options
                 .open
                 .clone()
-                .unwrap_or_else(|| "zim://newtab".to_owned());
+                .unwrap_or_else(|| "zim://app".to_owned());
             match zim_url::resolve(&target, &origin) {
                 Ok(url) => {
                     if let Err(e) = navigate_to_engine_url(app, &url) {
@@ -184,7 +187,7 @@ fn stage_trust(data_dir: &std::path::Path, app: &AppHandle) -> Result<(), String
 }
 
 /// Navigate the main window to an engine-origin URL.
-fn navigate_to_engine_url(app: &AppHandle, url: &str) -> Result<(), String> {
+pub fn navigate_to_engine_url(app: &AppHandle, url: &str) -> Result<(), String> {
     let window = app
         .get_webview_window(MAIN_WINDOW)
         .ok_or_else(|| "the main window is gone".to_owned())?;
@@ -214,18 +217,21 @@ fn navigate_to_page(app: &AppHandle, page: &str) {
     }
 }
 
-/// Navigate to a `zim://` URL against the attached engine (the
-/// tray's new-tab entry and, later, the M22 address bar).
-pub fn navigate_to_zim_url(app: &AppHandle, zim_url: &str) -> Result<(), String> {
+/// The tray's "New tab" (M22): open the application chrome with a
+/// fresh tab. `zim_url::resolve` deliberately rejects query strings
+/// (the identifier grammar, AD-23), so this builds the loadable HTTP
+/// form directly — the chrome reads `?newtab=1` on load and restores
+/// the session plus one new tab. Reloading the chrome page is the
+/// honest cost here: session restore re-opens every tab as a view,
+/// and the panes re-fetch their own data (console buffers included);
+/// an in-place event channel arrives with the M23 window work.
+pub fn open_new_tab(app: &AppHandle) -> Result<(), String> {
     let shared = app.state::<Arc<Shared>>();
     let port = shared
         .get()
         .port
         .ok_or_else(|| "the engine is not attached yet".to_owned())?;
-    let origin = format!("https://127.0.0.1:{port}");
-    let url = zim_url::resolve(zim_url, &origin)
-        .map_err(|e| format!("cannot resolve {zim_url:?}: {e}"))?;
-    navigate_to_engine_url(app, &url)
+    navigate_to_engine_url(app, &format!("https://127.0.0.1:{port}/zim/app?newtab=1"))
 }
 
 /// Emit a status snapshot to the bundled pages.

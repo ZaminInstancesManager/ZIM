@@ -7,9 +7,9 @@
  * `instance.state_change` events; a `stream.gap` triggers a state
  * re-fetch per §11.3.
  */
-import { ApiError, formatTime, getState, listInstances } from "./api";
-import { ZimStream } from "./stream";
-import "./components";
+import { ApiError, formatTime, getState, listInstances } from "./api.js";
+import { ZimStream } from "./stream.js";
+import "./components.js";
 /** Rows that get a live WebSocket (per-instance streams, §11). */
 const MAX_LIVE_SUBSCRIPTIONS = 10;
 /** Fallback polling interval for unsubscribed rows. */

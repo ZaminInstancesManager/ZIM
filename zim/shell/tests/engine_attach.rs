@@ -129,6 +129,18 @@ fn attach_finds_a_running_engine_and_maps_newtab() {
     let (status, _, _) = engine::https_get(port, "/zim/servers").unwrap();
     assert_eq!(status, 200);
 
+    // The M22 application chrome surface serves as well (the tab
+    // strip + omnibox host; its panes are the pages above).
+    let (status, content_type, body) = engine::https_get(port, "/zim/app").unwrap();
+    assert_eq!(status, 200);
+    assert!(content_type.starts_with("text/html"));
+    let body = String::from_utf8_lossy(&body);
+    assert!(
+        body.contains("tabstrip"),
+        "the app chrome identifies its tab strip (body starts: {:?})",
+        &body[..body.len().min(120)]
+    );
+
     // Crash semantics: kill -9 leaves a stale discovery file, which
     // must read back but answer no probe.
     crash(&mut child);

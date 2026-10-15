@@ -31,11 +31,17 @@ ZIM uses five test types:
    container), and real streaming.
    - Run in seconds.
    - May use Docker-in-Docker for runtime tests.
-3. **Browser tests** (Chromium's `browser_tests` target).
-   - Cover the Chromium-side integration layer: `zim://` URL
-   routing, `ServerTabFeature` attachment, tab menu items, etc.
-   - Run as part of the Chromium build.
-   - Require a Chromium build environment (not in this workspace).
+3. **Frontend unit tests** (node:test over the compiled TS —
+   delivered by M22; `zim/frontend/tests/`, `npm test`).
+   - Cover the frontend's pure logic: the `zim://` URL grammar,
+   the tab model + session format, the omnibox ranking, the §4
+   indicator mapping. DOM-layer behavior is not unit-tested here —
+   it is covered by the engine's page tests and the shell's
+   engine-attach integration, and will be by the M25 E2E suite.
+   - Run in milliseconds; part of the Engine CI frontend job.
+   - (The pre-correction plan called for Chromium `browser_tests`
+   on a C++ integration layer — cancelled with AD-20; the
+   dependency-free frontend keeps this layer small and honest.)
 4. **End-to-end (E2E) tests** (a separate test runner that drives
    the full ZIM product).
    - Cover user-visible scenarios: install, create instance, start,
@@ -58,10 +64,10 @@ Each lifecycle invariant from `docs/architecture/ZIM_ARCHITECTURE.md`
 |--------------|--------------------------------------------------------|-----------------------|--------------------------------------------------------|--------|
 | 1            | Persisted `running` flag is not proof of liveness      | Engine integration    | `engine_integration::reconcile_after_restart`           | Delivered (M6) — application tests/supervision.rs + runtime-docker tests (reconcile) |
 | 2            | Accepted start request is not proof that server started | Engine integration    | `engine_integration::start_job_state_machine`           | Delivered (M6) — supervision + api lifecycle tests (202 accepted) |
-| 3            | Tab's existence is not proof that server should run     | E2E                    | `e2e::tab_does_not_imply_running`                       | Planned |
-| 4            | Closing a tab does not stop its server                  | E2E                    | `e2e::close_tab_keeps_server_running`                  | Planned |
-| 5            | Restoring a session does not issue lifecycle commands   | E2E                    | `e2e::session_restore_no_lifecycle`                    | Planned |
-| 6            | Multiple tabs cannot create multiple server processes  | E2E                    | `e2e::three_tabs_one_process`                          | Planned |
+| 3            | Tab's existence is not proof that server should run     | E2E                    | `e2e::tab_does_not_imply_running`                       | In progress — M22: chrome logic delivered (tabs are views; the TabModel has no lifecycle surface at all); the packaged-app E2E run is M25 |
+| 4            | Closing a tab does not stop its server                  | E2E                    | `e2e::close_tab_keeps_server_running`                  | In progress — M22: close only unsubscribes the pane's stream (engine `ZimStream.close`); packaged-app E2E is M25 |
+| 5            | Restoring a session does not issue lifecycle commands   | E2E                    | `e2e::session_restore_no_lifecycle`                    | In progress — M22: session restore is views-only by construction + unit-tested (`tests/tabs.test.ts`); packaged-app E2E is M25 |
+| 6            | Multiple tabs cannot create multiple server processes  | E2E                    | `e2e::three_tabs_one_process`                          | In progress — M22: duplicate tabs tolerated by the session format (views, not processes); packaged-app E2E is M25 |
 | 7            | Lifecycle operations cannot race into undefined states  | Engine fault-injection | `engine_integration::power_action_race`                | Delivered (M6) — application tests/supervision.rs |
 | 8            | Native process runner is not equivalent to container    | Engine integration    | `engine_integration::host_runtime_requires_consent`    | Planned |
 | 9            | Per-instance operation serialization                    | Engine integration    | `engine_integration::power_queue_serializes`           | Delivered (M6) — application tests/supervision.rs |

@@ -99,14 +99,14 @@ Key properties:
 
 `zim://` is ZIM's internal navigation namespace — the app's URL
 vocabulary for its own pages. It is served by the engine's frontend
-loader (the shell maps the namespace onto the engine's loopback
-origin / a shell custom protocol; the mapping strategy is an M21
-spike decision).
+loader; the shell maps the namespace onto the engine's loopback
+origin at navigation time (AD-23; see §13's resolution notes).
 
 ### URL inventory
 
 | URL                                  | What it shows                                        |
 |--------------------------------------|------------------------------------------------------|
+| `zim://app`                          | The application chrome (M22): tab strip + omnibox, hosting the per-tab panes. |
 | `zim://newtab`                       | New-tab page (server discovery / create / import).   |
 | `zim://servers`                      | Server list (overview of all instances).             |
 | `zim://servers/{id}/console`        | Console for instance `{id}`.                          |
@@ -125,6 +125,17 @@ spike decision).
 These URLs are **stable identifiers**: session restoration,
 bookmarks-style quick access, split-view pairings, and extension
 links all address pages by `zim://` URL, never by tab index.
+
+M22 note on `zim://app` and the per-instance surfaces: the chrome
+is a declared frontend surface like any other — it renders in any
+browser, not only the desktop shell's webview. Its tab panes are
+same-origin iframes onto the other surfaces (AD-24), so the chrome,
+the panes, and direct page visits all share one URL space and one
+set of view-only semantics. The six per-instance rows (files,
+settings, backups, schedules, subusers, metrics) are declared and
+served by the default package as of M22 — with honest stub bodies
+(the metrics surface renders real recent samples); their full views
+ship with the milestones that own them.
 
 ## 4. Per-tab server metadata and the status model
 
@@ -160,6 +171,15 @@ The four primary statuses (green/yellow/red/blue) match the required
 model. Extension states reuse the primaries with overlays rather
 than inventing colors: installing uses yellow + progress overlay
 (not solid yellow); crash-loop uses red + glyph (not solid red).
+
+M22 implementation notes: the mapping is realized in the
+`zim-status-dot` component — pulsing for the transient yellow
+states, a conic progress ring driven by `instance.install_progress`
+events, the crash-loop glyph, and a small tab-strip variant in the
+favicon slot. The engine's `visual_color` mirror was aligned with
+this table in M22: `Suspended` is gray (the engine mirror
+previously said blue; this table is the visual authority, and
+Offline alone keeps blue).
 
 ## 5. Server-tab context menu
 
@@ -284,12 +304,26 @@ session persistence). Animation values (durations, curves) are tuned
 against Chrome's publicly documented motion specs, not copied from
 source.
 
+**M22 status:** the tab strip, tab state indicators, animations,
+address bar, session restore, and context menu rows are implemented
+(`zim/frontend/src/app.ts` + `tabs.ts` + `omnibox.ts` + `zimurl.ts`,
+with `tests/` covering the pure logic). Split view, the NTP layout
+grammar, and themes remain M23. One honest scope note: tear-off
+opens the tab in a new window where `window.open` is available
+(plain browsers); inside the desktop shell it reports that
+multi-window lands with M23, which owns native window management.
+
 ## 13. Open integration questions
 
-1. Shell content hosting strategy: single webview with iframe-based
-   panes vs. multiple native webviews per tab/pane (M22 spike;
-   trade-off is memory vs. per-pane isolation and fidelity. M21
-   shipped the single-window baseline the decision builds on).
+1. ~~Shell content hosting strategy~~ — **RESOLVED (M22, AD-24):
+   single webview, iframe panes.** The chrome (`zim://app`) hosts
+   tab content as same-origin iframes onto the engine's page
+   surface; the shell keeps exactly one webview window. Rationale:
+   panes inherit the pages' own view-only semantics and CSP, the
+   frontend works unchanged in plain browsers, and the memory cost
+   of one webview is flat. Native multi-webview (per-window
+   fidelity, tear-out/merge) remains the M23 multi-window design's
+   starting point — the iframe baseline is what it generalizes.
 2. ~~`zim://` resolution~~ — **RESOLVED (M21, AD-23): loopback-origin
    mapping.** The shell rewrites `zim://` URLs onto the engine's
    `https://127.0.0.1:{port}/zim/…` origin at navigation time
@@ -301,9 +335,14 @@ source.
    cookie and the `zim-events.v1` WebSocket sub-protocol) or force
    re-engineering both. `zim://` URLs remain stable *identifiers*;
    the loadable URL is derived at navigation time.
-3. Webview divergence testing matrix: which WebKitGTK/WebView2/
-   WKWebView versions are the floor (M22; the dependency-free
-   frontend keeps the surface small).
+3. Webview divergence floor — **M22 answer:** the frontend's
+   platform needs are ES2020 modules, WebSocket, Pointer Events,
+   Constructable Stylesheets, `conic-gradient`, and CSS custom
+   properties — the dependency-free surface stays the mitigation,
+   and CI verifies the bytes (type-check, unit tests, fresh dist)
+   rather than webview matrix behavior, which needs the packaged
+   app (M25's E2E suite owns the real matrix: WebKitGTK ≥ 2.40,
+   WebView2 Evergreen, macOS 13+ WKWebView).
 4. Shell auto-update channel mechanics (deferred to M25 packaging).
 
 ### M21 resolution notes (recorded for M22)
@@ -331,3 +370,39 @@ source.
 - **Shell window model**: M21 ships one webview window (`main`) —
   the tab strip, address bar, split views, and multi-window
   behavior are M22/M23 shell-UI work layered on this baseline.
+
+### M22 resolution notes (recorded for M23)
+
+- **The chrome is a frontend surface** (`zim://app`, AD-24): the
+  tab strip, omnibox, and panes are the frontend's own TypeScript
+  (`zim/frontend/src/app.ts`), served by the engine like every
+  other page. The shell's default attach target changed from
+  `zim://newtab` to `zim://app`; `--open` still deep-links.
+- **Panies are same-origin iframes**: the engine's page CSP gained
+  `frame-src 'self'` and `frame-ancestors 'self'` with
+  `X-Frame-Options: SAMEORIGIN` — same-origin framing in both
+  directions, cross-origin embedding still denied (and the loopback
+  host guard already confines who reaches the origin at all).
+- **Indicator wiring**: the chrome holds one §11 events stream per
+  server tab (the §9 events-stream slot); `instance.state_change`
+  drives the tab dot, `instance.install_progress` drives the §4
+  progress ring, gaps re-fetch state over HTTP, and a fatal stream
+  (anonymous or permission-denied) degrades the dot with one HTTP
+  fallback rather than breaking the tab.
+- **Session format**: `zim.session.v1` — `{v: 1, tabs: [zim://
+  paths], active: index}` — written debounced on every tab-set
+  change and flushed on unload; restoration re-opens views only
+  (invariants 3–6), and `?tab=` deep links (tear-off targets)
+  replace the session like Chrome opening with a URL argument.
+- **Tray "New tab"**: the shell navigates the main window to
+  `/zim/app?newtab=1` (built directly — the `zim://` identifier
+  grammar deliberately has no query strings, AD-23); the chrome
+  restores the session plus one new tab. The reload cost is the
+  honest trade: panes re-fetch their own data; an in-place event
+  channel is M23 window work.
+- **Fixed on the way**: the committed compiled assets carried
+  extensionless import specifiers (`from "./api"`), which no real
+  ES-module host resolves — tsc emits specifiers verbatim, and no
+  browser-level execution had ever exercised the pages. The build
+  now post-processes the emitted files (`scripts/fix-imports.mjs`)
+  and the freshness gate in CI catches drift.

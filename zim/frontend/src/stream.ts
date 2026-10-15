@@ -47,7 +47,8 @@ export class ZimStream {
   private lastGeneration = 0;
   private attempts = 0;
   private closed = false;
-  private reconnectTimer: number | undefined;
+  /** Timer id, typed portably across DOM and Node typings. */
+  private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(instanceId: string, handlers: StreamHandlers) {
     this.instanceId = instanceId;

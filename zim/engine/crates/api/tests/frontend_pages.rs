@@ -322,9 +322,29 @@ async fn pages_serve_the_default_frontend_with_csp() {
         .unwrap();
     assert!(csp.contains("default-src 'none'"));
     assert!(csp.contains("script-src 'self'"));
+    // M22 (AD-24): the app chrome's same-origin iframe panes.
+    assert!(csp.contains("frame-src 'self'"));
+    assert!(csp.contains("frame-ancestors 'self'"));
     assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(response.headers()["x-frame-options"], "SAMEORIGIN");
     let body = response.text().await.unwrap();
     assert!(body.contains("ZIM"));
+
+    // The M22 application chrome surface.
+    let response = engine.client.get(engine.page_url("/app")).send().await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert!(response.text().await.unwrap().contains("tabstrip"));
+
+    // A declared per-instance stub surface (the §3 inventory rows
+    // M22 brings into the package; one entrypoint, six surfaces).
+    let response = engine
+        .client
+        .get(engine.page_url("/servers/0a1b2c3d-0000-0000-0000-000000000000/files"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert!(response.text().await.unwrap().contains("surface"));
 
     // The console surface, parameterized.
     let response = engine

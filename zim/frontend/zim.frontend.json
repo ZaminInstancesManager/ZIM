@@ -2,9 +2,9 @@
   "$schema": "https://zim.zaminmc.org/schemas/frontend.v1.json",
   "manifest_version": 1,
   "id": "org.zaminmc.frontend.default",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "ZIM Default Frontend",
-  "description": "The default ZIM frontend: new-tab, server list, and server console.",
+  "description": "The default ZIM frontend: the M22 application chrome (tab strip + omnibox), new-tab, server list, server console, and the declared per-instance surfaces.",
   "author": "ZaminMC",
   "license": "Apache-2.0",
   "api_version": "v1",
@@ -14,12 +14,26 @@
   "page_surfaces": [
     "zim://newtab",
     "zim://servers",
-    "zim://servers/{id}/console"
+    "zim://servers/{id}/console",
+    "zim://app",
+    "zim://servers/{id}/files",
+    "zim://servers/{id}/settings",
+    "zim://servers/{id}/backups",
+    "zim://servers/{id}/schedules",
+    "zim://servers/{id}/subusers",
+    "zim://servers/{id}/metrics"
   ],
   "entrypoints": {
     "newtab": "pages/newtab.html",
     "servers": "pages/servers.html",
     "console": "pages/console.html",
+    "app": "pages/app.html",
+    "files": "pages/server_stub.html",
+    "settings": "pages/server_stub.html",
+    "backups": "pages/server_stub.html",
+    "schedules": "pages/server_stub.html",
+    "subusers": "pages/server_stub.html",
+    "metrics": "pages/server_stub.html",
     "smoke": "pages/smoke.html"
   },
   "assets": [
@@ -27,9 +41,14 @@
     "assets/api.js",
     "assets/components.js",
     "assets/stream.js",
+    "assets/zimurl.js",
+    "assets/tabs.js",
+    "assets/omnibox.js",
     "assets/newtab.js",
     "assets/servers.js",
-    "assets/console.js"
+    "assets/console.js",
+    "assets/app.js",
+    "assets/server_stub.js"
   ],
   "permissions": [
     "websocket.connect",

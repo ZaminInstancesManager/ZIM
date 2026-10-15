@@ -259,7 +259,20 @@ export async function frontendActive(): Promise<FrontendActive> {
   return api("/frontend/active");
 }
 
-// ── Status visual model (BROWSER_INTEGRATION.md §3) ───────────────
+/** The recent resource-usage view (`GET /instances/{id}/metrics`):
+ * the last §11.1 `instance.resource_usage` events. */
+export interface MetricsSnapshot {
+  instance_id: string;
+  samples: StreamEvent[];
+  last_generation: number;
+}
+
+/** The recent resource-usage samples for one instance (M7). */
+export async function metricsSnapshot(id: string): Promise<MetricsSnapshot> {
+  return api(`/instances/${encodeURIComponent(id)}/metrics`);
+}
+
+// ── Status visual model (BROWSER_INTEGRATION.md §4) ───────────────
 
 /** The visual classification of a lifecycle status. */
 export interface VisualStatus {
@@ -269,7 +282,8 @@ export interface VisualStatus {
   label: string;
 }
 
-/** Map an engine status string onto the §3 visual model. */
+/** Map an engine status string onto the §4 visual model (the
+ * engine's canonical `visual_color`, mirrored). */
 export function visualStatus(status: string): VisualStatus {
   switch (status) {
     case "running":
@@ -289,7 +303,7 @@ export function visualStatus(status: string): VisualStatus {
     case "offline":
       return { color: "blue", label: "offline" };
     case "suspended":
-      return { color: "blue", label: "suspended" };
+      return { color: "gray", label: "suspended" };
     default:
       return { color: "gray", label: status || "unknown" };
   }

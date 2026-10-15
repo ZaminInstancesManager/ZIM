@@ -5,8 +5,8 @@
  * needed, and quick links. No lifecycle side effects on load (the
  * session-restoration rule, BROWSER_INTEGRATION.md §6).
  */
-import { health, listInstances, whoami } from "./api";
-import "./components";
+import { health, listInstances, whoami } from "./api.js";
+import "./components.js";
 const statusPill = document.getElementById("engine-status");
 const whoPill = document.getElementById("who");
 const countPill = document.getElementById("server-count");

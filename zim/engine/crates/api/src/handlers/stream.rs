@@ -39,6 +39,14 @@
 //! yet issuing tab tokens in production, M7 ships the per-instance
 //! cap (hub-side) and leaves per-tab counting to the integration
 //! milestone, where tabs exist.
+//!
+//! M22 note: tabs now exist (`zim://app`'s panes), but they
+//! authenticate with the session cookie — a cookie is not
+//! tab-scoped, so per-tab counting has nothing to count against.
+//! Tab tokens become worth issuing when extension-authored panes
+//! arrive (M24); until then the per-instance cap (50) is the
+//! enforced bound and each pane's budget matches §9 by construction
+//! (one events stream per server tab, held by the chrome).
 
 use std::sync::Arc;
 use std::time::Duration;

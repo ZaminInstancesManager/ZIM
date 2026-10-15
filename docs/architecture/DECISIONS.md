@@ -606,6 +606,86 @@ trusted certificate.
   contract — the discovery file is the contract; the port probe is
   only the fallback path.
 
+### AD-24: The application chrome is a frontend surface (`zim://app`) hosting same-origin iframe panes. (2026-10-15)
+
+**Status:** Accepted (resolves `BROWSER_INTEGRATION.md` §13 Q1 —
+the M22 shell-content-hosting spike; implemented by M22).
+
+**Context:** The Chrome-UX parity milestones need a tab strip and
+an omnibox above per-tab page content. Two hosting strategies fit
+the AD-21/AD-23 baseline: multiple native webviews (the shell
+creates one webview per tab/pane, each navigated independently) or
+a single webview whose document — the chrome — embeds tab content
+as iframes.
+
+**Decision:** Single webview, iframe panes — and the chrome itself
+is a declared frontend surface, `zim://app` (`zim/frontend/src/
+app.ts`), served by the engine like every other page. Five
+reasons, in order of weight:
+
+1. **The roadmap's own words.** M22's goal is the interaction
+   model "in the frontend's own TypeScript" — the chrome belongs
+   to the package, not the shell. A `zim://app` surface renders in
+   any browser; a shell-owned chrome would not.
+2. **Panes inherit page semantics.** Each pane is the same page a
+   browser can load directly: view-only by construction, session
+   cookie included, §11 streams included. Nothing is re-implemented
+   per pane, and closing a tab only unsubscribes (invariants 3–6).
+3. **Memory is flat.** One webview regardless of tab count; the
+   iframe documents share the engine origin's caches. The native
+   multi-webview cost curve belongs to real multi-window (M23).
+4. **The shell stays thin.** The shell's only M22 changes are the
+   default attach target and the tray's new-tab entry — no window
+   management, no per-tab webview bookkeeping. The shell remains
+   disposable; the chrome is not shell state.
+5. **Tear-off and multi-window generalize.** The M23 window work
+   starts from this baseline: a torn-off tab is a new window
+   loading `/zim/app?tab={zim-url}` — the same chrome with a
+   one-tab session. Native tear-out/merge then swaps the pane
+   mechanism without touching the session format or the pages.
+
+**Framing posture (same decision):** the engine's page CSP gains
+`frame-src 'self'` (a page may embed same-origin panes) and
+`frame-ancestors 'self'` (a page may be embedded by the chrome),
+with `X-Frame-Options: SAMEORIGIN` matching. Cross-origin
+embedding stays denied in both directions — the loopback host
+guard already confines who can reach the origin, and a foreign
+page can neither embed ZIM surfaces nor be embedded by them.
+
+**Session format (same decision):** `zim.session.v1` —
+`{v: 1, tabs: [zim:// paths], active: index}` under the chrome
+page's localStorage, written debounced on every tab-set change and
+flushed on unload. Paths, never tab indexes (§3's stable-identifier
+rule); corruption rejects to the default session rather than being
+repaired; `?tab=` deep links replace the session (Chrome's
+"opened with a URL" semantics). Restoration re-opens views only —
+no lifecycle API is called as a side effect of loading the chrome.
+
+**Risks / mitigations:**
+- An iframe pane can navigate itself (in-page links); the chrome
+  resyncs the tab's URL from the pane's location on every load
+  event — same-origin reads make this exact, and the omnibox,
+  session, and indicator follow the pane, not the stale model.
+- Background tabs keep running (streams included), so many server
+  tabs mean many live WebSockets — bounded by the engine's
+  per-instance subscriber cap (50), matching §9's per-tab events-
+  stream slot by construction; the per-instance cap is the enforced
+  bound until tab tokens exist (M24).
+- Tear-off inside the desktop shell cannot create native windows
+  from page JS — M22 ships the browser-platform path
+  (`window.open` of the chrome with a `?tab=` deep link) plus the
+  `zim:tear-off` event hook, and reports the M23 dependency
+  honestly instead of degrading silently.
+- The tray's "New tab" reloads the chrome (session restore
+  recovers the tab set; panes re-fetch their own data, console
+  buffers included) — accepted for M22; an in-place event channel
+  is M23 window work.
+- A latent bug surfaced and was fixed: the committed compiled
+  assets used extensionless import specifiers that no real
+  ES-module host resolves (`from "./api"` 404s in a browser); the
+  build now post-processes specifiers (`scripts/fix-imports.mjs`)
+  so the embedded bytes actually execute.
+
 
 ## 2. Unresolved questions
 
