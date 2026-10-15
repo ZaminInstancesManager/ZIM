@@ -8,6 +8,10 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
+# Embeds the bundled default addon packages (zim/extensions/ at the
+# repo root, org.zaminmc.extension.* only) into the binary at build
+# time.
+build = "build.rs"
 
 [lib]
 name = "zim_engine_extensions"
@@ -16,3 +20,22 @@ path = "src/lib.rs"
 [dependencies]
 zim_engine_application = { workspace = true }
 zim_engine_domain = { workspace = true }
+# Reuses the frontend loader's public manifest primitives (surface
+# patterns, confinement-safe paths, the §3.4 signature block shape)
+# and its trust machinery (TrustStore + SignatureCheck + the built-in
+# key) so addons and frontend packages share one trust root.
+zim_engine_frontend_loader = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+semver = { workspace = true }
+ed25519-dalek = { workspace = true }
+zip = { workspace = true }
+sha2 = { workspace = true }
+base64 = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+# The real SQLite adapter for the service lifecycle tests (the
+# registry rows and reboot reconciliation).
+zim_engine_persistence_sqlite = { workspace = true }

@@ -5,15 +5,22 @@ on:
     branches: [main, "m*-dev"]
     paths:
       # Run when engine code, workspace manifest, lockfile, the
-      # frontend package, or this workflow change.
+      # frontend package, the addon packages + SDK + contracts the
+      # engine embeds, or this workflow change.
       - 'zim/engine/**'
       - 'zim/frontend/**'
+      - 'zim/extensions/**'
+      - 'zim/sdk/**'
+      - 'zim/contracts/**'
       - '.github/workflows/engine-ci.yml'
   pull_request:
     branches: [main]
     paths:
       - 'zim/engine/**'
       - 'zim/frontend/**'
+      - 'zim/extensions/**'
+      - 'zim/sdk/**'
+      - 'zim/contracts/**'
       - '.github/workflows/engine-ci.yml'
 
 # Cancel superseded runs on the same ref.

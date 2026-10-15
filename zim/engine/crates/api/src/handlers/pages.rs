@@ -28,6 +28,11 @@
 //!   already confines who can even talk to this origin.
 //! - Paths are routed through the loader's confinement checks; a
 //!   traversal attempt answers 404, never a filesystem read.
+//! - M24 addon fallback: when the active package does not declare
+//!   the surface, the enabled addons' page surfaces and the
+//!   reserved `ext/{addon-id}/…` asset namespace get the path
+//!   (same headers, same caching discipline, same confinement —
+//!   addon file keys come from validated package trees).
 
 use std::sync::Arc;
 
@@ -76,6 +81,13 @@ pub async fn serve(
 
 /// Resolve + serve one package path, honoring `If-None-Match`
 /// revalidation against the content digest ETag.
+///
+/// M24: when the active frontend package does not declare the
+/// surface, the enabled addons get the path — first the reserved
+/// `ext/{addon-id}/…` asset namespace, then their declared page
+/// surfaces (§4.4). Addon files serve with the same CSP, the same
+/// caching discipline (assets cacheable, pages no-cache), and the
+/// same digest-ETag revalidation.
 async fn serve_path(state: &Arc<AppState>, path: &str, headers: &HeaderMap) -> Response {
     let frontend = Arc::clone(&state.frontend);
     let owned = path.to_owned();
@@ -90,50 +102,84 @@ async fn serve_path(state: &Arc<AppState>, path: &str, headers: &HeaderMap) -> R
                 return not_found_page();
             };
             let digest = frontend.file_digest(&file);
-            let etag = digest.as_ref().map(|digest| format!("\"{digest}\""));
-            // §12-style revalidation: a matching If-None-Match (weak
-            // comparison, `W/` prefixes tolerated) short-circuits.
-            if let (Some(etag), Some(if_none_match)) = (
-                etag.as_deref(),
-                headers
-                    .get(header::IF_NONE_MATCH)
-                    .and_then(|v| v.to_str().ok()),
-            ) {
-                if if_none_match
-                    .split(',')
-                    .map(|candidate| candidate.trim().trim_start_matches("W/"))
-                    .any(|candidate| candidate == etag || candidate == "*")
-                {
-                    let mut response = StatusCode::NOT_MODIFIED.into_response();
-                    if let Ok(value) = HeaderValue::from_str(etag) {
-                        response.headers_mut().insert(header::ETAG, value);
-                    }
-                    return response;
-                }
-            }
-            let mut headers = HeaderMap::new();
-            security_headers(&mut headers);
-            if let Ok(value) = HeaderValue::from_str(mime) {
-                headers.insert(header::CONTENT_TYPE, value);
-            }
-            if cacheable {
-                headers.insert(
-                    header::CACHE_CONTROL,
-                    HeaderValue::from_static("public, max-age=3600"),
-                );
-            } else {
-                headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-            }
-            // Serving-side ETag from the content digest.
-            if let Some(etag) = etag {
-                if let Ok(value) = HeaderValue::from_str(&etag) {
-                    headers.insert(header::ETAG, value);
-                }
-            }
-            (StatusCode::OK, headers, bytes).into_response()
+            serve_file(bytes, mime, digest, cacheable, headers)
         }
-        Resolution::NotFound => not_found_page(),
+        Resolution::NotFound => {
+            // The addon fallback (M24): enabled addons' assets and
+            // declared surfaces.
+            let extensions = Arc::clone(&state.extensions);
+            let owned = path.to_owned();
+            let served = tokio::task::spawn_blocking(move || extensions.resolve(&owned))
+                .await
+                .ok()
+                .flatten();
+            match served {
+                Some(file) => serve_file(
+                    file.bytes,
+                    file.mime,
+                    Some(file.digest),
+                    // Pages (surfaces) never cache; namespace files
+                    // (the ext/ assets) do — the frontend loader's
+                    // own split.
+                    path.starts_with("ext/"),
+                    headers,
+                ),
+                None => not_found_page(),
+            }
+        }
     }
+}
+
+/// Serve one resolved file with the security headers, caching
+/// discipline, and digest-ETag revalidation.
+fn serve_file(
+    bytes: Vec<u8>,
+    mime: &str,
+    digest: Option<String>,
+    cacheable: bool,
+    request_headers: &HeaderMap,
+) -> Response {
+    let etag = digest.as_ref().map(|digest| format!("\"{digest}\""));
+    // §12-style revalidation: a matching If-None-Match (weak
+    // comparison, `W/` prefixes tolerated) short-circuits.
+    if let (Some(etag), Some(if_none_match)) = (
+        etag.as_deref(),
+        request_headers
+            .get(header::IF_NONE_MATCH)
+            .and_then(|v| v.to_str().ok()),
+    ) {
+        if if_none_match
+            .split(',')
+            .map(|candidate| candidate.trim().trim_start_matches("W/"))
+            .any(|candidate| candidate == etag || candidate == "*")
+        {
+            let mut response = StatusCode::NOT_MODIFIED.into_response();
+            if let Ok(value) = HeaderValue::from_str(etag) {
+                response.headers_mut().insert(header::ETAG, value);
+            }
+            return response;
+        }
+    }
+    let mut headers = HeaderMap::new();
+    security_headers(&mut headers);
+    if let Ok(value) = HeaderValue::from_str(mime) {
+        headers.insert(header::CONTENT_TYPE, value);
+    }
+    if cacheable {
+        headers.insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=3600"),
+        );
+    } else {
+        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    }
+    // Serving-side ETag from the content digest.
+    if let Some(etag) = etag {
+        if let Ok(value) = HeaderValue::from_str(&etag) {
+            headers.insert(header::ETAG, value);
+        }
+    }
+    (StatusCode::OK, headers, bytes).into_response()
 }
 
 /// The engine's built-in 404 page for undeclared surfaces (§3.2):

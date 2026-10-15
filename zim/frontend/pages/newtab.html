@@ -150,11 +150,17 @@
         <h2 id="theme-title" class="dialog-title">Customize ZIM</h2>
         <p class="dialog-note">Themes apply live, everywhere — the chrome included.</p>
         <div id="theme-presets" class="theme-presets" role="radiogroup" aria-label="Theme presets"></div>
+        <div id="theme-engine-section" hidden>
+          <h3 class="dialog-subtitle">Uploaded themes</h3>
+          <p class="dialog-note" id="theme-engine-note">From the engine's theme registry.</p>
+          <div id="theme-engine" class="theme-presets" role="radiogroup" aria-label="Uploaded themes"></div>
+        </div>
         <label class="theme-accent-row">
           <span>Accent</span>
           <input id="theme-accent" type="color" value="#3b82f6" aria-label="Accent color">
           <button type="button" class="theme-accent-reset" id="theme-accent-reset">Use the preset's</button>
         </label>
+        <p class="dialog-note">More themes and add-ons: <a href="/zim/extensions">the add-ons page</a>.</p>
       </div>
     </div>
   </main>

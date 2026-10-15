@@ -2,9 +2,9 @@
   "$schema": "https://zim.zaminmc.org/schemas/frontend.v1.json",
   "manifest_version": 1,
   "id": "org.zaminmc.frontend.default",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "name": "ZIM Default Frontend",
-  "description": "The default ZIM frontend: the application chrome (tab strip + omnibox + split view), the completed new-tab page (search, recents, create/import, themes), server list, server console, and the declared per-instance surfaces.",
+  "description": "The default ZIM frontend: the application chrome (tab strip + omnibox + split view), the completed new-tab page (search, recents, create/import, themes + uploaded engine themes), server list, server console with add-on surface contributions, the add-ons management page, and the declared per-instance surfaces.",
   "author": "ZaminMC",
   "license": "Apache-2.0",
   "api_version": "v1",
@@ -16,6 +16,7 @@
     "zim://servers",
     "zim://servers/{id}/console",
     "zim://app",
+    "zim://extensions",
     "zim://servers/{id}/files",
     "zim://servers/{id}/settings",
     "zim://servers/{id}/backups",
@@ -28,6 +29,7 @@
     "servers": "pages/servers.html",
     "console": "pages/console.html",
     "app": "pages/app.html",
+    "extensions": "pages/extensions.html",
     "files": "pages/server_stub.html",
     "settings": "pages/server_stub.html",
     "backups": "pages/server_stub.html",
@@ -51,7 +53,9 @@
     "assets/servers.js",
     "assets/console.js",
     "assets/app.js",
-    "assets/server_stub.js"
+    "assets/server_stub.js",
+    "assets/addons.js",
+    "assets/extensions.js"
   ],
   "permissions": [
     "websocket.connect",

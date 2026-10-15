@@ -1024,14 +1024,107 @@ window registry + tear-off/merge commands + in-place new-tab).
 
 **Estimated effort:** 2-3 weeks.
 
-### M24: Extension / addon system
+### M24: Extension / addon system — COMPLETE (2026-10-15)
 
-**Deliverables:**
-- Engine-side addon loading per `FRONTEND_EXTENSION_SPEC.md`.
-- The documented addon SDK + one sample addon.
-- Manual install via upload (no marketplace — out of scope §4).
+**Status: COMPLETE** (engine `zim_engine_extensions` — manifest,
+package, signature, service, theme; the §10.12 handler family +
+the `/zim/` addon fallback routing + `POST/GET/DELETE
+/api/v1/themes` in `zim_engine_api`; the addon SDK
+`zim/sdk/addon/` + `docs/api/ADDON_SDK.md`; the bundled
+`org.zaminmc.extension.audit-log` + the sample `hello-zim`; the
+frontend's `zim://extensions` management page + chrome
+contributions; AD-29).
 
-**Estimated effort:** 2 weeks.
+**What shipped:**
+
+- Engine-side addon loading per `FRONTEND_EXTENSION_SPEC.md` §4:
+  the `zim.addon.json` manifest (§4.1 — full structural validation:
+  the closed permission vocabulary, instance scope, surface
+  well-formedness + entrypoint routing, sidebar/context-menu
+  cross-references, command accelerators with §4.12's reserved
+  set rejected, the closed event vocabulary, `id@range`
+  dependencies, the optional §3.4-signature block), the
+  `.zimpkg` ZIP format (confinement + 32 MiB / 1000-file caps),
+  and the signature classification shared with frontend packages
+  (one trust root, one block shape; `invalid` is a hard reject).
+- The lifecycle (§4.11): install (admin upload IS the approval;
+  generation/engine-range gating; §4.9 dependency resolution with
+  no partial installs; §4.4 surface-collision refusal incl. the
+  reserved `zim://ext/` namespace), enable/disable, update
+  (strictly-greater versions; downgrades refused), uninstall
+  (dependents block; §6's bundled defaults are disable-only,
+  DELETE → 403), and grant (§4.2's admin re-approval for
+  elevation). Every lifecycle move is audited. Durable state in
+  the M3-era `extension_registrations` rows; extracted package
+  trees under `{data_dir}/extensions/packages/{id}/{version}/`.
+- Error isolation (§4.10, adapted per AD-29): a package whose
+  on-disk manifest/tree fails to load at boot is disabled with a
+  notice surfaced at `zim://extensions`; the engine, every other
+  addon, and the frontend keep working. The bundled defaults
+  repair missing trees from build-time-embedded bytes.
+- Serving: enabled addons' declared surfaces serve through the
+  `/zim/` router's fallback with the same §3.8 CSP, nosniff,
+  referrer, and digest-ETag discipline; their own files serve
+  under the reserved `zim://ext/{addon-id}/…` namespace (AD-29's
+  honest analog of §4.10's per-origin URLs).
+- The documented addon SDK (`zim/sdk/addon/`, `dist/zim.js`
+  vendored into packages; `docs/api/ADDON_SDK.md` is the author's
+  contract): `Zim.init` (resolve the registration),
+  `Zim.api` (§6-shaped errors + the client-side permission gate),
+  `Zim.ZimStream` (one §11 subscription per instance),
+  `Zim.whoami`.
+- Manual install via upload (no marketplace — §4): the
+  `package-addon.mjs` helper (validate + build with SDK vendoring)
+  and the admin upload path end-to-end.
+- The bundled default `org.zaminmc.extension.audit-log` (§6): a
+  real audit-log viewer (cursor-paginated `GET /api/v1/audit`,
+  honest 403 state for non-admins, §4.5 sidebar + §4.7 command),
+  embedded at build time, seeded on fresh installs,
+  disable-only. The other two §6 defaults (databases,
+  recycle-bin) are deferred with the roadmap's §4 out-of-scope
+  line (managed-database UI; the file API has no recycle
+  semantics yet) — the addon system that carries them is now
+  real. The sample `zim/extensions/samples/hello-zim/`
+  demonstrates every manifest capability.
+- The frontend: `zim://extensions` (the management page — list
+  with contributions/notices/signature classes, admin
+  enable/disable/uninstall/grant/upload), §4.6 context-menu
+  items in the app chrome, §4.5 sidebar items on the console
+  page, §4.7 command accelerators (navigating the active tab to
+  the addon's surface), and the theme panel's uploaded-engine
+  themes group.
+- Packaged themes (M23's deferral): `POST/GET/DELETE
+  /api/v1/themes` — `.zip` with `zim.theme.json` at the root,
+  tokens validated against `theme-tokens.v1.json` (closed
+  vocabulary, literal values, size caps), stored in the data dir,
+  chosen from the NTP panel with a token snapshot persisted so
+  every page's synchronous boot applies them (the scheme inferred
+  from the background's luminance).
+
+**Acceptance status (honest):**
+
+- Manifest/package/lifecycle/serving are covered by unit tests
+  (the extensions crate) and socket-level integration tests
+  (`api_surface.rs`: install → surface serves → ext/ namespace
+  serves → 409 collisions (frontend's own surface, same-version)
+  → disable stops serving → enable resumes → grant accumulates →
+  bundled DELETE → 403 → uninstall → 404 → non-admin → 403; the
+  theme family's upload/list/bad-token/delete round trip).
+- §4.10's isolation: disable-with-notice is tested (corrupt the
+  extracted manifest → rebuild → disabled + notice, others
+  unaffected). The spec's *process* isolation is retired by AD-29,
+  honestly, not simulated.
+- §4.2's engine-boundary enforcement: per-endpoint authz gates
+  every call (invariant 15, unchanged); per-addon attribution on
+  the shared loopback origin is an M25 hardening item — recorded,
+  not faked.
+- Visual fidelity of the audit-log page and the extensions page
+  needs a human pass in the packaged shell (as with every visual
+  row); the flows themselves are engine-tested.
+- §6's full bundled set: one of three shipped (audit-log); the
+  other two deferred with their owning out-of-scope lines.
+
+**Estimated effort:** 2-3 weeks.
 
 ### M25: E2E suite + cross-platform packaging
 

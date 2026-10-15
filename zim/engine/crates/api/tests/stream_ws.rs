@@ -103,6 +103,22 @@ impl StreamEngine {
         // assembly; the loop is not started in these tests).
         let scheduler =
             zim_engine_scheduler::Scheduler::new(Arc::clone(&persistence), Arc::clone(&supervisor));
+        // M11 + M24: the frontend loader, the addon system, and the
+        // theme registry over one fresh temp data dir.
+        let data_dir = std::env::temp_dir().join(format!("zim-stream-ws-{}", uuid::Uuid::new_v4()));
+        let frontend = Arc::new(zim_engine_frontend_loader::FrontendService::new(
+            data_dir.clone(),
+            semver::Version::new(0, 0, 1),
+            "v1.0.0",
+        ));
+        let extensions = Arc::new(zim_engine_extensions::ExtensionsService::new(
+            Arc::clone(&persistence),
+            Arc::clone(&frontend),
+            &data_dir,
+            semver::Version::new(0, 0, 1),
+            "v1.0.0",
+        ));
+        let themes = Arc::new(zim_engine_extensions::ThemeService::new(&data_dir));
         let state = Arc::new(AppState::new(
             Arc::clone(&persistence),
             supervisor,
@@ -114,13 +130,9 @@ impl StreamEngine {
             Arc::clone(&transfers),
             Arc::clone(&installs),
             Arc::clone(&scheduler),
-            // M11: the frontend loader (fresh temp dir = the bundled
-            // default package).
-            Arc::new(zim_engine_frontend_loader::FrontendService::new(
-                std::env::temp_dir().join(format!("zim-stream-ws-{}", uuid::Uuid::new_v4())),
-                semver::Version::new(0, 0, 1),
-                "v1.0.0",
-            )),
+            Arc::clone(&frontend),
+            Arc::clone(&extensions),
+            Arc::clone(&themes),
             ApiConfig::default(),
         ));
         let router =

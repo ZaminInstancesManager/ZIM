@@ -10,6 +10,7 @@ import { ApiError, consoleBuffer, consoleInput, getInstance, getState, power } f
 import { ZimStream } from "./stream.js";
 import "./components.js";
 import { initThemeFromStorage } from "./theme.js";
+import { addonSidebarItems, loadAddonContributions } from "./addons.js";
 // The theme applies before anything renders (M23: live, everywhere).
 initThemeFromStorage();
 /** Where the instance id lives: `/zim/servers/{id}/console`. */
@@ -72,6 +73,12 @@ async function boot() {
         idPill.textContent = instanceId;
     }
     window.localStorage.setItem("zim.lastConsole", instanceId);
+    // M24: the §4.5 sidebar contributions — enabled addons' items for
+    // this instance render as a quicklinks nav under the console.
+    // Best-effort: signed-out or unreachable engines render nothing.
+    void loadAddonContributions().then(() => {
+        renderAddonSurfaces(instanceId);
+    });
     // Row (name) + observed state.
     try {
         const instance = await getInstance(instanceId);
@@ -148,6 +155,48 @@ function reportError(error) {
     else {
         appendEventLine(`zim: ${String(error)}`);
     }
+}
+/** Render the §4.5 addon sidebar contributions for this instance —
+ * plain links into the addons' declared surfaces (view-only: the
+ * targets are the addons' own pages). */
+function renderAddonSurfaces(instanceId) {
+    const items = addonSidebarItems(instanceId);
+    const globals = addonSidebarItems(null);
+    if (items.length === 0 && globals.length === 0) {
+        return;
+    }
+    const section = document.createElement("section");
+    section.className = "card addon-surfaces";
+    section.setAttribute("aria-label", "Add-on surfaces");
+    const heading = document.createElement("h2");
+    heading.className = "card-title";
+    heading.textContent = "Add-on surfaces";
+    const nav = document.createElement("nav");
+    nav.className = "quicklinks";
+    nav.setAttribute("aria-label", "Add-on surfaces");
+    const link = (item) => {
+        const anchor = document.createElement("a");
+        anchor.className = "quicklink";
+        anchor.href = `/zim/${item.page.replace(/^zim:\/\//, "")}`;
+        const icon = document.createElement("span");
+        icon.className = "quicklink-icon";
+        icon.setAttribute("aria-hidden", "true");
+        icon.textContent = "+";
+        const label = document.createElement("span");
+        label.className = "quicklink-label";
+        label.textContent = item.label;
+        anchor.append(icon, label);
+        return anchor;
+    };
+    for (const item of items) {
+        nav.append(link(item));
+    }
+    for (const item of globals) {
+        nav.append(link(item));
+    }
+    section.append(heading, nav);
+    const main = document.querySelector("main.page-console");
+    main?.append(section);
 }
 inputForm?.addEventListener("submit", (event) => {
     event.preventDefault();

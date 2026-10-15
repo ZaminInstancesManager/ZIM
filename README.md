@@ -105,9 +105,22 @@ abstraction, and the roadmap that subsequent implementation work will follow.
   accent pip, AD-27) with the token vocabulary contract
   `zim/contracts/theme-tokens.v1.json`, and the completed new-tab
   page (search, engine-backed recents `/me/recents` (AD-28),
-  create/import flows, workload browsing, customization)).
-  Remaining: the desktop UX milestones (M24-M26: the addon system,
-  packaging + E2E, and the first alpha release).
+  create/import flows, workload browsing, customization)), and the
+  extension / addon system (M24 — `zim_engine_extensions`: the
+  `zim.addon.json` manifest + `.zimpkg` loader with the shared
+  ed25519 trust root, the §10.12 lifecycle (install-as-approval,
+  dependency resolution, surface-collision refusal, disable-only
+  bundled defaults, audited moves), disable-with-notice error
+  isolation (AD-29), `/zim/` addon surface + `zim://ext/{id}/`
+  asset serving, the packaged-theme family `POST/GET/DELETE
+  /api/v1/themes` against theme-tokens.v1, the documented addon
+  SDK (`zim/sdk/addon/`, `docs/api/ADDON_SDK.md`) with the
+  vendored `zim.js` client, the bundled
+  `org.zaminmc.extension.audit-log` viewer + the `hello-zim`
+  sample, and the frontend's `zim://extensions` management page
+  with the chrome's §4.5-§4.7 contribution points).
+  Remaining: the release milestones (M25-M26: packaging + E2E, and
+  the first alpha release).
 - A re-skinned Pterodactyl. The Panel's PHP/Laravel backend and Wings's Go
   daemon are preserved in `upstream/` as audit references and behavioral
   contracts; they are not part of ZIM's runtime architecture.

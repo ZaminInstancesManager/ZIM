@@ -1,6 +1,7 @@
-//! Remaining endpoints: health, jobs reads (§10.8), extensions list
-//! (§10.12), and the 501 families for frontend packages (§10.14)
-//! and workload integrations (§10.16).
+//! Remaining endpoints: health, jobs reads (§10.8), and the 501
+//! family for workload integrations (§10.16). The extensions family
+//! (§10.12) graduated to its real handlers in M24
+//! (`handlers::extensions`).
 
 use std::sync::Arc;
 
@@ -163,25 +164,8 @@ pub async fn cancel_job(
 }
 
 // ── Extensions (§10.12) ───────────────────────────────────────────
-
-/// `GET /api/v1/extensions` — list installed extensions (any
-/// session; installation itself is admin, M-later).
-pub async fn list_extensions(
-    State(state): State<Arc<AppState>>,
-    Extension(caller): Extension<Caller>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    require_user(&caller)?;
-    let extensions = db_or_500(&state, |p| p.list_extensions()).await?;
-    Ok(Json(serde_json::json!({ "data": extensions })))
-}
-
-/// Extension installation family — signature verification pipeline.
-pub async fn extension_install_stub() -> Result<Response, ApiError> {
-    Err(ApiError::NotImplemented {
-        feature: "extension install / uninstall / enable / disable / grant",
-        milestone: "post-M11 (extension loader + signature verification)",
-    })
-}
+// The real handlers live in `handlers::extensions` (M24); this
+// module kept the M5-era stubs until the addon system landed.
 
 // ── Workload integrations (§10.16) ────────────────────────────────
 

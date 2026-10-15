@@ -373,6 +373,21 @@ or for cursor pagination:
 | POST   | `/api/v1/frontend/smoke-test` | Run smoke test on a candidate package. | admin          |
 | POST   | `/api/v1/frontend/reset`      | Reset to default.                    | admin            |
 
+### 10.14a Themes (M24; M23's deferred upload surface)
+
+Packaged themes: `.zip` with a `zim.theme.json` manifest at the
+root (`{"manifest_version": 1, "name": …, "tokens": {…}}`), the
+token names and value shapes validated against
+`zim/contracts/theme-tokens.v1.json` (closed vocabulary, literal
+string/number values, size caps; omitted tokens fall back to the
+contract defaults at apply time).
+
+| Method | Path                          | Description                          | Required grants |
+|--------|-------------------------------|--------------------------------------|------------------|
+| GET    | `/api/v1/themes`              | List uploaded themes.                | (any session)    |
+| POST   | `/api/v1/themes`              | Upload a theme package (`application/zip`). | admin     |
+| DELETE | `/api/v1/themes/{id}`         | Remove an uploaded theme.            | admin            |
+
 ### 10.15 Workloads (canonical, per AD-19)
 
 The `/api/v1/workloads` surface is the canonical resource for managed

@@ -47,6 +47,7 @@ import type { Instance, Me } from "./api";
 import { ZimStream } from "./stream";
 import "./components";
 import { initThemeFromStorage } from "./theme";
+import { addonCommands, addonContextMenuItems, eventAccelerator, loadAddonContributions } from "./addons";
 import { LEGACY_SESSION_KEY, SESSION_KEY, TabModel, defaultSession, restoreSession, sessionKeyForWindow } from "./tabs";
 import type { SerializedTab, Tab } from "./tabs";
 import { buildSuggestions } from "./omnibox";
@@ -269,6 +270,10 @@ async function refreshIdentity(): Promise<void> {
     me = null;
   }
   if (me !== null) {
+    // M24: the addon contributions (§4.6 context items, §4.7
+    // commands) ride the same identity round — best-effort, empty
+    // when signed out or unreachable.
+    void loadAddonContributions();
     try {
       const instances = await listInstances();
       instanceCache.clear();
@@ -1340,6 +1345,44 @@ function omniboxKeydown(event: KeyboardEvent): void {
 
 // ── Context menu (§5) ────────────────────────────────────────────
 
+/** Run one addon's §4.7 command, when its accelerator matches the
+ * event. Returns whether a command consumed the event.
+ *
+ * Semantics (documented in ADDON_SDK.md): a command navigates the
+ * active tab to its addon's first declared surface, with the
+ * manifest's `{id}` resolved against the active server tab — a
+ * per-instance command with no server tab active is an honest
+ * no-op toast, never a navigation to a broken URL. */
+function runAddonCommand(event: KeyboardEvent): boolean {
+  const pressed = eventAccelerator(event);
+  if (!pressed.includes("+")) {
+    return false; // Commands are always modifier combos.
+  }
+  for (const entry of addonCommands()) {
+    if (entry.normalized !== pressed) {
+      continue;
+    }
+    let page = entry.page.replace(/^zim:\/\//, "");
+    if (page.includes("{id}")) {
+      const activeTab = model.active;
+      const instanceId = activeTab !== null ? instanceIdOf(activeTab.path) : null;
+      if (instanceId === null) {
+        showToast(`${entry.command.label}: no server tab is active`);
+        return true;
+      }
+      page = page.replace(new RegExp("{id}", "g"), instanceId);
+    }
+    if (model.activeId === null) {
+      newTab(page);
+    } else {
+      navigateTab(model.activeId, page);
+    }
+    showToast(`${entry.command.label} — ${entry.addonId}`);
+    return true;
+  }
+  return false;
+}
+
 interface MenuItem {
   label: string;
   hint?: string;
@@ -1397,6 +1440,15 @@ function contextItems(tab: Tab): MenuItem[] {
     });
   }
   if (instanceId === null) {
+    // M24: global addon contributions (§4.6) apply on any tab.
+    for (const item of addonContextMenuItems(null)) {
+      items.push({
+        label: item.label,
+        action: () => {
+          navigateTab(tab.id, item.page.replace(/^zim:\/\//, ""));
+        },
+      });
+    }
     items.push({
       label: "Copy address",
       action: () => {
@@ -1416,6 +1468,17 @@ function contextItems(tab: Tab): MenuItem[] {
       disabled: surface !== "console" && serverSurfaceOf(tab.path) === surface,
       action: () => {
         navigateTab(tab.id, `servers/${instanceId}/${surface}`);
+      },
+    });
+  }
+  // M24: the addon surface items (§4.6) for this instance, after
+  // the default frontend's own and before the lifecycle group.
+  for (const item of addonContextMenuItems(instanceId)) {
+    items.push({
+      label: item.label,
+      hint: "add-on",
+      action: () => {
+        navigateTab(tab.id, item.page.replace(/^zim:\/\//, ""));
       },
     });
   }
@@ -1654,6 +1717,11 @@ function attachGlobalListeners(): void {
       if (active !== null) {
         closeTab(active);
       }
+    } else if (runAddonCommand(event)) {
+      // An addon's §4.7 accelerator matched (never the reserved
+      // tab/window lifecycle ones — the engine's manifest
+      // validation rejects those, §4.12).
+      event.preventDefault();
     } else if (event.key === "Escape") {
       hideMenu();
     }

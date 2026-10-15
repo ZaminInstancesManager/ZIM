@@ -37,6 +37,9 @@ zim_engine_audit = { workspace = true }
 zim_engine_metrics = { workspace = true }
 zim_engine_platform = { workspace = true }
 zim_engine_frontend_loader = { workspace = true }
+# M24: the addon system — ExtensionsService + ThemeService
+# construction and boot (bundled-default seeding, §4.10 isolation).
+zim_engine_extensions = { workspace = true }
 zim_engine_domain = { workspace = true }
 # M10: the Pterodactyl Panel migration importer (the offline
 # `migrate` subcommand; the engine never links it into the serving

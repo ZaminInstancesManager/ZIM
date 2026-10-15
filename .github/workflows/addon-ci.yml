@@ -1,0 +1,97 @@
+name: Addon CI
+
+# M24: the addon ecosystem's own gate — the SDK's build freshness,
+# every addon manifest's §4.1 validity, and the packaging pipeline
+# that authors and CI share. The engine-side enforcement (the Rust
+# validators + lifecycle) runs in Engine CI; this workflow is the
+# fast author-time half of the contract.
+
+on:
+  push:
+    branches: [main, "m*-dev"]
+    paths:
+      - 'zim/extensions/**'
+      - 'zim/sdk/**'
+      - 'zim/contracts/**'
+      - '.github/workflows/addon-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'zim/extensions/**'
+      - 'zim/sdk/**'
+      - 'zim/contracts/**'
+      - '.github/workflows/addon-ci.yml'
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: addon-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sdk-and-addons:
+    name: SDK + manifests + packaging
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install zip (the packaging tool)
+        run: sudo apt-get update && sudo apt-get install -y zip
+
+      # ── The SDK: type-check + build, and the committed dist must be
+      # fresh (the same discipline as the frontend's assets/: the
+      # dist is what addon packages vendor, so a stale dist ships old
+      # client bytes).
+      - name: Type-check the addon SDK
+        working-directory: zim/sdk/addon
+        run: |
+          npm ci --no-fund --no-audit
+          npm run check
+
+      - name: Verify the SDK dist is fresh
+        working-directory: zim/sdk/addon
+        run: |
+          npm run build
+          if ! git diff --exit-code -- dist/; then
+            echo "::error::zim/sdk/addon/dist/zim.js is stale — rebuild with 'npm run build' and commit the output."
+            git diff --stat -- dist/
+            exit 1
+          fi
+
+      # ── Every addon manifest (bundled defaults + samples) must pass
+      # the §4.1 author-time gate.
+      - name: Validate the addon manifests
+        working-directory: zim/extensions
+        run: |
+          node scripts/package-addon.mjs validate \
+            org.zaminmc.extension.audit-log \
+            samples/hello-zim
+
+      # ── The packaging pipeline must produce installable .zimpkg
+      # archives (the same path authors use).
+      - name: Package the addons (round-trip smoke)
+        working-directory: zim/extensions
+        run: |
+          mkdir -p /tmp/zimpkgs
+          node scripts/package-addon.mjs build org.zaminmc.extension.audit-log /tmp/zimpkgs/audit-log.zimpkg
+          node scripts/package-addon.mjs build samples/hello-zim /tmp/zimpkgs/hello-zim.zimpkg
+          # Every archive carries the manifest at its root and the
+          # vendored SDK.
+          unzip -l /tmp/zimpkgs/audit-log.zimpkg | grep -q 'zim.addon.json'
+          unzip -l /tmp/zimpkgs/audit-log.zimpkg | grep -q 'assets/zim.js'
+          unzip -l /tmp/zimpkgs/hello-zim.zimpkg | grep -q 'zim.addon.json'
+          unzip -l /tmp/zimpkgs/hello-zim.zimpkg | grep -q 'assets/zim.js'
+
+      # ── The bundled default's vendored SDK copy must match the
+      # built dist byte-for-byte (the engine embeds the tree as-is).
+      - name: Verify the bundled addon's vendored SDK is current
+        run: |
+          if ! cmp -s zim/sdk/addon/dist/zim.js zim/extensions/org.zaminmc.extension.audit-log/assets/zim.js; then
+            echo "::error::the bundled audit-log addon vendors a stale SDK — copy zim/sdk/addon/dist/zim.js into its assets/ and commit."
+            exit 1
+          fi

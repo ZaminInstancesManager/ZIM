@@ -1,0 +1,31 @@
+{
+  "$schema": "https://zim.zaminmc.org/schemas/addon.v1.json",
+  "manifest_version": 1,
+  "id": "org.zaminmc.extension.audit-log",
+  "version": "0.1.0",
+  "name": "Audit Log",
+  "description": "The bundled audit-log viewer: a global zim://audit surface that lists the engine's audit records with cursor pagination. Querying the audit trail is admin-gated at the engine boundary; the page states that honestly for non-admins.",
+  "author": "ZaminMC",
+  "license": "Apache-2.0",
+  "api_version": "v1",
+  "engines": { "zim": ">=0.0.1" },
+  "permissions": [],
+  "instance_scope": "none",
+  "page_surfaces": [
+    "zim://audit"
+  ],
+  "entrypoints": {
+    "audit": "pages/audit.html"
+  },
+  "sidebar_items": [
+    { "label": "Audit log", "icon": "shield", "page": "zim://audit" }
+  ],
+  "context_menu_items": [],
+  "commands": [
+    { "id": "open-audit-log", "label": "Open the audit log", "accelerator": "Ctrl+Shift+A" }
+  ],
+  "event_subscriptions": [],
+  "dependencies": [
+    "org.zaminmc.frontend.default@>=1.0.0"
+  ]
+}

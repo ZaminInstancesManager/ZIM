@@ -24,7 +24,7 @@
 use base64::Engine;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 
-use crate::manifest::FrontendManifest;
+use crate::manifest::{FrontendManifest, SignatureInfo};
 
 /// The built-in ZaminMC development verifying key (base64, raw 32
 /// bytes), embedded from `keys/zaminmc-dev.pub`.
@@ -108,6 +108,14 @@ impl TrustStore {
         let Some(signature) = &manifest.signature else {
             return SignatureCheck::Unsigned;
         };
+        self.check_block(&manifest.canonical_json(), signature)
+    }
+
+    /// Classify a signature block over an arbitrary canonical JSON
+    /// payload (M24: the addon manifests reuse this path —
+    /// `FRONTEND_EXTENSION_SPEC.md` §4.1 uses the same signature
+    /// block shape and the same trust semantics as §3.4).
+    pub fn check_block(&self, canonical: &str, signature: &SignatureInfo) -> SignatureCheck {
         let Some(key_bytes) = decode_key(&signature.public_key) else {
             // Shape was validated at parse; a decode failure here
             // means whitespace/trailing junk: treat as unknown.
@@ -121,8 +129,7 @@ impl TrustStore {
         }
         let verifying =
             VerifyingKey::from_bytes(&key_bytes).expect("a 32-byte key always constructs");
-        let message = manifest.canonical_json();
-        match verifying.verify(message.as_bytes(), &value) {
+        match verifying.verify(canonical.as_bytes(), &value) {
             Ok(()) => SignatureCheck::Trusted,
             Err(_) => SignatureCheck::Invalid,
         }

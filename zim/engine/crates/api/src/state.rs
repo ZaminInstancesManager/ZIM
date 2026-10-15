@@ -9,6 +9,7 @@ use zim_engine_application::supervision::Supervisor;
 use zim_engine_auth::{ApiKeyManager, SessionManager, TabTokenManager};
 use zim_engine_backups::BackupService;
 use zim_engine_domain::User;
+use zim_engine_extensions::{ExtensionsService, ThemeService};
 use zim_engine_frontend_loader::FrontendService;
 use zim_engine_installs::InstallService;
 use zim_engine_jobs::JobSystem;
@@ -115,6 +116,12 @@ pub struct AppState {
     /// The frontend loader (M11): the active frontend package —
     /// the `/zim/` page surface and the §10.14 package endpoints.
     pub frontend: Arc<FrontendService>,
+    /// The addon system (M24): installed addons — the §10.12
+    /// extension family and the `/zim/` addon fallback routing.
+    pub extensions: Arc<ExtensionsService>,
+    /// The packaged-theme registry (M24, delivering M23's deferred
+    /// upload surface).
+    pub themes: Arc<ThemeService>,
     /// Server configuration.
     pub config: ApiConfig,
 }
@@ -138,6 +145,8 @@ impl AppState {
         installs: Arc<InstallService>,
         scheduler: Arc<Scheduler>,
         frontend: Arc<FrontendService>,
+        extensions: Arc<ExtensionsService>,
+        themes: Arc<ThemeService>,
         config: ApiConfig,
     ) -> Self {
         Self {
@@ -158,6 +167,8 @@ impl AppState {
             installs,
             scheduler,
             frontend,
+            extensions,
+            themes,
             config,
         }
     }

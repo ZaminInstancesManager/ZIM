@@ -89,6 +89,23 @@ impl TestEngine {
         // M9: the cron scheduler (schedule firing + run-now).
         let scheduler =
             zim_engine_scheduler::Scheduler::new(Arc::clone(&persistence), Arc::clone(&supervisor));
+        // M11 + M24: the frontend loader, the addon system, and the
+        // theme registry over one fresh temp data dir (the bundled
+        // defaults seed on first boot).
+        let data_dir = std::env::temp_dir().join(format!("zim-api-surface-{}", uuid::Uuid::new_v4()));
+        let frontend = Arc::new(zim_engine_frontend_loader::FrontendService::new(
+            data_dir.clone(),
+            semver::Version::new(0, 0, 1),
+            "v1.0.0",
+        ));
+        let extensions = Arc::new(zim_engine_extensions::ExtensionsService::new(
+            Arc::clone(&persistence),
+            Arc::clone(&frontend),
+            &data_dir,
+            semver::Version::new(0, 0, 1),
+            "v1.0.0",
+        ));
+        let themes = Arc::new(zim_engine_extensions::ThemeService::new(&data_dir));
         let state = Arc::new(AppState::new(
             Arc::clone(&persistence),
             supervisor,
@@ -100,13 +117,9 @@ impl TestEngine {
             Arc::clone(&transfers),
             Arc::clone(&installs),
             Arc::clone(&scheduler),
-            // M11: the frontend loader (fresh temp dir = the bundled
-            // default package).
-            Arc::new(zim_engine_frontend_loader::FrontendService::new(
-                std::env::temp_dir().join(format!("zim-api-surface-{}", uuid::Uuid::new_v4())),
-                semver::Version::new(0, 0, 1),
-                "v1.0.0",
-            )),
+            Arc::clone(&frontend),
+            Arc::clone(&extensions),
+            Arc::clone(&themes),
             config,
         ));
         let router = zim_engine_api::router(Arc::clone(&state));
@@ -1757,7 +1770,17 @@ async fn extensions_and_jobs_listings() {
         .unwrap();
     assert_eq!(response.status(), 200);
     let body: Value = response.json().await.unwrap();
-    assert_eq!(body["data"].as_array().map(Vec::len), Some(0));
+    // M24: a fresh engine seeds the bundled defaults (§6) — the
+    // audit-log viewer ships installed and enabled.
+    let extensions = body["data"].as_array().expect("the list envelope");
+    assert!(!extensions.is_empty(), "the bundled defaults are seeded");
+    let audit_log = extensions
+        .iter()
+        .find(|addon| addon["id"] == "org.zaminmc.extension.audit-log")
+        .expect("the bundled audit-log viewer is installed");
+    assert_eq!(audit_log["bundled"], true);
+    assert_eq!(audit_log["enabled"], true);
+    assert_eq!(audit_log["signature"], "unsigned");
 
     // Jobs listing: M8's global listing — admins see every job
     // (empty here), members without an instance filter still get
@@ -2507,4 +2530,372 @@ async fn recents_record_rank_and_isolate_per_user() {
     assert_eq!(response.status(), 200);
     let body: Value = response.json().await.unwrap();
     assert_eq!(body["data"].as_array().unwrap().len(), 0);
+}
+
+// ── Extensions (§10.12, M24) ──────────────────────────────────────
+
+/// Build a minimal addon `.zimpkg` for the install flow.
+fn addon_zip(id: &str, version: &str, surface: &str) -> Vec<u8> {
+    // The routing contract: the surface's last non-parameter segment
+    // is the entrypoint key it must route to.
+    let entrypoint_key = surface
+        .trim_start_matches("zim://")
+        .split('/')
+        .rev()
+        .find(|segment| !segment.starts_with('{'))
+        .unwrap_or("index");
+    let manifest = json!({
+        "manifest_version": 1,
+        "id": id,
+        "version": version,
+        "name": "Integration Test Addon",
+        "description": "Exercises the §10.12 family.",
+        "author": "Tests",
+        "license": "MIT",
+        "api_version": "v1",
+        "engines": { "zim": ">=0.0.1" },
+        "permissions": ["websocket.connect"],
+        "instance_scope": "optional",
+        "page_surfaces": [surface],
+        "entrypoints": { entrypoint_key: "pages/pane.html" },
+        "sidebar_items": [
+            { "label": "Pane", "icon": "spark", "page": surface }
+        ],
+        "commands": [
+            { "id": "pane-cmd", "label": "Open pane", "accelerator": "Ctrl+Shift+P" }
+        ],
+        "event_subscriptions": ["instance.state_change"],
+        "dependencies": []
+    });
+    let mut buffer = Vec::new();
+    {
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut buffer));
+        let options = zip::write::SimpleFileOptions::default();
+        writer.start_file("zim.addon.json", options).unwrap();
+        std::io::Write::write_all(&mut writer, manifest.to_string().as_bytes()).unwrap();
+        writer.start_file("pages/pane.html", options).unwrap();
+        std::io::Write::write_all(&mut writer, b"<p>addon pane</p>").unwrap();
+        writer.start_file("assets/pane.js", options).unwrap();
+        std::io::Write::write_all(&mut writer, b"window.pane = true;").unwrap();
+        writer.finish().unwrap();
+    }
+    buffer
+}
+
+#[tokio::test]
+async fn extension_family_lifecycle_end_to_end() {
+    let engine = TestEngine::start().await;
+    engine.seed_user("admin@zim.local", "admin pass", true);
+    let admin_cookie = login(&engine, "admin@zim.local", "admin pass")
+        .await
+        .expect("admin login");
+    engine.seed_user("member@zim.local", "member pass", false);
+    let member_cookie = login(&engine, "member@zim.local", "member pass")
+        .await
+        .expect("member login");
+
+    // Install (admin, application/zip): 201 + the summary.
+    let archive = addon_zip("org.example.addon.itest", "0.1.0", "zim://servers/{id}/pane");
+    let response = engine
+        .client
+        .post(engine.url("/extensions"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .header("Content-Type", "application/zip")
+        .body(archive)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["id"], "org.example.addon.itest");
+    assert_eq!(body["version"], "0.1.0");
+    assert_eq!(body["enabled"], true);
+    assert_eq!(body["permissions"]["granted"][0], "websocket.connect");
+
+    // The addon's declared surface serves (before the frontend's
+    // own — the frontend does not declare it, the fallback routes).
+    let response = engine
+        .client
+        .get(engine.url("/zim/servers/abc123/pane"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let html = response.text().await.unwrap();
+    assert_eq!(html, "<p>addon pane</p>");
+
+    // The reserved asset namespace serves the addon's own files.
+    let response = engine
+        .client
+        .get(engine.url("/zim/ext/org.example.addon.itest/assets/pane.js"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.headers()["content-type"],
+        "text/javascript; charset=utf-8"
+    );
+
+    // Same version again → 409.
+    let archive = addon_zip("org.example.addon.itest", "0.1.0", "zim://servers/{id}/pane");
+    let response = engine
+        .client
+        .post(engine.url("/extensions"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .header("Content-Type", "application/zip")
+        .body(archive)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 409);
+
+    // A surface colliding with the default frontend → 409, and
+    // nothing was installed.
+    let archive = addon_zip("org.example.addon.collide", "0.1.0", "zim://servers/{id}/console");
+    let response = engine
+        .client
+        .post(engine.url("/extensions"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .header("Content-Type", "application/zip")
+        .body(archive)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 409);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "conflict");
+
+    // Disable: the surface stops serving, the registry says so.
+    let response = engine
+        .client
+        .post(engine.url("/extensions/org.example.addon.itest/disable"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.json().await.unwrap()["enabled"], false);
+    let response = engine
+        .client
+        .get(engine.url("/zim/servers/abc123/pane"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 404);
+
+    // Enable: serving resumes.
+    let response = engine
+        .client
+        .post(engine.url("/extensions/org.example.addon.itest/enable"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let response = engine
+        .client
+        .get(engine.url("/zim/servers/abc123/pane"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+
+    // Grant: additional permissions accumulate.
+    let response = engine
+        .client
+        .post(engine.url("/extensions/org.example.addon.itest/grant"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .json(&json!({ "permissions": ["file.read"] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
+    let granted: Vec<&str> = body["permissions"]["granted"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert!(granted.contains(&"file.read"));
+    assert!(granted.contains(&"websocket.connect"));
+
+    // Non-admin lifecycle calls are 403.
+    let response = engine
+        .client
+        .post(engine.url("/extensions/org.example.addon.itest/disable"))
+        .header("Cookie", format!("zim_session={member_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 403);
+
+    // The bundled default is disable-only: DELETE answers 403.
+    let response = engine
+        .client
+        .delete(engine.url("/extensions/org.zaminmc.extension.audit-log"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 403);
+
+    // Uninstall the uploaded addon: 204, gone from the list, the
+    // surface 404s.
+    let response = engine
+        .client
+        .delete(engine.url("/extensions/org.example.addon.itest"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 204);
+    let response = engine
+        .client
+        .get(engine.url("/zim/servers/abc123/pane"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 404);
+    let response = engine
+        .client
+        .get(engine.url("/extensions"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    let body: Value = response.json().await.unwrap();
+    let ids: Vec<&str> = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|addon| addon["id"].as_str())
+        .collect();
+    assert!(!ids.contains(&"org.example.addon.itest"));
+
+    // Non-admin install is 403 (§10.12's admin column).
+    let archive = addon_zip("org.example.addon.member", "0.1.0", "zim://servers/{id}/member");
+    let response = engine
+        .client
+        .post(engine.url("/extensions"))
+        .header("Cookie", format!("zim_session={member_cookie}"))
+        .header("Content-Type", "application/zip")
+        .body(archive)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 403);
+}
+
+#[tokio::test]
+async fn theme_upload_list_and_delete() {
+    let engine = TestEngine::start().await;
+    engine.seed_user("admin@zim.local", "admin pass", true);
+    let admin_cookie = login(&engine, "admin@zim.local", "admin pass")
+        .await
+        .expect("admin login");
+
+    // Fresh registry: empty.
+    let response = engine
+        .client
+        .get(engine.url("/themes"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["data"].as_array().map(Vec::len), Some(0));
+
+    // A packaged theme: .zip with zim.theme.json at the root.
+    let theme = json!({
+        "manifest_version": 1,
+        "name": "Integration Teal",
+        "tokens": { "color.accent": "#14b8a6" }
+    });
+    let mut archive = Vec::new();
+    {
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut archive));
+        writer
+            .start_file(
+                "zim.theme.json",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+        std::io::Write::write_all(&mut writer, theme.to_string().as_bytes()).unwrap();
+        writer.finish().unwrap();
+    }
+    let response = engine
+        .client
+        .post(engine.url("/themes"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .header("Content-Type", "application/zip")
+        .body(archive)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["id"], "integration-teal");
+    assert_eq!(body["tokens"]["color.accent"], "#14b8a6");
+
+    // Listed.
+    let response = engine
+        .client
+        .get(engine.url("/themes"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["data"].as_array().map(Vec::len), Some(1));
+
+    // A token outside the vocabulary is a validation failure.
+    let bad = json!({
+        "manifest_version": 1,
+        "name": "Bad",
+        "tokens": { "color.brand": "#fff" }
+    });
+    let mut archive = Vec::new();
+    {
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut archive));
+        writer
+            .start_file(
+                "zim.theme.json",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+        std::io::Write::write_all(&mut writer, bad.to_string().as_bytes()).unwrap();
+        writer.finish().unwrap();
+    }
+    let response = engine
+        .client
+        .post(engine.url("/themes"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .header("Content-Type", "application/zip")
+        .body(archive)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400);
+
+    // Delete: gone.
+    let response = engine
+        .client
+        .delete(engine.url("/themes/integration-teal"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 204);
+    let response = engine
+        .client
+        .get(engine.url("/themes"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["data"].as_array().map(Vec::len), Some(0));
 }

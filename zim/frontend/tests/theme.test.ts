@@ -12,8 +12,10 @@ import {
   THEME_KEY,
   cssPropertyOf,
   presetById,
+  resolveAllTokens,
   resolveTokens,
   restoreTheme,
+  storedFromEngineTheme,
 } from "../src/theme";
 
 test("the default preset resolves to exactly the default tokens", () => {
@@ -91,4 +93,65 @@ test("light presets say so (the color-scheme hint flips with them)", () => {
       assert.equal(preset.scheme, "dark");
     }
   }
+});
+
+// ── M24: the engine-theme storage path ───────────────────────────
+
+test("restoreTheme accepts the engine-theme shape (M24's uploaded packages)", () => {
+  const stored = restoreTheme({
+    v: 1,
+    engine: "ember-dusk",
+    engineTokens: { "color.background": "#171310", "color.accent": "#e07b39" },
+  });
+  assert.notEqual(stored, null);
+  assert.equal(stored!.engine, "ember-dusk");
+  assert.equal(stored!.preset, undefined);
+  const tokens = resolveTokens(stored!);
+  assert.equal(tokens["color.background"], "#171310");
+  assert.equal(tokens["color.accent"], "#e07b39");
+  assert.equal(tokens["color.surface"], DEFAULT_TOKENS["color.surface"]); // the floor holds
+});
+
+test("the accent pip wins over an engine theme's own accent", () => {
+  const stored = restoreTheme({
+    v: 1,
+    engine: "x",
+    engineTokens: { "color.accent": "#e07b39" },
+    accent: "#00ff00",
+  });
+  assert.notEqual(stored, null);
+  assert.equal(resolveTokens(stored!)["color.accent"], "#00ff00");
+});
+
+test("restoreTheme rejects engine shapes without a valid token snapshot", () => {
+  assert.equal(restoreTheme({ v: 1, engine: "x" }), null);
+  assert.equal(restoreTheme({ v: 1, engine: "x", engineTokens: null }), null);
+  assert.equal(restoreTheme({ v: 1, engine: "x", engineTokens: "nope" }), null);
+  // Tampered keys/values are corruption, not a theme.
+  assert.equal(restoreTheme({ v: 1, engine: "x", engineTokens: { "bad key!": "#fff" } }), null);
+  assert.equal(restoreTheme({ v: 1, engine: "x", engineTokens: { "color.accent": 5 } }), null);
+  // Both engines and presets at once is a contradiction.
+  assert.equal(
+    restoreTheme({ v: 1, engine: "x", preset: "midnight", engineTokens: {} }),
+    null,
+  );
+});
+
+test("resolveAllTokens carries the engine snapshot's extra tokens verbatim", () => {
+  const stored = restoreTheme({
+    v: 1,
+    engine: "full",
+    engineTokens: { "typography.body.size": "15px", "radius.large": "14px" },
+  });
+  assert.notEqual(stored, null);
+  const all = resolveAllTokens(stored!);
+  assert.equal(all["typography.body.size"], "15px");
+  assert.equal(all["radius.large"], "14px");
+  assert.equal(all["color.background"], DEFAULT_TOKENS["color.background"]);
+});
+
+test("storedFromEngineTheme snapshots the package's tokens", () => {
+  const stored = storedFromEngineTheme("teal", { "color.accent": "#14b8a6" });
+  const round = restoreTheme(JSON.parse(JSON.stringify(stored)) as unknown);
+  assert.deepStrictEqual(round, stored);
 });

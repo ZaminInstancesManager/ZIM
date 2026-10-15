@@ -815,6 +815,71 @@ and reset never silently on cache clears; the localStorage seed
 (`zim.lastConsole`) remains as the console page's own quick link.
 
 
+### AD-29: Addons are same-origin surface contributors with disable-with-notice isolation; the admin upload is the approval. (2026-10-15)
+
+**Status:** Accepted (the M24 addon-system deliverable; adapts
+FRONTEND_EXTENSION_SPEC.md §4.2/§4.10 to the post-AD-20 serving
+model).
+
+**Context:** The extension spec's isolation and permission
+language predates AD-20 (the Chromium cancellation): §4.10 promises
+per-origin renderer-process isolation (each addon's `zim://` URL
+its own origin), and §4.2 says permissions are "checked at the
+engine boundary on every API call" — written against a browser
+that could attribute requests to extensions by process/origin.
+
+**Decision:** In ZIM's post-AD-20 model every page — the default
+frontend's and every addon's — is same-origin on the engine's
+loopback HTTPS origin (AD-23), so the engine's answers are:
+
+- **Isolation is disable-with-notice.** An addon whose on-disk
+  package fails to load or re-validate at boot (§4.10) is disabled,
+  its notice surfaces at `zim://extensions`, and every other addon
+  plus the default frontend keep working — the same
+  never-lock-the-user-out posture as invariant 16. Page-level
+  failures are contained by the frontend's per-pane iframe
+  boundaries (AD-24).
+- **Permissions are declared, granted, listed, revocable — and
+  gated twice.** The manifest's set is granted at install
+  (the admin's `POST /api/v1/extensions` upload IS §4.11's
+  approval for untrusted/unsigned packages; a trusted key whose
+  signature fails is a hard reject), extendable only through the
+  admin `grant` endpoint (§4.2's elevation re-approval), revoked at
+  uninstall, and enforced client-side by the vendored SDK
+  (`Zim.assertPermission`). Server-side, every API call from an
+  addon page flows through the same per-endpoint authz as every
+  other call (invariant 15) with the user's own credentials;
+  per-addon *attribution* on the shared loopback origin is an M25
+  hardening item, recorded with the roadmap's honest-boundary
+  notes rather than faked here.
+- **Surfaces and assets.** An addon's declared `zim://` surfaces
+  serve through the same `/zim/` router as the frontend's (the
+  frontend's resolution runs first; the addon fallback serves on
+  `NotFound`), and each addon's own files serve under the reserved
+  namespace `zim://ext/{addon-id}/…` — the closest honest analog
+  of §4.10's "the addon's id is part of the URL" in a one-origin
+  world. All addon responses carry the same §3.8 CSP, nosniff,
+  referrer, and ETag discipline as frontend pages. Surface
+  collisions (pattern overlap, §4.4) and the reserved namespace
+  are refused at install — enabled or not, an installed addon owns
+  its surfaces until uninstalled.
+- **Bundled defaults (§6).** `org.zaminmc.extension.*` packages
+  are embedded at build time from `zim/extensions/`, seeded on a
+  fresh data dir, repair their extracted trees when missing, and
+  are disable-only: DELETE answers 403.
+
+**Consequences:** one trust root and one signature discipline
+cover frontend packages and addons (shared `TrustStore`,
+`SignatureCheck`, and §3.4 block shape); the addon registry is
+durable SQLite (`extension_registrations`, the M3-era schema)
+with the extracted trees as the serving payload; the spec's
+process-isolation promise is retired honestly rather than
+simulated; and `POST /api/v1/themes` (packaged themes,
+theme-tokens.v1, M23's deferral) ships alongside as the same
+milestone's customization surface — upload/delete admin, list
+any-session, values-only tokens validated against the contract.
+
+
 ## 2. Unresolved questions
 
 These are open architectural questions that need further

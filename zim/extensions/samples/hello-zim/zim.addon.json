@@ -1,0 +1,37 @@
+{
+  "$schema": "https://zim.zaminmc.org/schemas/addon.v1.json",
+  "manifest_version": 1,
+  "id": "org.example.zim-addon.hello-zim",
+  "version": "0.1.0",
+  "name": "Hello ZIM (sample addon)",
+  "description": "The documented sample addon: one per-instance page surface, a sidebar item, a context-menu item, one command, one event subscription, and the vendored SDK — a complete, minimal tour of the addon manifest.",
+  "author": "Example Author",
+  "license": "MIT",
+  "api_version": "v1",
+  "engines": { "zim": ">=0.0.1" },
+  "permissions": [
+    "websocket.connect"
+  ],
+  "instance_scope": "optional",
+  "page_surfaces": [
+    "zim://servers/{id}/hello"
+  ],
+  "entrypoints": {
+    "hello": "pages/hello.html"
+  },
+  "sidebar_items": [
+    { "label": "Hello", "icon": "spark", "page": "zim://servers/{id}/hello" }
+  ],
+  "context_menu_items": [
+    { "label": "Say hello", "page": "zim://servers/{id}/hello?from=context-menu" }
+  ],
+  "commands": [
+    { "id": "hello-zim-greet", "label": "Greet this server", "accelerator": "Ctrl+Shift+H" }
+  ],
+  "event_subscriptions": [
+    "instance.state_change"
+  ],
+  "dependencies": [
+    "org.zaminmc.frontend.default@>=1.0.0"
+  ]
+}

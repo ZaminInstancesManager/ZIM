@@ -153,10 +153,20 @@ export function presetById(id: string): ThemePreset | null {
   return PRESETS.find((preset) => preset.id === id) ?? null;
 }
 
-/** The persisted shape: a preset choice plus an optional accent pip. */
+/** The persisted shape: a preset choice, or an engine-theme
+ * choice (M24: uploaded packages, with a validated token snapshot
+ * so every page's synchronous boot applies them without a network
+ * round-trip), plus the optional accent pip. */
 export interface StoredTheme {
   v: 1;
-  preset: string;
+  preset?: string;
+  /** An uploaded engine theme's id (mutually exclusive with
+   * `preset`). */
+  engine?: string;
+  /** The engine theme's token snapshot, validated on restore (the
+   * engine validated the package against theme-tokens.v1 at
+   * upload; this validates the persisted copy). */
+  engineTokens?: Record<string, string>;
   accent?: string;
 }
 
@@ -168,34 +178,99 @@ export function restoreTheme(stored: unknown): StoredTheme | null {
     return null;
   }
   const shape = stored as Partial<StoredTheme>;
-  if (shape.v !== 1 || typeof shape.preset !== "string") {
-    return null;
-  }
-  if (presetById(shape.preset) === null) {
+  if (shape.v !== 1) {
     return null;
   }
   const accent =
     typeof shape.accent === "string" && HEX_COLOR.test(shape.accent)
       ? shape.accent.toLowerCase()
       : undefined;
+  // Either an engine theme (id + a valid token snapshot) or one of
+  // the shipped presets — never both, never neither.
+  if (typeof shape.engine === "string" && shape.engine !== "") {
+    if (typeof shape.preset === "string") {
+      return null; // Both at once is a contradiction, not a choice.
+    }
+    const tokens = validateEngineTokens(shape.engineTokens);
+    if (tokens === null) {
+      return null;
+    }
+    return accent === undefined
+      ? { v: 1, engine: shape.engine, engineTokens: tokens }
+      : { v: 1, engine: shape.engine, engineTokens: tokens, accent };
+  }
+  if (typeof shape.preset !== "string" || presetById(shape.preset) === null) {
+    return null;
+  }
   // The key is omitted (not `undefined`-valued) so round-trips stay
   // byte-stable for deep-equality checks and storage diffs.
   return accent === undefined ? { v: 1, preset: shape.preset } : { v: 1, preset: shape.preset, accent };
 }
 
-/** Resolve the effective tokens: preset overrides on the default
- * floor, then the user's accent pip last (it wins the accent game). */
+/** Validate an engine-theme token snapshot: string keys of
+ * `[a-z0-9.]+`, string values, sane lengths (the engine's own
+ * caps mirrored — a tampered localStorage blob is corruption, not
+ * a theme). */
+function validateEngineTokens(tokens: unknown): Record<string, string> | null {
+  if (tokens === null || typeof tokens !== "object" || Array.isArray(tokens)) {
+    return null;
+  }
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(tokens as Record<string, unknown>)) {
+    if (!/^[a-z0-9.]+$/.test(key) || key.length > 64) {
+      return null;
+    }
+    if (typeof value !== "string" || value.length > 256) {
+      return null;
+    }
+    result[key] = value;
+  }
+  return result;
+}
+
+/** Build the stored form of one uploaded engine theme (the NTP
+ * panel's choose-an-engine-theme path). */
+export function storedFromEngineTheme(id: string, tokens: Record<string, string>): StoredTheme {
+  return { v: 1, engine: id, engineTokens: { ...tokens } };
+}
+
+/** Resolve the effective tokens: preset overrides (or the engine
+ * snapshot's) on the default floor, then the user's accent pip last
+ * (it wins the accent game). The engine path may carry tokens the
+ * typed preset floor does not name — they pass through (the CSS
+ * custom-property mapping is generic). */
 export function resolveTokens(stored: StoredTheme): ThemeTokens {
-  const preset = presetById(stored.preset) ?? PRESETS[0];
-  const tokens: ThemeTokens = { ...DEFAULT_TOKENS, ...preset.tokens };
+  const tokens: ThemeTokens =
+    stored.engine !== undefined && stored.engineTokens !== undefined
+      ? { ...DEFAULT_TOKENS, ...(stored.engineTokens as Partial<ThemeTokens>) }
+      : { ...DEFAULT_TOKENS, ...(presetById(stored.preset ?? "") ?? PRESETS[0]).tokens };
   if (stored.accent !== undefined) {
     tokens["color.accent"] = stored.accent;
   }
   return tokens;
 }
 
+/** Every token an engine theme carries (the generic map, for
+ * applying beyond the typed color floor). */
+export function resolveAllTokens(stored: StoredTheme): Record<string, string> {
+  if (stored.engine !== undefined && stored.engineTokens !== undefined) {
+    const all: Record<string, string> = {
+      ...(DEFAULT_TOKENS as unknown as Record<string, string>),
+      ...stored.engineTokens,
+    };
+    if (stored.accent !== undefined) {
+      all["color.accent"] = stored.accent;
+    }
+    return all;
+  }
+  const tokens = resolveTokens(stored);
+  return { ...(tokens as unknown as Record<string, string>) };
+}
+
 /** Map a dotted token name onto its CSS custom property. */
-export function cssPropertyOf(token: keyof ThemeTokens): string {
+export function cssPropertyOf(token: keyof ThemeTokens): string;
+export function cssPropertyOf(token: string): string;
+export function cssPropertyOf(token: string): string {
   // `color.surface2` → `--color-surface-2` (main.css's spelling).
   return `--${token.replace(/\./g, "-").replace("surface2", "surface-2")}`;
 }
@@ -211,10 +286,39 @@ export function applyTokens(tokens: ThemeTokens, scheme: "dark" | "light"): void
   root.style.setProperty("color-scheme", scheme);
 }
 
+/** Apply a full token map (the engine-theme path — every token the
+ * package carried, generically mapped, with the scheme inferred
+ * from the background's luminance). */
+export function applyAllTokens(tokens: Record<string, string>): void {
+  const root = document.documentElement;
+  for (const key of Object.keys(tokens)) {
+    root.style.setProperty(cssPropertyOf(key), tokens[key]);
+  }
+  root.style.setProperty("color-scheme", schemeOfBackground(tokens["color.background"] ?? ""));
+}
+
+/** Infer the color-scheme hint from a background's luminance — an
+ * engine theme declares no scheme of its own, but a light
+ * background under `dark` scrolling chrome is worse than the
+ * inference. */
+function schemeOfBackground(background: string): "dark" | "light" {
+  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(background);
+  if (match === null) {
+    return "dark";
+  }
+  const [r, g, b] = [Number.parseInt(match[1], 16), Number.parseInt(match[2], 16), Number.parseInt(match[3], 16)];
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.6 ? "light" : "dark";
+}
+
 /** Apply a stored theme (or the default when absent/corrupt). */
 export function applyStoredTheme(stored: StoredTheme | null): void {
   const effective = stored ?? { v: 1 as const, preset: PRESETS[0].id };
-  const preset = presetById(effective.preset) ?? PRESETS[0];
+  if (effective.engine !== undefined && effective.engineTokens !== undefined) {
+    applyAllTokens(resolveAllTokens(effective));
+    return;
+  }
+  const preset = presetById(effective.preset ?? "") ?? PRESETS[0];
   applyTokens(resolveTokens(effective), preset.scheme);
 }
 
