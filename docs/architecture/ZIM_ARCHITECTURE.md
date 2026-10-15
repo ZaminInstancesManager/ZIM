@@ -1,5 +1,15 @@
 # ZIM Architecture (Phase 6 — Authoritative)
 
+> **CORRECTION (2026-10-15, AD-20):** ZIM is a desktop application
+> with a Chrome-inspired UI, not a Chromium-derived browser.
+> Wherever this document says "browser" read "desktop shell";
+> Chromium-specific mechanisms (source import, C++ integration,
+> renderer isolation, browser profiles) are cancelled and
+> superseded by the rewritten
+> `docs/architecture/BROWSER_INTEGRATION.md` and AD-20/AD-21/AD-22.
+> The engine-side content, lifecycle invariants (§4), failure
+> behavior (§5), and workload generalization (§9) are unaffected.
+
 This is the authoritative architecture document for ZIM. Other
 architecture documents (`RUST_ENGINE.md`, `BROWSER_INTEGRATION.md`,
 `PLATFORM_SUPPORT.md`, `TEST_STRATEGY.md`, `UPSTREAM_MAINTENANCE.md`,
@@ -13,7 +23,7 @@ canonical for the boundaries between components.
 ZIM is a desktop product consisting of three independently-authoritative
 layers:
 
-1. **The browser** (Chromium-derived). Owns the user's navigation,
+1. **The desktop shell** (Chrome-inspired; system WebView). Owns the user's navigation,
    tabs, windows, bookmarks, history, session restoration, profile
    separation, and renderer/host process isolation. The browser is
    the user's primary surface for everything they do, including
@@ -26,22 +36,22 @@ layers:
    long-running process independent of the browser; it survives
    browser crashes, renderer exits, and "all browser windows closed".
 
-3. **The integration layer** (Chromium-side C++ +
-   `zim://` WebUI + Rust-side HTTPS/WSS API). Connects the browser to
+3. **The frontend integration** (shell UI + engine-served
+   `zim://` pages over loopback HTTPS/WSS). Connects the shell to
    the engine through stable, documented, capability-controlled
    contracts. The integration layer is replaceable on the *frontend*
    side (a ZIM frontend package can be swapped) and *versioned* on
    the *API* side (the engine's API has explicit version numbers).
 
 The **default frontend** (authored by ZIM under `zim/frontend/`) is
-the browser-native UI for managing servers. It runs as a set of
-`zim://` internal pages in the browser. It is replaceable per
+the application UI for managing servers. It runs as a set of
+`zim://` internal pages served by the engine. It is replaceable per
 `docs/api/FRONTEND_EXTENSION_SPEC.md`.
 
 The **default extensions** (under `zim/extensions/`) are bundled ZIM
 addons that contribute additional UI surfaces (database management,
 custom dashboards, etc.). They use the ZIM addon SDK, not the
-Chromium extension platform, for any ZIM server-control permission.
+browser extension platform, for any ZIM server-control permission.
 
 ### Per-component ownership
 
@@ -51,8 +61,8 @@ enforced by these boundaries:
 
 | State                                              | Authority              | Notes |
 |----------------------------------------------------|------------------------|-------|
-| Tab list, window list, bookmarks, history, session | Chromium              | Restored on restart; never re-derived from engine state. |
-| Profile separation, cookies, origin storage        | Chromium              | Per-profile data owned by Chromium. |
+| Tab list, window list, quick access, session | Desktop shell          | Restored on restart; never re-derived from engine state. |
+| Profiles (if enabled)                            | Desktop shell          | Application-level profile data owned by the shell. |
 | Server lifecycle (running, stopped, crashed)        | Rust engine            | A persisted `running` flag in the DB is *not* proof of liveness; the engine verifies liveness by talking to the runtime. |
 | Server configuration (desired state)               | Rust engine's DB       | Source of truth for "what the server should be". |
 | Server runtime state (observed state)              | Runtime adapter        | Source of truth for "what the server is". |
@@ -64,7 +74,7 @@ enforced by these boundaries:
 | Audit log                                           | Rust engine            | Append-only; the engine is the only writer. |
 | Console stream                                      | Rust engine            | Fan-out from runtime → engine → subscribers; a tab is a subscriber. |
 | ZIM extension manifests                            | Rust engine            | The manifest declares permissions; the engine validates each API call. |
-| Default frontend package                           | Rust engine (loader)   | The engine loads the active frontend package on browser request; a broken frontend cannot prevent engine access. |
+| Default frontend package                           | Rust engine (loader)   | The engine loads the active frontend package on shell request; a broken frontend cannot prevent engine access. |
 
 ## 2. Process and runtime topology
 
@@ -72,12 +82,12 @@ At runtime, ZIM consists of the following processes:
 
 ```
 ┌───────────────────────────────────────────────────────────────────┐
-│  Browser process (Chromium-derived)                               │
+│  Desktop shell (Tauri 2, system WebView)                          │
 │  ├ BrowserManagerService (owns Browser windows)                    │
 │  ├ TabStripModel per Browser window                                │
 │  ├ TabFeatures (per-tab; ZIM ServerTabFeature attaches here)       │
 │  ├ WebUI registration for zim:// URLs                              │
-│  └ ZIM Integration Layer (C++; lives in the browser process)     │
+│  └ Shell UI: tab strip / address bar / split view (TS)            │
 │      ├ zim:// URL handler                                          │
 │      ├ Frontend package loader (requests packages from engine)    │
 │      └ Engine IPC client (HTTPS + WSS to local engine)            │
@@ -111,10 +121,10 @@ At runtime, ZIM consists of the following processes:
 
 Key properties:
 
-- The **browser and engine are separate OS processes.** The engine
-  does not run in the browser process. A browser crash does not stop
+- The **shell and engine are separate OS processes.** The engine
+  does not run in the shell process. A shell crash does not stop
   the engine. A renderer crash does not stop the engine. Closing all
-  browser windows does not stop the engine.
+  shell windows does not stop the engine.
 
 - The **engine does not depend on the active frontend's framework.**
   The frontend talks to the engine through the API; if the frontend
@@ -132,7 +142,7 @@ Key properties:
   contract, not over the loopback surface.
 
 - **No second backend.** There is no Panel-style PHP server behind
-  ZIM. The engine is the backend. The browser is the frontend
+  ZIM. The engine is the backend. The shell is the frontend
   (replaceable).
 
 ## 3. Component boundaries
@@ -145,7 +155,7 @@ zim/
 ├── contracts/       # Versioned IPC/API contracts (schema, OpenAPI)
 ├── frontend/        # Default frontend package (HTML/CSS/TS)
 ├── extensions/      # Bundled ZIM addons
-└── integration/     # Browser-side C++ that connects Chromium to engine
+└── shell/           # Desktop shell (Tauri 2) hosting the frontend
     ├── webui_registration/   # zim:// scheme registration
     ├── server_tab_feature/   # per-tab ZIM metadata
     ├── tab_menu/             # server-tab context-menu items
@@ -178,8 +188,8 @@ runtime; concrete adapters implement those traits. `zim_engine::api`
 is a thin layer that translates HTTP/WS to application service calls
 and enforces capability checks.
 
-The browser-side `zim/integration/` is C++ in the Chromium tree; it
-depends on Chromium headers and on the engine's HTTPS/WSS API (via
+The frontend integration is engine-served TypeScript; it
+depends only on the engine's HTTPS/WSS API (via
 the IPC client). It does not depend on the engine's Rust source.
 
 ### The contracts directory
@@ -311,9 +321,9 @@ ZIM's response:
 
 | Failure                              | Engine behavior                                                                  | Browser behavior                                |
 |---------------------------------------|----------------------------------------------------------------------------------|-------------------------------------------------|
-| Renderer crash                        | Unaffected; the engine has no renderer dependency.                              | Chromium restores the renderer; tab navigates back to its `zim://` URL; the loaded page re-subscribes to the engine. |
-| All browser windows closed            | Unaffected; the engine is an independent process.                               | (none — no browser to behave)                  |
-| Browser process crash                 | Unaffected.                                                                      | On restart, `exit_type_service` records a crash exit; Chromium offers session restore; restored tabs re-subscribe. |
+| Shell / webview crash                 | Unaffected; the engine has no shell dependency.                                   | The shell restarts; tabs navigate back to their `zim://` URLs; the loaded pages re-subscribe to the engine. |
+| All shell windows closed              | Unaffected; the engine is an independent process.                                | (none — no shell to behave)                    |
+| Shell process crash                   | Unaffected.                                                                       | On restart the shell offers session restore; restored tabs re-subscribe. |
 | Engine process crash                  | The engine restarts (managed by the OS service manager / launcher). On startup, it reconciles persisted state with runtime state for every instance; durable jobs resume or roll back. | The browser's IPC client detects the engine is unreachable; surfaces a recovery notice; WS subscriptions automatically reconnect with replay-from-checkpoint semantics when the engine returns. |
 | DB transaction failure                | The engine returns a structured error to the caller; the operation is rolled back; no partial state persists. | The browser's page surfaces the error to the user. |
 | Remote node disconnect                | The engine marks the node's instances as `unknown` (NOT `stopped`); the engine does not assume the servers have stopped. The node reconnects via the runtime contract; on reconnect, the engine reconciles. | Server tabs for instances on the disconnected node show `unknown` status (gray). |

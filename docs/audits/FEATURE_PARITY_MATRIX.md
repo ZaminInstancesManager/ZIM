@@ -1,5 +1,10 @@
 # Feature Parity Matrix (Phase 4)
 
+> **CORRECTION (2026-10-15, AD-20):** Chromium-fork references herein
+> are superseded — ZIM is a Chrome-inspired desktop application, not a
+> browser. Retained as the historical record of the superseded plan;
+> see `docs/architecture/DECISIONS.md` AD-20.
+
 This matrix lists every upstream capability relevant to ZIM, the current
 upstream implementation location, the intended ZIM behavior, the
 replacement owner (which ZIM component is responsible), the

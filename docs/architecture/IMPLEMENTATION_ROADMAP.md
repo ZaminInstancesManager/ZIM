@@ -1,5 +1,13 @@
 # Implementation Roadmap (Phase 6)
 
+> **CORRECTION (2026-10-15, AD-20):** Milestones M12-M15 (Chromium
+> source import, C++ integration layer, browser-gated E2E /
+> packaging / release) are **cancelled** — ZIM is a Chrome-inspired
+> desktop application, not a Chromium fork. The corrected milestones
+> M20-M26 below supersede them. M1-M11 and M16-M19 (engine +
+> frontend package) are unaffected and complete. Blockers B2-B4
+> (depot_tools / Chromium disk / Chromium link memory) are moot.
+
 This document specifies ZIM's implementation roadmap:
 dependency-ordered milestones, the acceptance criteria for each
 milestone, and the known blockers. It is the bridge between the
@@ -596,99 +604,17 @@ list, and a server's console.
 
 **Estimated effort:** 3-4 weeks.
 
-### M12: Chromium source import + local patches
+### M12-M15: CANCELLED — Chromium integration (superseded by AD-20)
 
-**Goal:** Import the Chromium source tree and apply the local
-patch queue (patches 0001-0006).
-
-**Deliverables:**
-- `chromium/src/` populated via `git subtree add` at the pinned
-  revision.
-- `gclient sync` run against the pinned revision.
-- Patches 0001-0006 applied via `chromium/PATCHES/series`.
-- `gn gen out/Default` succeeds.
-- `ninja -C out/Default chrome` succeeds (a buildable Chromium
-  with ZIM patches).
-
-**Acceptance criteria:**
-- The Chromium build produces a ZIM-branded browser binary.
-- `zim://newtab` loads in the built browser.
-- The ZIM local patches are recorded in
-  `docs/architecture/UPSTREAM_MAINTENANCE.md` §3.4 with the actual
-  application details.
-
-**Blockers cleared:** B2, B3, B4.
-
-**Estimated effort:** 1-2 weeks (assuming the build environment
-is provisioned; the actual `ninja` build can take hours).
-
-### M13: Integration layer (C++ on the Chromium side)
-
-**Goal:** Implement the browser-side integration layer under
-`zim/integration/` and link it into the Chromium build.
-
-**Deliverables:**
-- `zim/integration/webui_registration/` — `zim://` scheme
-  registration (uses patch 0001/0002).
-- `zim/integration/server_tab_feature/` — `ServerTabFeature`
-  (uses patch 0003).
-- `zim/integration/tab_menu/` — ZIM tab menu items (uses patch
-  0005).
-- `zim/integration/engine_ipc_client/` — HTTPS+WSS client to
-  the engine.
-- `zim/integration/crash_keys/` — ZIM crash keys (uses patch
-  0006).
-- The built browser links the integration layer.
-
-**Acceptance criteria:**
-- A `zim://servers/{id}/console` tab loads the default frontend's
-  console page.
-- The tab's status indicator updates in real time as the
-  instance's state changes.
-- The tab's context menu shows ZIM items.
-- Closing the tab does not stop the server (invariant 4).
-
-**Estimated effort:** 4-6 weeks.
-
-### M14: End-to-end tests + cross-platform packaging
-
-**Goal:** Implement the E2E test suite and cross-platform
-packaging.
-
-**Deliverables:**
-- E2E tests under `tests/e2e/` covering the scenarios in
-  `docs/architecture/TEST_STRATEGY.md` §3.
-- Windows packaging (installer, service registration, URL
-  protocol registration).
-- Linux packaging (deb, rpm, systemd user unit, .desktop file).
-- macOS packaging (app bundle, launchd agent, Info.plist URL
-  protocol registration).
-- Cross-platform CI matrix (Linux x64, Windows x64, macOS arm64).
-
-**Acceptance criteria:**
-- All E2E tests pass on all three platforms.
-- A user can install ZIM on each platform, create an instance,
-  start it, view its console, and stop it.
-
-**Estimated effort:** 4-6 weeks.
-
-### M15: First usable ZIM release
-
-**Goal:** Cut the first usable ZIM release.
-
-**Deliverables:**
-- Release binaries for Windows x64, Linux x64, macOS arm64.
-- Release notes documenting what works and what doesn't.
-- Migration guide for users coming from Pterodactyl.
-- The release is marked "alpha" or "preview"; not production-ready.
-
-**Acceptance criteria:**
-- All M1-M14 milestones complete.
-- All architectural invariant tests in
-  `docs/architecture/TEST_STRATEGY.md` §2 pass.
-- All failure-scenario tests in §3 pass.
-
-**Estimated effort:** 1 week (after M14).
+The four Chromium milestones — source import + patch queue (M12),
+the C++ integration layer (M13), E2E + packaging gated on a built
+browser (M14), and the first release (M15) — are cancelled as of
+2026-10-15. ZIM is a Chrome-inspired desktop application, not a
+Chromium fork: no Chromium source is imported, built, patched, or
+shipped, and no 100 GB build environment is ever required. The
+E2E / packaging / release scope is re-scoped into M25/M26 below.
+The original acceptance criteria of M12-M15 are void; M20-M26 are
+the corrected continuation of this roadmap.
 
 ### M16: Workload integration SDK + first-party integration skeletons
 
@@ -802,6 +728,132 @@ integrations.
 
 **Estimated effort:** 3-4 weeks.
 
+### M20: Architecture correction — COMPLETE (2026-10-15)
+
+**Goal:** Correct the product direction across the architecture
+documentation and plan, preserving all valid engine work.
+
+**Deliverables:**
+- AD-20/AD-21/AD-22 recorded; AD-2/AD-7/AD-9 superseded;
+  Q1-Q3 resolved as moot.
+- `docs/architecture/BROWSER_INTEGRATION.md` rewritten as the
+  desktop-frontend architecture (Chrome-UX reference inventory,
+  shell architecture, preserved URL inventory / status model /
+  session invariants).
+- This roadmap's Chromium milestones cancelled and replaced with
+  M21-M26.
+- All affected architecture/audit/API/security docs carry
+  correction banners; `chromium/UPSTREAM_MANIFEST.md` is marked
+  cancelled (provenance only).
+
+**Acceptance criteria:** No doc instructs anyone to import, build,
+patch, or require Chromium; the engine milestones M1-M19 remain
+described as complete and valid; the corrected path forward
+(M21-M26) is fully specified.
+
+**Status:** Complete.
+
+### M21: Desktop shell scaffold (Tauri 2)
+
+**Goal:** A thin desktop shell hosting the engine-served frontend.
+
+**Deliverables:**
+- `zim/shell/`: the Tauri 2 application (window, OS integration,
+  tray, app chrome skeleton).
+- `zim://` resolution onto the engine's frontend loader — custom
+  protocol vs. loopback-origin mapping (AD-22 spike; pick and
+  record in BROWSER_INTEGRATION.md §13).
+- Engine lifecycle independence: closing/crashing the shell never
+  stops the engine; the shell attaches to an already-running engine
+  and starts it when absent.
+- CI workflow building the shell on Linux, Windows, and macOS
+  runners.
+
+**Acceptance criteria:**
+- `zim://newtab` renders the engine-served new-tab page inside the
+  shell.
+- With a server running, killing the shell leaves the server
+  running; relaunching the shell reattaches and shows live state.
+- Shell CI green on all three platforms.
+
+**Estimated effort:** 1-2 weeks.
+
+### M22: Chrome-UX parity I — tab strip, address bar, navigation
+
+**Goal:** Replicate the Chrome tab-strip and omnibox interaction
+model in the frontend's own TypeScript.
+
+**Deliverables:**
+- Tab strip: one tab per server/workload view; drag-reorder,
+  close, tear-off-to-window, overflow, Chrome animation curves.
+- Per-tab workload status indicator wired to
+  `instance.state_change` over the stream (the §4 status model →
+  visual mapping).
+- Address bar for `zim://` navigation with suggestion dropdown and
+  engine-identity indication.
+- Tab context menu with the §5 items, permission-gated.
+- Session persistence of tab sets as `zim://` URLs; restore
+  restores views only, never lifecycle.
+
+**Acceptance criteria:**
+- The UX-parity checklist (tab strip + omnibox sections) passes.
+- Indicators track live engine state in real time over WSS.
+- Session restore re-opens views with zero lifecycle side effects.
+
+**Estimated effort:** 2-3 weeks.
+
+### M23: Chrome-UX parity II — split view, windows, themes, NTP
+
+**Deliverables:**
+- Split view: panes with independent stream subscriptions, divider
+  physics and snapping per the Chrome split-tab reference.
+- Multi-window and tab tear-out/merge; window+split session
+  persistence.
+- Theme system with live application and presets.
+- New-tab page completion: server discovery, create, import,
+  recent/frequent servers.
+
+**Acceptance criteria:**
+- Split panes subscribe independently; closing a pane unsubscribes
+  only that pane; the server keeps running.
+- Themes apply live; NTP flows create/open a server end-to-end.
+
+**Estimated effort:** 2-3 weeks.
+
+### M24: Extension / addon system
+
+**Deliverables:**
+- Engine-side addon loading per `FRONTEND_EXTENSION_SPEC.md`.
+- The documented addon SDK + one sample addon.
+- Manual install via upload (no marketplace — out of scope §4).
+
+**Estimated effort:** 2 weeks.
+
+### M25: E2E suite + cross-platform packaging
+
+**Deliverables:**
+- E2E suite covering the TEST_STRATEGY scenarios: install ZIM,
+  create an instance, start it, view its console, stop it — on
+  Windows, Linux, macOS.
+- Installers per platform + auto-update channel mechanics.
+- Cross-platform CI matrix for the packaged app.
+
+**Estimated effort:** 3-4 weeks.
+
+### M26: First usable ZIM release (alpha)
+
+**Deliverables:**
+- Release binaries for Windows x64, Linux x64, macOS arm64.
+- Release notes (what works / what doesn't) and the Pterodactyl
+  migration guide.
+- Alpha labeling: not production-ready.
+
+**Acceptance criteria:** M1-M11, M16-M25 complete; the
+architectural-invariant and failure-scenario suites pass.
+
+**Estimated effort:** 1 week (after M25).
+
+
 ## 4. Out-of-scope for the first release
 
 The following are explicitly out-of-scope for the first ZIM
@@ -833,16 +885,16 @@ The milestones are sequenced to respect dependencies:
   runtime).
 - M11 (frontend) needs the API and streaming; ships a minimal
   surface.
-- M12 (Chromium import) is gated on toolchain + disk + memory;
-  can run in parallel with M3-M11.
-- M13 (integration) needs M11 (frontend) and M12 (Chromium
-  build).
-- M14 (E2E + packaging) needs M13 (a built browser).
-- M15 (release) needs everything.
+- M12-M15 (Chromium integration) are cancelled (AD-20).
+- M21 (shell scaffold) needs M11 (engine-served frontend).
+- M22/M23 (Chrome-UX parity) need M21.
+- M24 (addons) can run in parallel with M22/M23.
+- M25 (E2E + packaging) needs M22/M23.
+- M26 (release) needs everything.
 
-Critical path: M1 → M2 → M3 → M5 → M11 → M13 → M14 → M15.
+Critical path: M1 → M2 → M3 → M5 → M11 → M21 → M22 → M25 → M26.
 Parallelizable: M4 (with M3), M6/M7/M8/M9 (after M5), M10 (after
-M3), M12 (after M1+environment).
+M3), M24 (with M22/M23).
 
 ## 6. First Rust implementation milestone
 

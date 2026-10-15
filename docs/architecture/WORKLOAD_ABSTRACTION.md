@@ -1,5 +1,11 @@
 # Workload Abstraction (Phase 6 expansion)
 
+> **CORRECTION (2026-10-15, AD-20):** Layer-1 ("Browser platform")
+> is re-scoped: the desktop shell (Tauri 2, system WebView) +
+> engine-served `zim://` pages own windows/tabs/navigation/session;
+> there are no Chromium local patches. The layer model and
+> capability traits are otherwise unchanged.
+
 This document is canonical for ZIM's general workload model. It
 generalizes the narrower "managed game server" concept in the
 original architecture documents into a generic Workload abstraction

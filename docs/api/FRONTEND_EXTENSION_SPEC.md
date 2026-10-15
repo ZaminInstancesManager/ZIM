@@ -1,5 +1,10 @@
 # Frontend & Extension Specification (Phase 6)
 
+> **CORRECTION (2026-10-15, AD-20):** References to
+> browser/Chromium hosting are superseded by the desktop-shell model
+> (AD-20/AD-21). The frontend-package manifest, themes, and addon SDK
+> design are unchanged.
+
 This document specifies the ZIM frontend-replacement model and the
 ZIM addon SDK. It is canonical for:
 

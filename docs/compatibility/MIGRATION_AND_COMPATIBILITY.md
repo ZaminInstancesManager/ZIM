@@ -245,7 +245,7 @@ replacement for Pterodactyl. The documented differences:
 
 | Behavior                                | Pterodactyl                                 | ZIM                                              |
 |-----------------------------------------|---------------------------------------------|--------------------------------------------------|
-| Frontend                                | Web panel served by PHP/Laravel              | Browser-native (Chromium tab pages)               |
+| Frontend                                | Web panel served by PHP/Laravel              | Chrome-inspired desktop shell (zim:// pages)               |
 | Backend                                  | Panel (PHP) + Wings (Go)                     | Single Rust engine                                |
 | Server lifecycle authority              | Wings (the daemon)                         | The engine (a single process)                    |
 | Console stream protocol                  | Custom WS protocol between Wings and Panel    | Documented WS event contract with replay-from-checkpoint |

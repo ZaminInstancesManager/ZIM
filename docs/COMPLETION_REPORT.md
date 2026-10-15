@@ -1,5 +1,14 @@
 # ZIM Engineering Foundation — Completion Report
 
+> **CORRECTION (2026-10-15, AD-20):** This report describes the
+> architecture phase as originally planned, including the
+> (then-planned) Chromium-fork direction. The Chromium direction was
+> superseded on 2026-10-15 — see AD-20/AD-21/AD-22 and the
+> rewritten `docs/architecture/BROWSER_INTEGRATION.md` and
+> `docs/architecture/IMPLEMENTATION_ROADMAP.md`. The Pterodactyl
+> imports, audits, engine milestones M1-M19, and the frontend
+> package described here remain valid and in place.
+
 This report records the completion of the architecture-phase
 assignment for ZIM (Zamin Instances Manager). It follows the format
 specified in §17 of the assignment prompt.

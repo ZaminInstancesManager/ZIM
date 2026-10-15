@@ -1,5 +1,12 @@
 # Platform Support (Phase 6)
 
+> **CORRECTION (2026-10-15, AD-20):** The "Browser (Chromium)"
+> column is superseded: the frontend is a Tauri 2 desktop shell over
+> the system WebView (WebView2 / WKWebView / WebKitGTK) — no
+> Chromium build, no patch queue, no depot_tools / 100 GB toolchain.
+> Webview availability follows the OS's own webview runtime; engine
+> and container-runtime columns are unchanged.
+
 This document specifies ZIM's platform support: which platforms are
 first-class, what works on each, what doesn't, and the rationale.
 

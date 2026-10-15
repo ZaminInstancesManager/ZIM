@@ -1,12 +1,13 @@
 # ZIM — Zamin Instances Manager
 
 ZIM is an independent desktop product of the ZaminMC ecosystem: a
-Chromium-derived browser combined with a Rust-based workload-management
-engine. ZIM lets the user manage long-running workloads — game servers,
-databases, websites, development processes, generic containers, and
-future workload types introduced by first-party modules or third-party
-extensions — through ordinary browser tabs, while keeping the browser and
-the management engine as separate, independently-recoverable
+Chrome-inspired desktop application powered by a Rust-based
+workload-management engine. ZIM lets the user manage long-running
+workloads — game servers, databases, websites, development processes,
+generic containers, and future workload types introduced by
+first-party modules or third-party extensions — through a
+Chrome-style tabbed interface, while keeping the application and the
+management engine as separate, independently-recoverable
 authorities.
 
 Minecraft and Pterodactyl are the original workload and reference
@@ -16,17 +17,19 @@ beyond them through a typed workload abstraction with capability traits
 
 This repository is the engineering foundation for ZIM. It contains the real
 upstream source trees of Pterodactyl Panel and Pterodactyl Wings (imported via
-subtree merge with full upstream history preserved), the pinned-revision
-manifest and import strategy for Chromium, the source-backed audit of all three
-upstream codebases, the architecture and API contracts for the Rust engine,
-browser integration, and workload abstraction, and the roadmap that
-subsequent implementation work will follow.
+subtree merge with full upstream history preserved), the cancelled Chromium
+import manifest (kept as provenance; see AD-20), the source-backed audits of
+the Pterodactyl codebases and of Chrome's UX platform, the architecture and
+API contracts for the Rust engine, the desktop frontend, and workload
+abstraction, and the roadmap that subsequent implementation work will follow.
 
 ## What this repository is and is not
 
 **It is:**
 
-- A real, source-backed hard fork of Chromium and Pterodactyl.
+- A real, source-backed project: Pterodactyl Panel and Wings are imported
+  as audited reference trees; Chrome's UX is the design reference for the
+  frontend (no Chromium source — see AD-20).
 - A working ZIM monorepo: Pterodactyl Panel and Wings source trees are present
   as `upstream/pterodactyl-panel/` and `upstream/pterodactyl-wings/` with their
   complete upstream history reachable through `git log`.
@@ -38,17 +41,14 @@ subsequent implementation work will follow.
 
 **It is not:**
 
-- A buildable Chromium checkout. A full Chromium source-plus-dependencies
-  checkout requires on the order of 100 GB of disk and the `depot_tools` /
-  `gclient` toolchain; the workspace in which this repository was established
-  has roughly 9 GB of disk available and no `depot_tools`. The Chromium source
-  tree is therefore deferred for import until a build environment with
-  sufficient capacity is provisioned. The pinned revision, import strategy and
-  build-readiness constraints are documented in
-  `chromium/UPSTREAM_MANIFEST.md` and `docs/audits/UPSTREAM_AUDIT.md`, and the
-  Chromium architecture audit in `docs/audits/CHROMIUM_ARCHITECTURE.md` is
-  backed by direct spot-inspection of the upstream source at the pinned
-  revision via the chromium/chromium GitHub mirror.
+- Dependent on Chromium source. The Chromium import is CANCELLED
+  (AD-20, 2026-10-15): ZIM is a desktop application with a
+  Chrome-inspired UI, not a browser. The desktop shell renders via the
+  OS webview (WebView2 / WKWebView / WebKitGTK) — no Chromium source,
+  no patch queue, no 100 GB build, ever. `chromium/UPSTREAM_MANIFEST.md`
+  is kept as provenance for the cancelled decision; the pinned-revision
+  audit (`docs/audits/CHROMIUM_ARCHITECTURE.md`) is reframed as a
+  Chrome platform/UX reference for the frontend.
 - A working ZIM runtime — partially. The Rust engine workspace
   (`zim/engine/`) is under active implementation following
   `docs/architecture/IMPLEMENTATION_ROADMAP.md`: the domain model +
@@ -98,7 +98,7 @@ subsequent implementation work will follow.
 
 ```text
 ZIM/
-├── chromium/                     # Chromium import manifest and patch queue
+├── chromium/                    # Cancelled Chromium import manifest (provenance; AD-20)
 │   ├── UPSTREAM_MANIFEST.md      # Pinned revision, import strategy, status
 │   └── PATCHES/                  # Local Chromium patches (initially empty)
 ├── upstream/
@@ -129,7 +129,7 @@ ZIM/
 |----------------------|-------------------------------------------------------|------------|----------------|---------------|---------|
 | Pterodactyl Panel    | https://github.com/pterodactyl/panel                  | v1.15.1    | 2026-10-13     | git subtree   | MIT     |
 | Pterodactyl Wings    | https://github.com/pterodactyl/wings                  | v1.13.3    | 2026-10-13     | git subtree   | MIT     |
-| Chromium             | https://chromium.googlesource.com/chromium/src.git   | 157.0.8103.0 | 2026-10-13   | deferred (see manifest) | BSD-style |
+| Chromium             | https://chromium.googlesource.com/chromium/src.git   | 157.0.8103.0 | 2026-10-13   | cancelled (AD-20; UX reference only) | BSD-style |
 
 Full traceable commit hashes and verification status are recorded in
 `docs/audits/UPSTREAM_AUDIT.md`.
@@ -140,7 +140,7 @@ Start with:
 
 1. `docs/audits/BASELINE.md` — Phase 0 workspace baseline.
 2. `docs/audits/UPSTREAM_AUDIT.md` — what is imported, how, and what is verified.
-3. `docs/audits/CHROMIUM_ARCHITECTURE.md` — what Chromium actually provides.
+3. `docs/audits/CHROMIUM_ARCHITECTURE.md` — Chrome platform/UX reference (integration cancelled; see AD-20).
 4. `docs/audits/PTERODACTYL_ARCHITECTURE.md` — what Panel and Wings actually do.
 5. `docs/audits/COMPONENT_DISPOSITION.md` — what ZIM keeps, adapts, replaces, removes, defers, or investigates.
 6. `docs/architecture/ZIM_ARCHITECTURE.md` — the authoritative ZIM architecture.

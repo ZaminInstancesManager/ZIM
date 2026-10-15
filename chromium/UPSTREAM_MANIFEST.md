@@ -1,5 +1,13 @@
 # Chromium Upstream Manifest
 
+> **CANCELLED (2026-10-15, AD-20):** The Chromium import described
+> in this manifest will not happen. ZIM is a Chrome-inspired desktop
+> application (Tauri 2 shell over the system WebView), not a
+> Chromium fork. This manifest is retained as provenance for the
+> superseded decision; the pinned revision remains useful only as
+> the reference point for the UX/platform audit in
+> `docs/audits/CHROMIUM_ARCHITECTURE.md`.
+
 This document records the pinned Chromium revision for ZIM, the import
 strategy, the verification status of that strategy in the current workspace,
 and the path to a full buildable Chromium fork when a suitable build

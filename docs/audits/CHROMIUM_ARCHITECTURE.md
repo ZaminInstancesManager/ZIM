@@ -1,5 +1,13 @@
 # Chromium Architecture Audit (Phase 2)
 
+> **REFRAME (2026-10-15, AD-20):** This audit was originally
+> written to plan a Chromium-fork integration. That integration is
+> cancelled. The document is retained as a **Chrome platform / UX
+> reference** — the source-backed description of the interaction
+> model (tabs, split view, session restore, NTP, omnibox) that
+> ZIM's desktop frontend replicates in its own TypeScript. No
+> Chromium code is imported, built, or patched.
+
 This audit records the actual Chromium architecture relevant to ZIM, grounded
 in direct source inspection at the pinned revision `157.0.8103.0` (commit
 `b0a05135bf5a60bb3ab5a1e86a0e55193cb126d0`) on the chromium/chromium GitHub

@@ -33,7 +33,7 @@ desktop shell; the engine is the resident daemon.
 Dockerfile, docker-compose, Nix flake are not used in ZIM's
 runtime, per `docs/audits/COMPONENT_DISPOSITION.md` §2.5).
 
-### AD-2: Chromium is the browser foundation.
+### AD-2: Chromium is the browser foundation. (SUPERSEDED by AD-20 — do not implement)
 
 **Date:** 2026-10-13.
 **Status:** Settled.
@@ -140,7 +140,7 @@ engine and cannot be removed; it is the recovery frontend. A
 broken custom frontend cannot lock the user out (invariant 16
 in `docs/architecture/ZIM_ARCHITECTURE.md` §4).
 
-### AD-7: ZIM extensions are distinct from Chromium extensions.
+### AD-7: ZIM extensions are distinct from Chromium extensions. (SUPERSEDED by AD-20 — moot: no Chromium extension runtime exists)
 
 **Date:** 2026-10-13.
 **Status:** Settled.
@@ -182,7 +182,7 @@ the engine's internal node-runtime contract for remote nodes
 (see `docs/architecture/RUST_ENGINE.md` §9). The legacy
 Panel↔Wings API is preserved only as an importer reference.
 
-### AD-9: Chromium source import is deferred until a build environment with sufficient capacity is provisioned.
+### AD-9: Chromium source import is deferred until a build environment with sufficient capacity is provisioned. (CANCELLED by AD-20 — the import will not happen)
 
 **Date:** 2026-10-13.
 **Status:** Settled (this assignment).
@@ -452,13 +452,102 @@ documentation and UI use the workload form.
 continue to work. The browser-side integration layer treats
 both forms identically.
 
+### AD-20: ZIM is a Chrome-inspired desktop application, not a browser. (2026-10-15)
+
+**Status:** Accepted; supersedes AD-2 (Chromium foundation), AD-7
+(extension-platform distinction), AD-9 (deferred Chromium import).
+
+**Context:** The original architecture treated the Chrome-inspired UI
+requirement as authorization to fork Chromium: source import, a C++
+patch queue, browser-process integration, and a 100 GB build
+environment. The product requirement was the *interaction model* —
+tabs, an address bar, split views, windows, a new-tab experience,
+customization — not the browser engine. The correction (2026-10-15)
+reframes ZIM as a desktop Minecraft server manager (generalizable to
+other workloads per AD-13) with a Chrome-inspired frontend and the
+existing Rust engine.
+
+**Decision:**
+
+1. ZIM is a desktop application; the frontend is
+   HTML/CSS/TypeScript hosted in a system-WebView desktop shell
+   (AD-21).
+2. Chrome's UX is the design reference the frontend *replicates* —
+   tab strip behavior, animations, split view, omnibox patterns,
+   NTP grammar — implemented in our own code, never vendored from
+   Chromium source.
+3. No Chromium source is imported, built, patched, or shipped. No
+   `chromium/PATCHES/` queue. No depot_tools / 100 GB build. The
+   `chromium/UPSTREAM_MANIFEST.md` import is cancelled (kept as
+   provenance); `docs/audits/CHROMIUM_ARCHITECTURE.md` is reframed
+   as a UX/platform reference.
+4. ZIM does not implement website browsing, browser history, browser
+   bookmarks, a Chromium extension runtime, or browser security
+   infrastructure. ZIM extensions are the engine's own addon system.
+5. The engine work (milestones M1-M19) is unaffected: the engine
+   remains the authority for workload state, and the
+   frontend-package model (AD-6) is preserved.
+
+**Consequences:** Roadmap M12-M15 are cancelled and superseded by
+M20-M26 (desktop shell, Chrome-UX parity, packaging, release).
+AD-7's "distinct from Chromium extensions" distinction is moot (no
+Chromium extension runtime exists). Q1-Q3 resolve as moot. The
+system WebView is the only browser-engine component ZIM touches —
+as an OS-provided runtime, exactly like any other desktop app.
+
+### AD-21: The desktop shell is Tauri 2 over the system WebView. (2026-10-15)
+
+**Status:** Accepted (framework selection; the two open hosting
+questions are M21 spikes, see AD-22 and BROWSER_INTEGRATION.md §13).
+
+**Context:** The frontend must be a desktop application hosting the
+engine-served, dependency-free TypeScript frontend
+(`zim/frontend/`) with windowing, tabs, split views, and OS
+integration. Framework candidates:
+
+| Candidate | Verdict | Why |
+|-----------|---------|-----|
+| Electron | Rejected | Ships a full Chromium runtime inside every install; contradicts the corrected product shape and bloats binaries; its Node backend duplicates engine responsibilities. |
+| Per-platform native UI (Qt / Swift / WinUI) | Rejected | Three codebases; no reuse of the engine-served HTML/TS frontend; the highest cost to reach Chrome-UX parity fidelity. |
+| Tauri 2 (wry: WebView2 / WKWebView / WebKitGTK) | **Selected** | Rust-native (matches the engine toolchain), renders via the OS webview (no browser engine to build or patch), small binaries, custom-protocol support for `zim://`, multi-window support. |
+
+**Decision:** Build the shell as a Tauri 2 application under
+`zim/shell/`. The shell stays thin: windowing, OS integration, and
+app chrome (tab strip, address bar, split containers) only. All
+management UI remains the engine-served frontend package, preserving
+AD-6 (replaceable frontend) and the engine's authority.
+
+**Risks / mitigations:** Webview divergence across platforms —
+mitigated by the frontend being dependency-free Web Components (the
+existing package) plus a per-platform UI test floor (M22 open
+question). The tab/pane hosting strategy (iframe panes vs. multiple
+native webviews) is an M21 spike, not a pre-commitment.
+
+### AD-22: `zim://` is an app-internal navigation namespace served by the engine's frontend loader. (2026-10-15)
+
+**Status:** Accepted.
+
+**Context:** The URL inventory (`zim://newtab`,
+`zim://servers/{id}/...`, the AD-19 workload form) predates the
+correction and remains the correct addressing model for tabs,
+session restore, split pairings, and extension links. What changed
+is resolution: not a Chromium WebUI scheme, but the shell mapping
+the namespace onto the engine-served frontend.
+
+**Decision:** The shell resolves `zim://` URLs to the engine's
+active frontend package — via a Tauri custom protocol or a
+loopback-origin mapping (the M21 spike decides; tracked in
+`docs/architecture/BROWSER_INTEGRATION.md` §13). URLs are stable
+identifiers and remain the persistence format for sessions and
+quick-access entries.
+
 ## 2. Unresolved questions
 
 These are open architectural questions that need further
 investigation or a future decision. They are tracked here so they
 are not lost; each has a "preliminary" answer that may be revised.
 
-### Q1: The exact `zim://` scheme registration mechanism.
+### Q1: The exact `zim://` scheme registration mechanism. (RESOLVED-MOOT by AD-20/AD-22: shell-level resolution, not Chromium WebUI)
 
 **Status:** INVESTIGATE.
 **Preliminary:** Custom scheme (separate from `chrome://`), for
@@ -470,7 +559,7 @@ at the pinned Chromium revision; understand how Chromium
 distinguishes trusted vs untrusted WebUI; confirm the scheme's
 CSP behavior.
 
-### Q2: The exact `TabFeatures` attachment API.
+### Q2: The exact `TabFeatures` attachment API. (RESOLVED-MOOT by AD-20: no Chromium; per-tab state is frontend state)
 
 **Status:** INVESTIGATE.
 **Preliminary:** `ServerTabFeature` implements the `TabFeature`
@@ -479,7 +568,7 @@ interface declared in `chrome/browser/ui/tabs/tab_features.h`.
 confirm the attachment lifecycle, the per-tab feature
 construction parameters, and the destruction semantics.
 
-### Q3: The exact `BrowserWindowFeatures` API surface.
+### Q3: The exact `BrowserWindowFeatures` API surface. (RESOLVED-MOOT by AD-20: no Chromium; shell windowing is Tauri's)
 
 **Status:** INVESTIGATE.
 **Preliminary:** ZIM contributes window-scoped features via

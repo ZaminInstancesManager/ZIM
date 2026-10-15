@@ -1,5 +1,11 @@
 # Test Strategy (Phase 6)
 
+> **CORRECTION (2026-10-15, AD-20):** Test layers referencing a
+> built Chromium browser are superseded by the desktop-shell model:
+> shell/UI tests run against the Tauri shell + the engine-served
+> frontend (milestones M21+), not a patched Chromium. Engine test
+> layers are unaffected.
+
 This document specifies ZIM's test strategy: the test types, the
 inventory of tests that protect each architectural invariant, the
 fault-injection scenarios, the cross-platform test matrix, and the

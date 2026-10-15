@@ -1,5 +1,10 @@
 # Upstream Audit — Source Trees, Revisions, Verification
 
+> **CORRECTION (2026-10-15, AD-20):** Chromium-fork references herein
+> are superseded — ZIM is a Chrome-inspired desktop application, not a
+> browser. Retained as the historical record of the superseded plan;
+> see `docs/architecture/DECISIONS.md` AD-20.
+
 This is the canonical record of what upstream source is present in the ZIM
 repository, what upstream source is referenced but not present, the exact
 revisions, the import methods, and what was actually verified. Other audit

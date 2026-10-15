@@ -1,5 +1,10 @@
 # Phase 0 — Workspace Baseline Report
 
+> **CORRECTION (2026-10-15, AD-20):** Chromium-fork references herein
+> are superseded — ZIM is a Chrome-inspired desktop application, not a
+> browser. Retained as the historical record of the superseded plan;
+> see `docs/architecture/DECISIONS.md` AD-20.
+
 This document records the state of the workspace and the ZaminInstancesManager
 organization at the time work began. It is the canonical baseline against
 which later changes are compared.

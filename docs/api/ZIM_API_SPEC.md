@@ -1,5 +1,10 @@
 # ZIM API Specification (Phase 6)
 
+> **CORRECTION (2026-10-15, AD-20):** The API's client is the ZIM
+> desktop shell's frontend (engine-served pages), not a Chromium
+> browser process. The loopback HTTPS+WSS contract, auth model, and
+> endpoints are unchanged.
+
 This document specifies the ZIM API: the resource schemas, request
 validation, response formats, structured errors, authentication,
 permissions, pagination, filtering, concurrency controls, rate limits,

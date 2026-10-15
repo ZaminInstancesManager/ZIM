@@ -1,5 +1,13 @@
 # ZIM Threat Model (Phase 6)
 
+> **CORRECTION (2026-10-15, AD-20):** Trust tiers and scenarios
+> involving the Chromium browser process, renderer isolation, or a
+> browser-extension attack surface are superseded by the
+> desktop-shell model (AD-20/AD-21): the frontend attack surface is
+> the OS webview runtime plus the engine's loopback API. Re-rating
+> of affected scenarios is tracked in the M21 milestone;
+> engine-side scenarios are unaffected.
+
 This document threat-models the entire ZIM product: trust boundaries,
 attack scenarios, mitigations, and outstanding security questions. It
 is canonical for ZIM's security architecture; other documents reference

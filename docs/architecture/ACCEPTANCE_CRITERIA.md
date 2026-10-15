@@ -1,5 +1,10 @@
 # Architecture Acceptance Criteria (Phase 6 expansion)
 
+> **CORRECTION (2026-10-15, AD-20):** Acceptance criteria that
+> gate on a built ZIM browser binary are superseded by the
+> desktop-shell criteria in the corrected roadmap (M21-M26).
+> Engine-side criteria are unaffected.
+
 This document demonstrates, with reference to the existing
 architecture documents, how ZIM's architecture satisfies each of
 the 10 expanded-scope acceptance criteria (from the "Additional

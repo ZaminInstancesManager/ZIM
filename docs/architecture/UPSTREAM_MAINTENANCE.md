@@ -1,5 +1,11 @@
 # Upstream Maintenance (Phase 6)
 
+> **CORRECTION (2026-10-15, AD-20):** Section 3 (Chromium
+> maintenance) is **cancelled** — no Chromium source is imported or
+> patched. The patch queue / registry / resolution-log subsections
+> are void, retained only as the historical record of the superseded
+> plan. Pterodactyl maintenance (§2) is unaffected.
+
 This document specifies how ZIM maintains its forks of Chromium and
 Pterodactyl over time: how patches are carried, how upstream
 revisions are updated, how conflicts are resolved, and how

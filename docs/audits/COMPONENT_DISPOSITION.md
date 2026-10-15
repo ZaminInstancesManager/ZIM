@@ -1,5 +1,10 @@
 # Component Disposition Matrix (Phase 4)
 
+> **CORRECTION (2026-10-15, AD-20):** Chromium-fork references herein
+> are superseded — ZIM is a Chrome-inspired desktop application, not a
+> browser. Retained as the historical record of the superseded plan;
+> see `docs/architecture/DECISIONS.md` AD-20.
+
 This is the canonical evidence-backed inventory of how each major upstream
 component is treated in ZIM. Each entry assigns one of the six dispositions
 defined by the prompt:
