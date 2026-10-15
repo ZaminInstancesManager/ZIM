@@ -44,9 +44,17 @@ use zim_engine_frontend_loader::Resolution;
 /// embeds tab panes as same-origin iframes — same-origin only, in
 /// both directions, so a foreign page can neither embed ZIM surfaces
 /// nor be embedded by them.
+///
+/// `ipc:` + `http://ipc.localhost` in `connect-src` (M23, AD-26):
+/// inside the desktop shell, the chrome page reaches the shell's
+/// command surface (tear-off, merge, window label) through Tauri's
+/// IPC schemes — the same direction of trust the shell's own bundled
+/// pages already use (`zim/shell/tauri.conf.json`). In plain
+/// browsers these schemes simply never resolve; they grant no
+/// network reach (they terminate in the shell process).
 pub const ZIM_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; \
-     connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; \
-     form-action 'none'; frame-src 'self'; frame-ancestors 'self'";
+     connect-src 'self' ipc: http://ipc.localhost; img-src 'self' data:; font-src 'self'; \
+     base-uri 'none'; form-action 'none'; frame-src 'self'; frame-ancestors 'self'";
 
 /// `GET /zim` and `GET /zim/` — the package root routes to the
 /// `newtab` entrypoint (the NTP-replacement rule, §8).

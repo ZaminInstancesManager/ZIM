@@ -9,6 +9,9 @@
 import { ApiError, consoleBuffer, consoleInput, getInstance, getState, power } from "./api.js";
 import { ZimStream } from "./stream.js";
 import "./components.js";
+import { initThemeFromStorage } from "./theme.js";
+// The theme applies before anything renders (M23: live, everywhere).
+initThemeFromStorage();
 /** Where the instance id lives: `/zim/servers/{id}/console`. */
 function instanceIdFromPath() {
     const match = window.location.pathname.match(/^\/zim\/servers\/([^/]+)\/console\/?$/);

@@ -98,9 +98,16 @@ abstraction, and the roadmap that subsequent implementation work will follow.
   frontend's own TypeScript, same-origin iframe panes per AD-24,
   live §4 status indicators over the event stream, the §5 tab
   context menu, view-only session persistence, and a frontend
-  unit-test layer in CI). Remaining: the desktop UX milestones
-  (M23-M26: split views, multi-window, NTP completion, themes —
-  the addon system, packaging, and the first alpha release).
+  unit-test layer in CI), and the Chrome-UX parity II batch (M23 —
+  the §8 split view with independent per-pane streams and snapping
+  divider, real multi-window: shell-owned tear-off/merge with
+  per-window session keys (AD-26), the live theme system (presets +
+  accent pip, AD-27) with the token vocabulary contract
+  `zim/contracts/theme-tokens.v1.json`, and the completed new-tab
+  page (search, engine-backed recents `/me/recents` (AD-28),
+  create/import flows, workload browsing, customization)).
+  Remaining: the desktop UX milestones (M24-M26: the addon system,
+  packaging + E2E, and the first alpha release).
 - A re-skinned Pterodactyl. The Panel's PHP/Laravel backend and Wings's Go
   daemon are preserved in `upstream/` as audit references and behavioral
   contracts; they are not part of ZIM's runtime architecture.
@@ -115,15 +122,22 @@ ZIM/
 │   ├── pterodactyl-panel/        # Pterodactyl Panel v1.15.1 (subtree-merged)
 │   └── pterodactyl-wings/        # Pterodactyl Wings v1.13.3 (subtree-merged)
 ├── zim/                          # ZIM's own code
+│   ├── contracts/                # Versioned contract files
+│   │   └── theme-tokens.v1.json  # Theme token vocabulary (AD-27)
 │   ├── engine/                   # Rust engine workspace (28 crates, M1-M19)
 │   ├── shell/                    # Tauri 2 desktop shell (M21): window, tray,
-│   │   │                         #   engine attach/spawn, zim:// mapping, trust
+│   │   │                         #   engine attach/spawn, zim:// mapping, trust;
+│   │   │                         #   (M23: multi-window — tear-off / merge /
+│   │   │                         #   new-window commands, window registry)
 │   │   ├── ui/                   #   bundled pre-engine pages (boot / recovery)
 │   │   ├── icons/                #   app icons (png / ico / icns)
-│   │   └── src/                  #   cli / zim_url / engine / trust / tray / state
+│   │   └── src/                  #   cli / zim_url / engine / trust / tray /
+│   │                             #   state / windows / commands
 │   └── frontend/                 # Default frontend package (engine-served)
 │       │                         #   (M22: the zim://app chrome — tab strip +
-│       │                         #   omnibox + panes — newtab, servers, console,
+│       │                         #   omnibox + panes; M23: split view, session
+│       │                         #   v2, themes, the completed NTP with create /
+│       │                         #   import / recents; newtab, servers, console,
 │       │                         #   and the declared per-instance surfaces;
 │       │                         #   src/ TypeScript, tests/ node:test suite)
 ├── docs/

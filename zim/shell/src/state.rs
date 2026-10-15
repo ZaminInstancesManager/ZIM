@@ -3,10 +3,12 @@
 
 #![forbid(unsafe_code)]
 
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Mutex;
 
 use serde::Serialize;
+
+use crate::windows::WindowRegistry;
 
 /// The attach sequence's phases, in order.
 ///
@@ -56,7 +58,8 @@ impl EngineStatus {
 }
 
 /// Shared shell state: the frozen CLI options, the attach status,
-/// and the one-flight guard for retry attempts.
+/// the one-flight guard for retry attempts, and (M23) the window
+/// registry plus the chrome-window label counter.
 pub struct Shared {
     /// The parsed options (frozen at boot; retries reuse them).
     pub options: crate::cli::Options,
@@ -64,6 +67,10 @@ pub struct Shared {
     /// True while an attach sequence is running (prevents retry
     /// dogpiles from the recovery page).
     pub attaching: AtomicBool,
+    /// The chrome-window label mint (M23 multi-window).
+    pub window_counter: AtomicU64,
+    /// The chrome windows the shell knows about (M23).
+    pub windows: WindowRegistry,
 }
 
 impl Shared {
@@ -73,6 +80,8 @@ impl Shared {
             options,
             status: Mutex::new(EngineStatus::waiting()),
             attaching: AtomicBool::new(false),
+            window_counter: AtomicU64::new(1),
+            windows: WindowRegistry::new(),
         }
     }
 

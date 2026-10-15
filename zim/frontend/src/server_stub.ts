@@ -19,6 +19,10 @@ import { ApiError, getInstance, getState, metricsSnapshot } from "./api";
 import type { StreamEvent } from "./api";
 import { ZimStream } from "./stream";
 import "./components";
+import { initThemeFromStorage } from "./theme";
+
+// The theme applies before anything renders (M23: live, everywhere).
+initThemeFromStorage();
 
 /** Which surface this page is (`/zim/servers/{id}/{surface}`). */
 function surfaceFromPath(): { instanceId: string; surface: string } | null {

@@ -921,19 +921,106 @@ model in the frontend's own TypeScript.
 
 ### M23: Chrome-UX parity II — split view, windows, themes, NTP
 
-**Deliverables:**
-- Split view: panes with independent stream subscriptions, divider
-  physics and snapping per the Chrome split-tab reference.
-- Multi-window and tab tear-out/merge; window+split session
-  persistence.
-- Theme system with live application and presets.
-- New-tab page completion: server discovery, create, import,
-  recent/frequent servers.
+**Status: COMPLETE** (frontend `src/split.ts` + `src/theme.ts` +
+`src/instanceForm.ts` + the `tabs.ts` v2 session format + the
+rewritten NTP + the `app.ts` split/multi-window chrome; engine
+`/me/recents` + migration 0005 + the IPC CSP sources; shell
+window registry + tear-off/merge commands + in-place new-tab).
 
-**Acceptance criteria:**
-- Split panes subscribe independently; closing a pane unsubscribes
-  only that pane; the server keeps running.
-- Themes apply live; NTP flows create/open a server end-to-end.
+**What shipped:**
+
+- Split view (§8): one split per tab — the primary pane plus a
+  secondary pane, each its own iframe and its own §11 stream
+  subscription. The divider drags (pointer events) with Chrome's
+  snap points (halves and thirds, 3% tolerance, a visible snap
+  state), double-click re-centers, arrow keys nudge, and a close
+  affordance on the divider closes only the secondary pane —
+  `stream.close()` on that pane alone; the primary pane and the
+  server are untouched. "Open in split view" (§5 menu) copies the
+  tab, Chrome-style; the split pairing serializes into the session
+  (v2) with a clamped ratio, and a torn-out split tab carries both
+  paths (`?tab=` + `?split=` + `?ratio=`).
+- Session v2 (`tabs.ts`): entries are `{path, split?}`; the v1 key
+  is still read once for upgrade; corruption voids the whole
+  session (a bad split path is corruption, a drifted ratio is
+  clamped); ≤64 tabs stands. Per-window keys: the main window owns
+  `zim.session.v2`; a torn-off window (`?window=chrome-N`) owns
+  `zim.session.v2.w:chrome-N` — windows never clobber each other's
+  sessions on the shared origin (hostile labels fall back to the
+  primary key).
+- Multi-window + tear-out/merge (AD-26): inside the shell, tear-off
+  invokes `zim_tear_off` — the shell resolves every path through
+  the `zim://` grammar (AD-23 holds), builds the window, registers
+  its label, and the chrome closes the torn-out tab. A torn-off
+  window's tab menu offers "Merge back to the main window":
+  `zim_merge_to_main` relays the whole v2 session as a
+  `zim:merge-session` event (the main chrome validates it with the
+  same restore discipline) and closes the window. The shell
+  persists the window set (`windows.json`, corrupt = empty) and
+  recreates remembered windows after attach — each restores its own
+  session from its own storage key; no tab state crosses IPC. The
+  tray gained "New window — zim://app", and its "New tab" is now an
+  in-place `zim:new-tab` event (no reload; the `?newtab=1`
+  navigation remains the fallback). Plain browsers keep M22's
+  `window.open` tear-off and simply never see merge.
+- Themes (§12 row, AD-27): five presets (ZIM Dark, Midnight,
+  Forest, Ember, Paper — one light) + an accent pip, applied live
+  through CSSOM custom-property writes on `:root` (CSP-clean under
+  `style-src 'self'`; CSSOM writes are not markup style
+  attributes). The shadow-root component styles were re-tokenized
+  to `var(--…, fallback)` so custom properties inherit through the
+  shadow boundaries. The token vocabulary contract ships as
+  `zim/contracts/theme-tokens.v1.json`; packaged-theme upload
+  (`POST /api/v1/themes`) stays with M24's addon work.
+- NTP completion (§9): centered search/filter over the caller's
+  servers, a Recent tile section (engine-backed `GET /me/recents`,
+  §11 — not a browser-history database; frequent tiles badge their
+  open counts), an All-servers grid with live status dots, create
+  and import actions (admin-gated honestly — non-admins see the
+  sign-in state, a 403 on node listing says so), workload-type
+  browsing (game servers live; other kinds honestly marked "later"
+  until M16), and the customization entry point (the theme panel).
+  The create dialog posts the engine's `POST /instances` shape
+  (name + node + optional fields); import parses a pasted JSON
+  server definition through the same validation (pure,
+  unit-tested) and points panel migrations at the
+  `zim-migrate-pterodactyl` CLI. Successful create/import opens
+  the new server's console — the §9 end-to-end flow.
+- Engine: `GET/POST /api/v1/me/recents` (user-scoped, `limit`
+  clamped `[1,32]`, 404 on unknown instances, not audited — an
+  open is nicety state, not an authority move), migration 0005
+  (`user_recents`, capped at the newest 32 per user on write),
+  domain `RecentServer`, port methods, sqlite store. The page CSP
+  gains `ipc:` + `http://ipc.localhost` in `connect-src` (AD-26:
+  the chrome's shell-command channel; no network reach — the
+  schemes terminate in the shell process).
+- The chrome records pane-open adoptions fire-and-forget
+  (`POST /me/recents`, only while signed in, once per adoption).
+
+**Acceptance status (honest):**
+- Split panes subscribe independently; closing one pane
+  unsubscribes only that pane; the server keeps running — by
+  construction (each pane owns its stream; `closeSplitSecondary`
+  never touches the primary pane's stream) and covered by the
+  split/session unit tests.
+- Themes apply live — CSSOM token writes on every page's boot +
+  the NTP panel; covered by the theme unit tests (resolution,
+  persistence validation, pip rules). Visual fidelity of the
+  presets needs a human pass in the packaged shell (as with every
+  visual row).
+- NTP flows create/open a server end-to-end — the create dialog +
+  the engine's instance endpoint are integration-tested
+  (`recents_record_rank_and_isolate_per_user` walks login → node →
+  instances → recents over real TLS); the page-level flow needs
+  M25's E2E to be pressed in the packaged app.
+- Multi-window: window creation/restore/registry is unit-tested
+  shell-side; the full OS-window flows (tear-off drag, merge,
+  per-window storage across restarts) need the packaged shell —
+  the same honest boundary M21/M22 recorded for window work.
+- Split-all / drag-between-windows merge: not shipped (Chrome's
+  split-all and cross-window drag-merge are polish behind the
+  milestone's acceptance line; the merge path that exists is the
+  menu-driven one).
 
 **Estimated effort:** 2-3 weeks.
 

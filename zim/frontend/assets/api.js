@@ -129,6 +129,29 @@ export async function power(id, operation) {
 export async function frontendActive() {
     return api("/frontend/active");
 }
+// ── Recent servers, nodes, instance creation (M23 NTP) ───────────
+/** The caller's recent servers (most-recent first). */
+export async function listRecents(limit = 8) {
+    const clamped = Math.min(Math.max(Math.floor(limit), 1), 32);
+    const body = await api(`/me/recents?limit=${clamped}`);
+    return body.data;
+}
+/** Record that the caller opened a server view (fire-and-forget by
+ * design: recents are a nicety — failures are swallowed by the
+ * caller, never surfaced as chrome errors). */
+export async function recordRecent(instanceId) {
+    await api("/me/recents", { body: { instance_id: instanceId } });
+}
+/** List nodes (admin-visible; the create dialog degrades honestly
+ * when this is a 403). */
+export async function listNodes() {
+    const envelope = await api("/nodes");
+    return envelope.data;
+}
+/** Create a server (admin-only engine-side; 201 returns the row). */
+export async function createInstance(request) {
+    return api("/instances", { body: request });
+}
 /** The recent resource-usage samples for one instance (M7). */
 export async function metricsSnapshot(id) {
     return api(`/instances/${encodeURIComponent(id)}/metrics`);

@@ -17,6 +17,9 @@
 import { ApiError, getInstance, getState, metricsSnapshot } from "./api.js";
 import { ZimStream } from "./stream.js";
 import "./components.js";
+import { initThemeFromStorage } from "./theme.js";
+// The theme applies before anything renders (M23: live, everywhere).
+initThemeFromStorage();
 /** Which surface this page is (`/zim/servers/{id}/{surface}`). */
 function surfaceFromPath() {
     const match = window.location.pathname.match(/^\/zim\/servers\/([^/]+)\/([a-z]+)\/?$/);

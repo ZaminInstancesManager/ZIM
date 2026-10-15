@@ -13,6 +13,10 @@ import type { Instance } from "./api";
 import { ZimStream } from "./stream";
 import type { StreamStatus } from "./stream";
 import "./components";
+import { initThemeFromStorage } from "./theme";
+
+// The theme applies before anything renders (M23: live, everywhere).
+initThemeFromStorage();
 
 /** Rows that get a live WebSocket (per-instance streams, §11). */
 const MAX_LIVE_SUBSCRIPTIONS = 10;

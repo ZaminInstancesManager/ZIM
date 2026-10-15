@@ -22,10 +22,11 @@
 //! can move to an async trait with a connection pool without
 //! changing the domain layer.
 
+use chrono::{DateTime, Utc};
 use zim_engine_domain::{
     Allocation, AuditRecord, Backup, Egg, EggId, ExtensionRegistration, Instance, InstanceId,
-    InstanceStatus, InstanceVariable, Job, JobId, JobState, Node, NodeId, Permission, Schedule,
-    ScheduleId, Transfer, TransferId, User, UserId,
+    InstanceStatus, InstanceVariable, Job, JobId, JobState, Node, NodeId, Permission, RecentServer,
+    Schedule, ScheduleId, Transfer, TransferId, User, UserId,
 };
 
 /// Errors returned by [`Persistence`] implementations.
@@ -272,6 +273,26 @@ pub trait Persistence: Send + Sync {
 
     /// All permission rows for a user.
     fn list_permissions_by_user(&self, user: &UserId) -> Result<Vec<Permission>, PersistenceError>;
+
+    // ── Recent servers (M23 NTP quick-access, §11) ──────────────
+
+    /// Record that a user opened a server view: upsert the
+    /// (user, instance) row, bumping `open_count` and refreshing
+    /// `last_opened_at`. Implementations cap the per-user rows
+    /// (quick access, not history).
+    fn record_recent_server(
+        &self,
+        user: &UserId,
+        instance: &InstanceId,
+        now: DateTime<Utc>,
+    ) -> Result<(), PersistenceError>;
+
+    /// A user's recent servers, most-recently-opened first.
+    fn list_recent_servers(
+        &self,
+        user: &UserId,
+        limit: u32,
+    ) -> Result<Vec<RecentServer>, PersistenceError>;
 
     // ── Jobs ────────────────────────────────────────────────────────
 

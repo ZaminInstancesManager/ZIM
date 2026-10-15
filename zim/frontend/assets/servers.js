@@ -10,6 +10,9 @@
 import { ApiError, formatTime, getState, listInstances } from "./api.js";
 import { ZimStream } from "./stream.js";
 import "./components.js";
+import { initThemeFromStorage } from "./theme.js";
+// The theme applies before anything renders (M23: live, everywhere).
+initThemeFromStorage();
 /** Rows that get a live WebSocket (per-instance streams, §11). */
 const MAX_LIVE_SUBSCRIPTIONS = 10;
 /** Fallback polling interval for unsubscribed rows. */
