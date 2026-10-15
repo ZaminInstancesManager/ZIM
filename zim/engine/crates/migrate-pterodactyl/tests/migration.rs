@@ -538,9 +538,10 @@ fn a_real_import_through_the_cli_writes_the_database() {
     let code = zim_engine_migrate_pterodactyl::cli::run_cli(&args);
     assert_eq!(code, 0);
     assert!(target.exists(), "the real import creates the database");
-    // The written store is a valid engine database.
+    // The written store is a valid engine database (schema head is
+    // 0005 user_recents since M23).
     let store = zim_engine_persistence_sqlite::SqlitePersistence::open(&target).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 4);
+    assert_eq!(store.schema_version().unwrap(), 5);
     assert_eq!(store.list_users().unwrap().len(), 2);
     let _ = std::fs::remove_file(&target);
 }
