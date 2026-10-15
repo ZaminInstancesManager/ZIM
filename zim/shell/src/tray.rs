@@ -90,6 +90,14 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
 
     builder.build(app)?;
 
+    // Hand the update-check item's handle to the shared state so
+    // the updater can retitle it as a check progresses (AD-31).
+    if let Some(shared) = app.try_state::<std::sync::Arc<crate::state::Shared>>() {
+        if let Ok(mut slot) = shared.update_menu_item.lock() {
+            *slot = Some(check_update);
+        }
+    }
+
     Ok(())
 }
 

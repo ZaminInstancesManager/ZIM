@@ -4,16 +4,21 @@
 //!
 //! Scope discipline: this module is *mechanics*, not UX. The
 //! alpha channel surfaces its state where the consent happened —
-//! the tray menu item's own label — plus stderr; an in-app update
-//! page is release polish (M26). There is deliberately no
-//! automatic check-on-boot: updates install only when the user
-//! asks for one, and the signature gate (minisign, the public key
-//! baked into this binary via tauri.conf.json) is what makes that
-//! safe. The channel's contract — endpoint, manifest, granularity,
+//! the tray menu item's own label (the handle lives in
+//! [`crate::state::Shared`]) — plus stderr; an in-app update page
+//! is release polish (M26). There is deliberately no automatic
+//! check-on-boot: updates install only when the user asks for
+//! one, and the signature gate (minisign, the public key baked
+//! into this binary via tauri.conf.json) is what makes that safe.
+//! The channel's contract — endpoint, manifest, granularity,
 //! rollback — is documented in docs/architecture/UPDATES.md.
 
-use tauri::AppHandle;
+use std::sync::Arc;
+
+use tauri::{AppHandle, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
+
+use crate::state::Shared;
 
 /// The tray item's resting label (restored after any check).
 const RESTING_LABEL: &str = "Check for updates…";
@@ -88,25 +93,23 @@ async fn install(app: AppHandle, update: Update) {
     }
 }
 
-/// Point the tray item's label at `text`.
+/// Point the tray item's label at `text` (the item handle was
+/// stored by `tray::init`; a missing tray is a no-op, not an error).
 fn set_label(app: &AppHandle, text: &str) {
-    use tauri::Manager;
-    if let Some(tray) = app.tray_by_id("zim-tray") {
-        if let Some(menu) = tray.menu() {
-            if let Some(item) = menu.get("check-update") {
-                if let Some(item) = item.as_menuitem() {
-                    let _ = item.set_text(text);
-                }
-            }
+    let shared = app.state::<Arc<Shared>>();
+    if let Ok(mut guard) = shared.update_menu_item.lock() {
+        if let Some(item) = guard.as_ref() {
+            let _ = item.set_text(text);
         }
     }
 }
 
 /// Reset the tray item's label after the state has been read —
-/// the label is a flash surface, not a log.
+/// the label is a flash surface, not a log. A plain thread: the
+/// async runtime has no sleep of its own, and this is a one-shot.
 fn restore_label_later(app: AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        tauri::async_runtime::sleep(std::time::Duration::from_secs(10)).await;
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(10));
         set_label(&app, RESTING_LABEL);
     });
 }

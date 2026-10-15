@@ -10,6 +10,9 @@ use serde::Serialize;
 
 use crate::windows::WindowRegistry;
 
+/// The stored handle type for the tray's update-check item (M25).
+pub type UpdateMenuItem = Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>;
+
 /// The attach sequence's phases, in order.
 ///
 /// Serialized snake_case to the UI pages (`engine-status` events
@@ -71,6 +74,11 @@ pub struct Shared {
     pub window_counter: AtomicU64,
     /// The chrome windows the shell knows about (M23).
     pub windows: WindowRegistry,
+    /// The tray's "Check for updates…" item (M25, AD-31): stored
+    /// by `tray::init` so the updater can retitle it as a check
+    /// progresses — the item's own label is the alpha channel's
+    /// progress surface. `None` until the tray is built.
+    pub update_menu_item: UpdateMenuItem,
 }
 
 impl Shared {
@@ -82,6 +90,7 @@ impl Shared {
             attaching: AtomicBool::new(false),
             window_counter: AtomicU64::new(1),
             windows: WindowRegistry::new(),
+            update_menu_item: Mutex::new(None),
         }
     }
 
