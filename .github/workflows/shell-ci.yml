@@ -107,9 +107,9 @@ jobs:
       # M25 diagnostic: on Windows the shell's test binary has hit
       # STATUS_ENTRYPOINT_NOT_FOUND at load (a missing DLL export).
       # Compile the test binary without running it, probe THE exact
-      # executable cargo test would run, and let the loader's own
-      # message (which names the DLL) land in the log; dumpbin's
-      # import list rides along as the backup.
+      # executable cargo test would run, and dump its import table
+      # (dumpbin via vswhere — the loader's own message is silent in
+      # CI, so the import list is the evidence trail).
       - name: Probe the Windows test binary load
         if: runner.os == 'Windows'
         shell: pwsh
@@ -125,11 +125,21 @@ jobs:
           Write-Host "== probing $exe"
           $output = cmd /c "`"$exe`" --list 2>&1"
           Write-Host $output
-          $dumpbin = Get-ChildItem 'C:\Program Files\Microsoft Visual Studio\2022\*\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe' -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-          if ($dumpbin) {
-            Write-Host "== dumpbin /imports"
-            & $dumpbin.FullName /imports $exe | Select-String -Pattern '\.dll' | ForEach-Object { $_.Line.Trim() }
+          $vswhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
+          if (Test-Path $vswhere) {
+            $installPath = & $vswhere -latest -property installationPath
+            $dumpbin = Get-ChildItem "$installPath\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if ($dumpbin) {
+              Write-Host "== dumpbin /imports of $exe"
+              & $dumpbin.FullName /imports $exe |
+                Select-String -Pattern '^\s+\S+\.dll' |
+                ForEach-Object { $_.Line.Trim() }
+            } else {
+              Write-Host 'dumpbin not found under the VS installation'
+            }
+          } else {
+            Write-Host 'vswhere not found'
           }
           exit 0
 
