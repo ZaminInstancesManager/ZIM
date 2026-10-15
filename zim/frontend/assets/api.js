@@ -190,3 +190,61 @@ export function formatTime(iso) {
     }
     return date.toLocaleString();
 }
+/** `GET /extensions` — every installed addon plus boot notices. */
+export async function listExtensions() {
+    return api("/extensions");
+}
+/** `POST /extensions` — install (or update) an addon from `.zimpkg`
+ * ZIP bytes (admin; the upload IS the approval). */
+export async function installExtension(packageBytes) {
+    const response = await fetch("/api/v1/extensions", {
+        credentials: "same-origin",
+        method: "POST",
+        headers: { "Content-Type": "application/zip", Accept: "application/json" },
+        body: packageBytes,
+    });
+    if (!response.ok) {
+        throw await parseError(response);
+    }
+    return (await response.json());
+}
+/** `POST /extensions/{id}/enable` or `…/disable` (admin). */
+export async function setExtensionEnabled(id, enabled) {
+    return api(`/extensions/${encodeURIComponent(id)}/${enabled ? "enable" : "disable"}`, {
+        method: "POST",
+    });
+}
+/** `DELETE /extensions/{id}` — uninstall + revoke (admin). */
+export async function uninstallExtension(id) {
+    return api(`/extensions/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+/** `POST /extensions/{id}/grant` — grant additional permissions
+ * (admin; §4.2's elevation re-approval). */
+export async function grantExtension(id, permissions) {
+    return api(`/extensions/${encodeURIComponent(id)}/grant`, {
+        body: { permissions },
+    });
+}
+/** `GET /themes` — the uploaded themes (the presets live in the
+ * frontend's own code). */
+export async function listThemes() {
+    return api("/themes");
+}
+/** `POST /themes` — install a packaged theme (`.zip` with
+ * `zim.theme.json` at the root; admin). */
+export async function uploadTheme(zipBytes) {
+    const response = await fetch("/api/v1/themes", {
+        credentials: "same-origin",
+        method: "POST",
+        headers: { "Content-Type": "application/zip", Accept: "application/json" },
+        body: zipBytes,
+    });
+    if (!response.ok) {
+        throw await parseError(response);
+    }
+    return (await response.json());
+}
+/** `DELETE /themes/{id}` — remove an uploaded theme (admin). */
+export async function deleteTheme(id) {
+    return api(`/themes/${encodeURIComponent(id)}`, { method: "DELETE" });
+}

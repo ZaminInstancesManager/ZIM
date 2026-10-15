@@ -1,0 +1,45 @@
+<!doctype html>
+<!--
+  org.example.zim-addon.hello-zim — the sample addon's page.
+
+  Demonstrates the addon page contract: CSP-clean (external
+  stylesheet + script only), the vendored SDK, the {id} path
+  parameter resolved from the surface match, and the query string
+  available for context-menu actions.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hello — ZIM sample addon</title>
+  <link rel="stylesheet" href="/zim/ext/org.example.zim-addon.hello-zim/assets/hello.css">
+</head>
+<body>
+  <main class="hello">
+    <h1 id="greeting">Hello, ZIM!</h1>
+    <p class="hello-sub">This page is contributed by the sample addon
+      <code>org.example.zim-addon.hello-zim</code> — its surface is
+      <code>zim://servers/{id}/hello</code>, its files are served from the addon's
+      own package under <code>/zim/ext/{addon-id}/…</code>, and its logic runs on
+      the vendored SDK.</p>
+
+    <dl class="hello-facts">
+      <dt>Instance</dt>
+      <dd id="instance" class="mono">…</dd>
+      <dt>Instance name</dt>
+      <dd id="instance-name">…</dd>
+      <dt>Live state</dt>
+      <dd id="state">…</dd>
+      <dt>Opened via</dt>
+      <dd id="via">direct navigation</dd>
+      <dt>Events seen</dt>
+      <dd id="events">0</dd>
+    </dl>
+
+    <p id="note" class="hello-note" role="status"></p>
+  </main>
+
+  <script src="/zim/ext/org.example.zim-addon.hello-zim/assets/zim.js"></script>
+  <script src="/zim/ext/org.example.zim-addon.hello-zim/assets/hello.js"></script>
+</body>
+</html>

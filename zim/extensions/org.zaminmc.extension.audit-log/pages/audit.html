@@ -1,0 +1,49 @@
+<!doctype html>
+<!--
+  org.zaminmc.extension.audit-log — the audit viewer page.
+
+  CSP-clean (§3.8 discipline): external stylesheet and script only,
+  no inline anything, no javascript: URLs. The SDK is vendored from
+  zim/sdk/addon/dist/zim.js at package-build time.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Audit log — ZIM</title>
+  <link rel="stylesheet" href="/zim/ext/org.zaminmc.extension.audit-log/assets/audit.css">
+</head>
+<body>
+  <main class="audit">
+    <header class="audit-head">
+      <h1>Audit log</h1>
+      <p class="audit-sub">The engine's authority-move trail — every lifecycle action, admin
+        change, and recovery, newest first. Querying is admin-only; this page states
+        that honestly when the signed-in user is not an admin.</p>
+      <div class="audit-toolbar">
+        <button id="reload" type="button">Reload</button>
+        <button id="more" type="button" hidden>Load more</button>
+        <span id="stream-note" class="audit-note" hidden></span>
+      </div>
+    </header>
+
+    <p id="state" class="audit-state" role="status">Loading…</p>
+
+    <table class="audit-table" hidden>
+      <thead>
+        <tr>
+          <th scope="col">When</th>
+          <th scope="col">Actor</th>
+          <th scope="col">Action</th>
+          <th scope="col">Object</th>
+          <th scope="col">Request</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </main>
+
+  <script src="/zim/ext/org.zaminmc.extension.audit-log/assets/zim.js"></script>
+  <script src="/zim/ext/org.zaminmc.extension.audit-log/assets/audit.js"></script>
+</body>
+</html>

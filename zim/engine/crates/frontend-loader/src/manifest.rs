@@ -387,6 +387,25 @@ impl SurfacePattern {
         Some(params)
     }
 
+    /// Could this pattern and another match the same concrete path?
+    ///
+    /// Two patterns overlap when they have the same segment count
+    /// and every segment pair is compatible: equal literals, or at
+    /// least one parameter (a `{param}` matches anything, so it
+    /// overlaps every literal and every other parameter). M24's
+    /// addon loader uses this to refuse page-surface collisions
+    /// (FRONTEND_EXTENSION_SPEC.md §4.4): an addon surface may never
+    /// overlap the active frontend's or another addon's.
+    pub fn overlaps(&self, other: &SurfacePattern) -> bool {
+        if self.segments.len() != other.segments.len() {
+            return false;
+        }
+        self.segments
+            .iter()
+            .zip(&other.segments)
+            .all(|(a, b)| a.starts_with('{') || b.starts_with('{') || a == b)
+    }
+
     /// The pattern's concrete prefix, for display.
     pub fn as_str(&self) -> String {
         format!("zim://{}", self.segments.join("/"))
@@ -592,5 +611,28 @@ mod tests {
         assert_eq!(fixed.entrypoint_key(), "newtab");
         assert!(fixed.matches_path("newtab").is_some());
         assert!(fixed.matches_path("servers").is_none());
+    }
+
+    #[test]
+    fn surface_pattern_overlap_semantics() {
+        // Same literals overlap; differing literals do not.
+        let console = SurfacePattern::parse("zim://servers/{id}/console").unwrap();
+        let console_again = SurfacePattern::parse("zim://servers/{id}/console").unwrap();
+        let files = SurfacePattern::parse("zim://servers/{id}/files").unwrap();
+        assert!(console.overlaps(&console_again));
+        assert!(!console.overlaps(&files));
+
+        // A parameter overlaps a literal at the same position.
+        let wildcard = SurfacePattern::parse("zim://servers/{id}/{page}").unwrap();
+        assert!(console.overlaps(&wildcard));
+        assert!(wildcard.overlaps(&console));
+
+        // Different depths never overlap.
+        let shallow = SurfacePattern::parse("zim://servers/{id}").unwrap();
+        assert!(!console.overlaps(&shallow));
+
+        // Unrelated roots never overlap.
+        let newtab = SurfacePattern::parse("zim://newtab").unwrap();
+        assert!(!console.overlaps(&newtab));
     }
 }

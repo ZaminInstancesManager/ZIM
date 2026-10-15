@@ -999,3 +999,83 @@ a.ntp-workload:hover { border-color: var(--color-accent); }
   font-size: 10px;
   color: var(--color-text-secondary);
 }
+
+/* ── Add-ons page (M24, zim://extensions) ─────────────────────── */
+
+.page-extensions .ext-list {
+  display: grid;
+  gap: 12px;
+}
+
+.ext-card { border: 1px solid var(--color-surface-2); }
+
+.ext-card.ext-disabled { opacity: 0.65; }
+
+.ext-card .ext-name {
+  font-size: 15px;
+  margin: 0;
+}
+
+.ext-card .ext-badges {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ext-card .ext-id { font-size: 11px; }
+
+.ext-card .ext-description {
+  color: var(--color-text-secondary);
+  margin: 8px 0 0;
+  max-width: 70ch;
+}
+
+.ext-card .ext-notice {
+  border: 1px dashed var(--color-danger);
+  color: var(--color-danger);
+  border-radius: var(--radius-small);
+  padding: 6px 10px;
+}
+
+.ext-card .ext-facts { margin: 12px 0 0; }
+
+.ext-card .ext-controls { margin-top: 12px; }
+
+.ext-card .ext-grant {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+  min-width: 220px;
+}
+
+.ext-card .ext-grant .input { flex: 1; }
+
+.ext-card .ext-tokens {
+  color: var(--color-text-secondary);
+  font-size: 11.5px;
+  word-break: break-all;
+  margin: 8px 0 0;
+}
+
+.plainlist { margin: 0; padding-left: 18px; }
+
+.empty-error {
+  color: var(--color-danger);
+  padding: var(--spacing-unit) 0;
+}
+
+.pill-danger { color: var(--color-danger); }
+
+/* ── Add-on surfaces nav on the console page (§4.5) ────────────── */
+
+.addon-surfaces .quicklink-label { max-width: 180px; }
+
+/* ── Theme panel's uploaded-themes group (M24) ─────────────────── */
+
+.dialog-subtitle {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+  margin: 14px 0 6px;
+}

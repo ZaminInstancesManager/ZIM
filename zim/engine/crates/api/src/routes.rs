@@ -11,7 +11,8 @@ use axum::routing::{delete, get, patch, post};
 use axum::Router;
 
 use crate::handlers::{
-    audit, auth, eggs, frontend, instances, misc, nodes, pages, recents, stream, users,
+    audit, auth, eggs, extensions, frontend, instances, misc, nodes, pages, recents, stream,
+    themes, users,
 };
 use crate::middleware;
 use crate::state::AppState;
@@ -227,21 +228,18 @@ pub fn router(state: Arc<AppState>) -> Router {
                 .patch(eggs::patch_egg)
                 .delete(eggs::delete_egg),
         )
-        // ── Extensions (§10.12) ───────────────────────────────────
+        // ── Extensions (§10.12, M24) ─────────────────────────
         .route(
             "/extensions",
-            get(misc::list_extensions).post(misc::extension_install_stub),
+            get(extensions::list).post(extensions::install),
         )
-        .route("/extensions/{id}", delete(misc::extension_install_stub))
-        .route(
-            "/extensions/{id}/enable",
-            post(misc::extension_install_stub),
-        )
-        .route(
-            "/extensions/{id}/disable",
-            post(misc::extension_install_stub),
-        )
-        .route("/extensions/{id}/grant", post(misc::extension_install_stub))
+        .route("/extensions/{id}", delete(extensions::uninstall))
+        .route("/extensions/{id}/enable", post(extensions::enable))
+        .route("/extensions/{id}/disable", post(extensions::disable))
+        .route("/extensions/{id}/grant", post(extensions::grant))
+        // ── Themes (M23's deferred upload surface, M24) ────────
+        .route("/themes", get(themes::list).post(themes::upload))
+        .route("/themes/{id}", delete(themes::delete))
         // ── Audit (§10.13) ────────────────────────────────────────
         .route("/audit", get(audit::list))
         // ── Frontend packages (§10.14) ────────────────────────────

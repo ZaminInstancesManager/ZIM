@@ -15,8 +15,9 @@
  */
 import { ApiError, createInstance, health, listInstances, listNodes, listRecents, visualStatus, whoami, } from "./api.js";
 import "./components.js";
-import { applyStoredTheme, initThemeFromStorage, presetById, resolveTokens, saveTheme } from "./theme.js";
+import { applyStoredTheme, initThemeFromStorage, presetById, resolveTokens, saveTheme, storedFromEngineTheme } from "./theme.js";
 import { PRESETS, THEME_KEY } from "./theme.js";
+import { listThemes } from "./api.js";
 import { formFromCreate, parseInstanceJson, serverMatchesQuery } from "./instanceForm.js";
 const statusPill = document.getElementById("engine-status");
 const whoPill = document.getElementById("who");
@@ -46,6 +47,9 @@ const importNode = document.getElementById("import-node");
 const importProblem = document.getElementById("import-problem");
 const themeDialog = document.getElementById("theme-dialog");
 const themePresetsBox = document.getElementById("theme-presets");
+const themeEngineSection = document.getElementById("theme-engine-section");
+const themeEngineBox = document.getElementById("theme-engine");
+const themeEngineNote = document.getElementById("theme-engine-note");
 const themeAccent = document.getElementById("theme-accent");
 const themeAccentReset = document.getElementById("theme-accent-reset");
 /** The tile-cache: instance rows + recents + the search filter. */
@@ -54,6 +58,8 @@ let recents = [];
 let meAdmin = false;
 let nodes = [];
 let currentTheme = null;
+/** The engine's uploaded themes (M24; empty until fetched). */
+let engineThemes = [];
 // ── Boot ─────────────────────────────────────────────────────────
 initThemeFromStorage();
 currentTheme = readStoredTheme();
@@ -312,14 +318,20 @@ customizeButton?.addEventListener("click", () => {
     }
     renderThemePanel();
     showDialog(themeDialog);
+    // The engine's uploaded themes are fetched when the panel opens
+    // (M24): freshest state, no boot-time cost on other pages.
+    void loadEngineThemes().then(() => {
+        renderThemePanel();
+    });
 });
 /** The preset rows: a pip of the preset's accent, its name, a check
- * when selected (Chrome's theme rows, §12). */
+ * when selected (Chrome's theme rows, §12). M24: the engine's
+ * uploaded themes render as their own group below. */
 function renderThemePanel() {
     if (themePresetsBox === null) {
         return;
     }
-    const selected = currentTheme?.preset ?? PRESETS[0].id;
+    const selected = currentTheme?.preset ?? currentTheme?.engine ?? PRESETS[0].id;
     const fragment = document.createDocumentFragment();
     for (const preset of PRESETS) {
         const row = document.createElement("button");
@@ -345,13 +357,76 @@ function renderThemePanel() {
         fragment.append(row);
     }
     themePresetsBox.replaceChildren(fragment);
+    renderEngineThemeRows(selected);
     if (themeAccent !== null && currentTheme !== null && currentTheme.accent !== undefined) {
         themeAccent.value = currentTheme.accent;
+    }
+}
+/** The uploaded-theme rows (M24): one radio per engine theme, its
+ * pip from the package's own accent, "uploaded" as the note. */
+function renderEngineThemeRows(selected) {
+    if (themeEngineBox === null || themeEngineSection === null) {
+        return;
+    }
+    themeEngineSection.hidden = engineThemes.length === 0;
+    if (themeEngineNote !== null && engineThemes.length > 0) {
+        themeEngineNote.textContent =
+            engineThemes.length === 1
+                ? "From the engine's theme registry (uploaded)."
+                : `From the engine's theme registry (${engineThemes.length} uploaded).`;
+    }
+    const fragment = document.createDocumentFragment();
+    for (const theme of engineThemes) {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "theme-preset";
+        row.setAttribute("role", "radio");
+        row.setAttribute("aria-checked", String(theme.id === selected));
+        const pip = document.createElement("span");
+        pip.className = "theme-pip";
+        pip.style.backgroundColor = theme.tokens["color.accent"] ?? "#3b82f6";
+        pip.style.borderColor = theme.tokens["color.surface2"] ?? "#24282f";
+        const label = document.createElement("span");
+        label.className = "theme-preset-name";
+        label.textContent = theme.name;
+        const note = document.createElement("span");
+        note.className = "theme-preset-note";
+        const overridden = theme.overrides.length === 0
+            ? "no token overrides"
+            : `${theme.overrides.length} token${theme.overrides.length === 1 ? "" : "s"} overridden`;
+        note.textContent = `uploaded · ${overridden}`;
+        row.append(pip, label, note);
+        row.addEventListener("click", () => {
+            chooseEngineTheme(theme);
+        });
+        fragment.append(row);
+    }
+    themeEngineBox.replaceChildren(fragment);
+}
+/** Fetch the engine's uploaded themes for the panel (best-effort:
+ * an unreachable or signed-out engine keeps the preset rows only). */
+async function loadEngineThemes() {
+    try {
+        const envelope = await listThemes();
+        engineThemes = envelope.data;
+    }
+    catch {
+        engineThemes = [];
     }
 }
 /** Apply + persist a preset choice, live. */
 function choosePreset(preset) {
     currentTheme = { v: 1, preset: preset.id };
+    applyCurrentTheme();
+    saveTheme(currentTheme);
+    renderThemePanel();
+}
+/** Apply + persist one uploaded engine theme, live — the stored
+ * form snapshots the package's tokens so every page's synchronous
+ * boot applies it without a network round-trip (the engine
+ * validated them against theme-tokens.v1 at upload). */
+function chooseEngineTheme(theme) {
+    currentTheme = storedFromEngineTheme(theme.id, theme.tokens);
     applyCurrentTheme();
     saveTheme(currentTheme);
     renderThemePanel();

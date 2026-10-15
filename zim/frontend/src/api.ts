@@ -380,3 +380,128 @@ export function formatTime(iso: string): string {
   }
   return date.toLocaleString();
 }
+
+// ── Extensions (§10.12, M24) ──────────────────────────────────────
+
+/** One sidebar contribution from an addon's manifest (§4.5). */
+export interface AddonSidebarItem {
+  label: string;
+  icon: string;
+  page: string;
+}
+
+/** One context-menu contribution from an addon's manifest (§4.6). */
+export interface AddonContextMenuItem {
+  label: string;
+  page: string;
+}
+
+/** One command registration from an addon's manifest (§4.7). */
+export interface AddonCommand {
+  id: string;
+  label: string;
+  accelerator?: string;
+}
+
+/** One installed addon (`GET /extensions` data element). */
+export interface AddonSummary {
+  id: string;
+  version: string;
+  name: string;
+  description: string;
+  author: string;
+  license: string;
+  enabled: boolean;
+  bundled: boolean;
+  instance_scope: "required" | "optional" | "none";
+  permissions: { requested: string[]; granted: string[] };
+  signature: "trusted" | "untrusted" | "unsigned" | "invalid";
+  installed_at: string;
+  page_surfaces: string[];
+  sidebar_items: AddonSidebarItem[];
+  context_menu_items: AddonContextMenuItem[];
+  commands: AddonCommand[];
+  event_subscriptions: string[];
+  dependencies: string[];
+  notice?: string;
+}
+
+/** `GET /extensions` — every installed addon plus boot notices. */
+export async function listExtensions(): Promise<{ data: AddonSummary[]; notices: string[] }> {
+  return api<{ data: AddonSummary[]; notices: string[] }>("/extensions");
+}
+
+/** `POST /extensions` — install (or update) an addon from `.zimpkg`
+ * ZIP bytes (admin; the upload IS the approval). */
+export async function installExtension(packageBytes: ArrayBuffer): Promise<AddonSummary> {
+  const response = await fetch("/api/v1/extensions", {
+    credentials: "same-origin",
+    method: "POST",
+    headers: { "Content-Type": "application/zip", Accept: "application/json" },
+    body: packageBytes,
+  });
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  return (await response.json()) as AddonSummary;
+}
+
+/** `POST /extensions/{id}/enable` or `…/disable` (admin). */
+export async function setExtensionEnabled(
+  id: string,
+  enabled: boolean,
+): Promise<AddonSummary> {
+  return api<AddonSummary>(`/extensions/${encodeURIComponent(id)}/${enabled ? "enable" : "disable"}`, {
+    method: "POST",
+  });
+}
+
+/** `DELETE /extensions/{id}` — uninstall + revoke (admin). */
+export async function uninstallExtension(id: string): Promise<void> {
+  return api<void>(`/extensions/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+/** `POST /extensions/{id}/grant` — grant additional permissions
+ * (admin; §4.2's elevation re-approval). */
+export async function grantExtension(id: string, permissions: string[]): Promise<AddonSummary> {
+  return api<AddonSummary>(`/extensions/${encodeURIComponent(id)}/grant`, {
+    body: { permissions },
+  });
+}
+
+// ── Themes (M23's deferred upload surface, delivered M24) ────────
+
+/** One uploaded packaged theme (`GET /themes` data element). */
+export interface EngineTheme {
+  id: string;
+  name: string;
+  description: string;
+  tokens: Record<string, string>;
+  overrides: string[];
+}
+
+/** `GET /themes` — the uploaded themes (the presets live in the
+ * frontend's own code). */
+export async function listThemes(): Promise<{ data: EngineTheme[] }> {
+  return api<{ data: EngineTheme[] }>("/themes");
+}
+
+/** `POST /themes` — install a packaged theme (`.zip` with
+ * `zim.theme.json` at the root; admin). */
+export async function uploadTheme(zipBytes: ArrayBuffer): Promise<EngineTheme> {
+  const response = await fetch("/api/v1/themes", {
+    credentials: "same-origin",
+    method: "POST",
+    headers: { "Content-Type": "application/zip", Accept: "application/json" },
+    body: zipBytes,
+  });
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  return (await response.json()) as EngineTheme;
+}
+
+/** `DELETE /themes/{id}` — remove an uploaded theme (admin). */
+export async function deleteTheme(id: string): Promise<void> {
+  return api<void>(`/themes/${encodeURIComponent(id)}`, { method: "DELETE" });
+}

@@ -11,6 +11,7 @@
 pub mod audit;
 pub mod auth;
 pub mod eggs;
+pub mod extensions;
 pub mod frontend;
 pub mod instances;
 pub mod misc;
@@ -18,6 +19,7 @@ pub mod nodes;
 pub mod pages;
 pub mod recents;
 pub mod stream;
+pub mod themes;
 pub mod users;
 
 use std::sync::Arc;

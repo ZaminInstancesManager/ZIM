@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ZIM — Add-ons</title>
+  <link rel="stylesheet" href="/zim/assets/main.css">
+  <script type="module" src="/zim/assets/extensions.js"></script>
+</head>
+<body>
+  <main class="page page-extensions">
+    <zim-recovery-notice></zim-recovery-notice>
+
+    <header class="page-header">
+      <a class="backlink" href="/zim/newtab" title="New tab">←</a>
+      <h1>Add-ons</h1>
+    </header>
+
+    <section class="card card-login" id="auth-gate" aria-label="Sign in" hidden>
+      <h2 class="card-title">Sign in to ZIM</h2>
+      <zim-login-form id="login"></zim-login-form>
+    </section>
+
+    <section class="card" id="boot-notices" aria-label="Engine notices" hidden>
+      <h2 class="card-title">Engine notices</h2>
+      <ul id="boot-notices-list" class="plainlist"></ul>
+    </section>
+
+    <section class="card" aria-label="Installed add-ons">
+      <div class="console-toolbar">
+        <h2 class="card-title">Installed add-ons</h2>
+        <span class="spacer"></span>
+        <label class="btn" id="upload-label" hidden>
+          Install from .zimpkg…
+          <input id="upload-input" type="file" accept=".zimpkg,.zip,application/zip" hidden>
+        </label>
+      </div>
+      <p id="ext-state" class="empty" role="status">Loading…</p>
+      <div id="ext-list" class="ext-list"></div>
+    </section>
+
+    <section class="card" aria-label="Uploaded themes">
+      <div class="console-toolbar">
+        <h2 class="card-title">Uploaded themes</h2>
+        <span class="spacer"></span>
+        <label class="btn" id="theme-upload-label" hidden>
+          Install theme .zip…
+          <input id="theme-upload-input" type="file" accept=".zip,application/zip" hidden>
+        </label>
+      </div>
+      <p id="theme-state" class="empty" role="status">Loading…</p>
+      <div id="theme-list" class="ext-list"></div>
+      <p class="empty">The five built-in presets (ZIM Dark, Midnight, Forest, Ember, Paper) live
+        in the frontend itself — they are set from the new-tab page's theme panel; this section
+        lists engine-side uploaded theme packages (theme-tokens.v1).</p>
+    </section>
+  </main>
+</body>
+</html>

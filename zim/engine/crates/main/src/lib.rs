@@ -130,6 +130,27 @@ fn record_recovery_audit(
     }
 }
 
+/// Append an addon boot notice to the audit trail (best-effort, the
+/// same discipline as the frontend recovery record: a lost audit row
+/// must not fail the boot).
+fn record_addon_boot_notice(persistence: &Arc<dyn Persistence>, notice: &str) {
+    let record = zim_engine_domain::AuditRecord {
+        id: 0,
+        timestamp: chrono::Utc::now(),
+        actor: zim_engine_domain::AuditActor::System,
+        actor_id: None,
+        action: "extension.boot_notice".to_owned(),
+        instance_id: None,
+        metadata: serde_json::json!({ "notice": notice }),
+        ip_address: None,
+        user_agent: None,
+    };
+    if let Err(e) = persistence.append_audit(&record) {
+        eprintln!("zim_engine: addon boot-notice audit append failed: {e}");
+    }
+    eprintln!("zim_engine: addon boot notice — {notice}");
+}
+
 /// A booted engine: the bound loopback address plus the handles to
 /// stop serving, supervision, and the job executor.
 pub struct RunningEngine {
@@ -334,6 +355,33 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         frontend_info.page_surfaces.len(),
     );
 
+    // ── Addon system (M24) ───────────────────────────────────
+    // Boots the installed-addon registry against disk (§4.10: a
+    // corrupt package disables that addon with a notice, never the
+    // engine), seeds the bundled defaults on a fresh data dir (§6),
+    // and owns the `/zim/` addon fallback routing + the §10.12
+    // endpoints through AppState. The theme registry (M23's deferred
+    // upload surface) boots alongside it.
+    let extensions = Arc::new(zim_engine_extensions::ExtensionsService::new(
+        Arc::clone(&persistence),
+        Arc::clone(&frontend),
+        &options.data_dir,
+        semver::Version::parse(env!("CARGO_PKG_VERSION"))
+            .expect("the workspace version is valid semver"),
+        &state_api_version(),
+    ));
+    let addon_summaries = extensions.list();
+    for notice in extensions.boot_notices() {
+        record_addon_boot_notice(&persistence, &notice);
+    }
+    eprintln!(
+        "zim_engine: addons — {} installed ({} bundled), {} notice(s)",
+        addon_summaries.len(),
+        addon_summaries.iter().filter(|a| a.bundled).count(),
+        extensions.boot_notices().len(),
+    );
+    let themes = Arc::new(zim_engine_extensions::ThemeService::new(&options.data_dir));
+
     // ── API server ──────────────────────────────────────────────────
     let state = Arc::new(AppState::new(
         Arc::clone(&persistence),
@@ -347,6 +395,8 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         Arc::clone(&installs),
         Arc::clone(&scheduler),
         Arc::clone(&frontend),
+        Arc::clone(&extensions),
+        Arc::clone(&themes),
         ApiConfig::default(),
     ));
     let router = zim_engine_api::router(Arc::clone(&state));

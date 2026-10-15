@@ -2,7 +2,7 @@
   "$schema": "https://zim.zaminmc.org/schemas/theme-tokens.v1.json",
   "manifest_version": 1,
   "contract": "theme-tokens.v1",
-  "description": "The engine-defined theme token vocabulary (FRONTEND_EXTENSION_SPEC.md §2). Theme packages validate against this contract: values only (literal strings or numbers), no code, no new tokens. Omitted tokens fall back to the defaults below. The default frontend's main.css :root block and src/theme.ts DEFAULT_TOKENS carry these same values — three sources, one vocabulary.",
+  "description": "The engine-defined theme token vocabulary (FRONTEND_EXTENSION_SPEC.md \u00a72). Theme packages validate against this contract: values only (literal strings or numbers), no code, no new tokens. Omitted tokens fall back to the defaults below. The default frontend's main.css :root block and src/theme.ts DEFAULT_TOKENS carry these same values \u2014 three sources, one vocabulary.",
   "defaults": {
     "color.background": "#14161a",
     "color.surface": "#1d2026",
@@ -30,34 +30,107 @@
     "icon.set": "text"
   },
   "tokens": {
-    "color.background": { "type": "color", "maps_to": "--color-background" },
-    "color.surface": { "type": "color", "maps_to": "--color-surface" },
-    "color.surface2": { "type": "color", "maps_to": "--color-surface-2" },
-    "color.text.primary": { "type": "color", "maps_to": "--color-text-primary" },
-    "color.text.secondary": { "type": "color", "maps_to": "--color-text-secondary" },
-    "color.accent": { "type": "color", "maps_to": "--color-accent" },
-    "color.success": { "type": "color", "maps_to": "--color-success" },
-    "color.warning": { "type": "color", "maps_to": "--color-warning" },
-    "color.danger": { "type": "color", "maps_to": "--color-danger" },
-    "color.indicator.running": { "type": "color", "maps_to": "--color-indicator-running" },
-    "color.indicator.starting": { "type": "color", "maps_to": "--color-indicator-starting" },
-    "color.indicator.crashed": { "type": "color", "maps_to": "--color-indicator-crashed" },
-    "color.indicator.stopped": { "type": "color", "maps_to": "--color-indicator-stopped" },
-    "color.indicator.unknown": { "type": "color", "maps_to": "--color-indicator-unknown" },
-    "typography.body.family": { "type": "string", "maps_to": "--typography-body-family" },
-    "typography.body.size": { "type": "length", "maps_to": "--typography-body-size" },
-    "typography.heading.family": { "type": "string", "maps_to": "--typography-heading-family" },
-    "typography.heading.size": { "type": "length", "maps_to": "--typography-heading-size" },
-    "typography.mono.family": { "type": "string", "maps_to": "--typography-mono-family" },
-    "spacing.unit": { "type": "length", "maps_to": "--spacing-unit" },
-    "radius.small": { "type": "length", "maps_to": "--radius-small" },
-    "radius.medium": { "type": "length", "maps_to": "--radius-medium" },
-    "radius.large": { "type": "length", "maps_to": "--radius-large" },
-    "icon.set": { "type": "string", "maps_to": null, "note": "advisory: the icon vocabulary a theme is designed against (no CSS mapping)" }
+    "color.background": {
+      "type": "color",
+      "maps_to": "--color-background"
+    },
+    "color.surface": {
+      "type": "color",
+      "maps_to": "--color-surface"
+    },
+    "color.surface2": {
+      "type": "color",
+      "maps_to": "--color-surface-2"
+    },
+    "color.text.primary": {
+      "type": "color",
+      "maps_to": "--color-text-primary"
+    },
+    "color.text.secondary": {
+      "type": "color",
+      "maps_to": "--color-text-secondary"
+    },
+    "color.accent": {
+      "type": "color",
+      "maps_to": "--color-accent"
+    },
+    "color.success": {
+      "type": "color",
+      "maps_to": "--color-success"
+    },
+    "color.warning": {
+      "type": "color",
+      "maps_to": "--color-warning"
+    },
+    "color.danger": {
+      "type": "color",
+      "maps_to": "--color-danger"
+    },
+    "color.indicator.running": {
+      "type": "color",
+      "maps_to": "--color-indicator-running"
+    },
+    "color.indicator.starting": {
+      "type": "color",
+      "maps_to": "--color-indicator-starting"
+    },
+    "color.indicator.crashed": {
+      "type": "color",
+      "maps_to": "--color-indicator-crashed"
+    },
+    "color.indicator.stopped": {
+      "type": "color",
+      "maps_to": "--color-indicator-stopped"
+    },
+    "color.indicator.unknown": {
+      "type": "color",
+      "maps_to": "--color-indicator-unknown"
+    },
+    "typography.body.family": {
+      "type": "string",
+      "maps_to": "--typography-body-family"
+    },
+    "typography.body.size": {
+      "type": "length",
+      "maps_to": "--typography-body-size"
+    },
+    "typography.heading.family": {
+      "type": "string",
+      "maps_to": "--typography-heading-family"
+    },
+    "typography.heading.size": {
+      "type": "length",
+      "maps_to": "--typography-heading-size"
+    },
+    "typography.mono.family": {
+      "type": "string",
+      "maps_to": "--typography-mono-family"
+    },
+    "spacing.unit": {
+      "type": "length",
+      "maps_to": "--spacing-unit"
+    },
+    "radius.small": {
+      "type": "length",
+      "maps_to": "--radius-small"
+    },
+    "radius.medium": {
+      "type": "length",
+      "maps_to": "--radius-medium"
+    },
+    "radius.large": {
+      "type": "length",
+      "maps_to": "--radius-large"
+    },
+    "icon.set": {
+      "type": "string",
+      "maps_to": null,
+      "note": "advisory: the icon vocabulary a theme is designed against (no CSS mapping)"
+    }
   },
   "notes": [
     "M23 scope: the default frontend ships presets (zim-dark, midnight, forest, ember, paper) + an accent pip, applied live via CSSOM custom properties (CSP-clean under style-src 'self').",
-    "Packaged-theme upload (POST /api/v1/themes, admin-only, .zip with zim.theme.json at the root) is the M24 addon milestone's work; this contract file is the vocabulary it will validate against.",
-    "A theme that becomes invalid reverts to the previous theme on the next load (spec §2 failure/recovery rule)."
+    "Packaged-theme upload (POST /api/v1/themes, admin-only, .zip with zim.theme.json at the root) shipped with M24: POST/GET/DELETE /api/v1/themes \u2014 .zip with zim.theme.json at the root, validated against this contract (closed vocabulary, literal values); the engine-side registry lists uploaded themes and the default frontend's theme panel applies them with a persisted token snapshot.",
+    "A theme that becomes invalid reverts to the previous theme on the next load (spec \u00a72 failure/recovery rule)."
   ]
 }

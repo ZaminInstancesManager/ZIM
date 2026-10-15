@@ -1,0 +1,97 @@
+/* org.zaminmc.extension.audit-log — the audit viewer's own tokens.
+   Self-contained by design: an addon package styles itself and never
+   reaches into the default frontend's stylesheet. The palette follows
+   the theme-tokens.v1 defaults so the page sits comfortably next to
+   the default frontend without depending on it. */
+
+:root {
+  --audit-bg: #14161a;
+  --audit-surface: #1d2026;
+  --audit-surface-2: #24282f;
+  --audit-text: #e6e8ec;
+  --audit-text-dim: #9aa1ac;
+  --audit-accent: #3b82f6;
+  --audit-danger: #ef4444;
+  --audit-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--audit-bg);
+  color: var(--audit-text);
+  font: 14px/1.5 "Inter", "Segoe UI", system-ui, sans-serif;
+}
+
+.audit {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+.audit-head h1 {
+  font-size: 20px;
+  margin: 0 0 6px;
+}
+
+.audit-sub {
+  color: var(--audit-text-dim);
+  margin: 0 0 16px;
+  max-width: 60ch;
+}
+
+.audit-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+button {
+  background: var(--audit-surface-2);
+  color: var(--audit-text);
+  border: 1px solid var(--audit-text-dim);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover { border-color: var(--audit-accent); }
+
+.audit-note { color: var(--audit-text-dim); font-size: 12px; }
+
+.audit-state {
+  color: var(--audit-text-dim);
+  border: 1px dashed var(--audit-text-dim);
+  border-radius: 6px;
+  padding: 12px 16px;
+}
+
+.audit-state.error { color: var(--audit-danger); border-color: var(--audit-danger); }
+
+.audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.audit-table th {
+  text-align: left;
+  color: var(--audit-text-dim);
+  font-weight: 600;
+  border-bottom: 1px solid var(--audit-text-dim);
+  padding: 6px 10px;
+}
+
+.audit-table td {
+  border-bottom: 1px solid var(--audit-surface-2);
+  padding: 6px 10px;
+  vertical-align: top;
+}
+
+.audit-table td.when { white-space: nowrap; color: var(--audit-text-dim); }
+.audit-table td.mono { font-family: var(--audit-mono); font-size: 12px; }
+.audit-table td.action { color: var(--audit-accent); font-family: var(--audit-mono); font-size: 12px; }

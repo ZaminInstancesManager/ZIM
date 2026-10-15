@@ -115,6 +115,16 @@ impl TestEngine {
             semver::Version::new(0, 0, 1),
             "v1.0.0",
         ));
+        // M24: the addon system + theme registry over the same data
+        // root (fresh temp dir = the bundled defaults seeded).
+        let extensions = Arc::new(zim_engine_extensions::ExtensionsService::new(
+            Arc::clone(&persistence),
+            Arc::clone(&frontend),
+            &frontend_dir,
+            semver::Version::new(0, 0, 1),
+            "v1.0.0",
+        ));
+        let themes = Arc::new(zim_engine_extensions::ThemeService::new(&frontend_dir));
         let state = Arc::new(AppState::new(
             Arc::clone(&persistence),
             supervisor,
@@ -127,6 +137,8 @@ impl TestEngine {
             Arc::clone(&installs),
             Arc::clone(&scheduler),
             Arc::clone(&frontend),
+            Arc::clone(&extensions),
+            Arc::clone(&themes),
             ApiConfig::default(),
         ));
         let router = zim_engine_api::router(Arc::clone(&state));

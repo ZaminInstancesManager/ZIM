@@ -36,6 +36,9 @@ zim_engine_scheduler = { workspace = true }
 # M11: the frontend loader — the §10.14 package endpoints and the
 # `/zim/` page-serving surface over the active package.
 zim_engine_frontend_loader = { workspace = true }
+# M24: the addon system — the §10.12 extension family, the addon
+# `/zim/` fallback routing, and the packaged-theme family.
+zim_engine_extensions = { workspace = true }
 # Async runtime (listener, middleware, spawn_blocking bridge).
 tokio = { workspace = true }
 # HTTP framework: router, extractors, `from_fn` middleware, and

@@ -49,3 +49,6 @@ zim/frontend/.test-build/
 
 # --- Frontend dependencies ---
 zim/frontend/node_modules/
+
+# --- Addon SDK dependencies (zim/sdk/addon builds like the frontend) ---
+zim/sdk/addon/node_modules/
