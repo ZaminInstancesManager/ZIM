@@ -30,7 +30,7 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
     let mut builder = TrayIconBuilder::with_id("zim-tray")
         .tooltip("ZIM — engine: starting…")
         .menu(&menu)
-        .menu_on_left_click(false)
+        .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_main(app),
             "newtab" => {
@@ -82,7 +82,6 @@ fn show_main(app: &AppHandle) {
 
 /// Update the tray tooltip from the engine status.
 pub fn set_engine_tooltip(app: &AppHandle, tooltip: &str) {
-    use tauri::tray::TrayIcon;
     if let Some(tray) = app.tray_by_id("zim-tray") {
         let _ = tray.set_tooltip(Some(tooltip));
     }
