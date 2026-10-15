@@ -95,7 +95,15 @@ export function uniqueName(base: string): string {
   return `${base}-${stamp}`;
 }
 
-/** Run a command, capture stdout/stderr, assert the exit code. */
+/**
+ * Run a command, capture stdout/stderr, and report an exit code.
+ * Never rejects: a missing command resolves as `code: 127` (the
+ * shell convention), a timeout as `code: 124` after SIGKILL — the
+ * callers decide what failures mean (the tier probe treats any
+ * non-zero as "not available", which is exactly right for a
+ * docker CLI that hangs on daemon-less hosts like the Windows
+ * runners).
+ */
 export async function run(
   command: string,
   args: string[],
@@ -115,14 +123,14 @@ export async function run(
     stderr += chunk.toString("utf8");
   });
   const timeoutMs = options.timeoutMs ?? 120_000;
-  const code = await new Promise<number>((resolve, reject) => {
+  const code = await new Promise<number>((resolve) => {
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
-      reject(new Error(`${command} timed out after ${timeoutMs}ms`));
+      resolve(124); // timeout, by convention
     }, timeoutMs);
-    child.on("error", (error) => {
+    child.on("error", () => {
       clearTimeout(timer);
-      reject(error);
+      resolve(127); // command not found, by convention
     });
     child.on("close", (exitCode) => {
       clearTimeout(timer);

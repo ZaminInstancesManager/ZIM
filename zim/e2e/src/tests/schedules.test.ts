@@ -18,13 +18,14 @@ test("schedules: create → validate → list → update → run-now → delete"
     const nodeId = await firstNodeId(client);
     const instance = await createInstance(client, uniqueName("sched"), { nodeId });
 
-    // Create: a 5-field cron with one power action.
+    // Create: a 5-field cron with one power action (the domain's
+    // internally-tagged enum: {"type": "power", "action": …}).
     const created = await client.post(`/api/v1/instances/${instance.id}/schedules`, {
       name: "nightly restart",
       cron: "0 4 * * *",
       is_active: true,
       only_when_online: true,
-      actions: [{ power: { action: "restart" } }],
+      actions: [{ type: "power", action: "restart" }],
     });
     const scheduleId = String(created.id);
     assert.ok(scheduleId.length > 0);

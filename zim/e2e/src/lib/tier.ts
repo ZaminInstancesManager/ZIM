@@ -31,14 +31,22 @@ export async function detectTier(): Promise<TierInfo> {
     return cached;
   }
   const probe = await run("docker", ["version", "--format", "{{.Server.Version}}"], {
-    timeoutMs: 20_000,
+    // Short on purpose: daemon-less hosts with a docker CLI stub
+    // (the Windows runners) HANG here — a timeout is a null-tier
+    // answer, not a suite failure.
+    timeoutMs: 10_000,
   });
   if (probe.code === 0 && probe.stdout.trim() !== "") {
     cached = { tier: "docker", detail: `docker server ${probe.stdout.trim()}` };
   } else {
     cached = {
       tier: "null",
-      detail: "no Docker daemon answered `docker version`",
+      detail:
+        probe.code === 124
+          ? "the docker CLI hung (no daemon answered within 10s)"
+          : probe.code === 127
+            ? "no docker CLI on PATH"
+            : `docker version exited ${probe.code}`,
     };
   }
   return cached;

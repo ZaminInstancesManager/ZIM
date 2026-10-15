@@ -35,10 +35,11 @@ test("custom frontend: signed package uploads, activates, serves; broken ones ar
     const page = await context.newPage();
     await loginViaUi(page, engine);
 
-    // ── A good, dev-signed package uploads (201 + report).
+    // ── A good, dev-signed package uploads (201 + report: the
+    //    envelope carries `package` + `smoke`).
     const good = customFrontendZip({ id: "org.e2e.frontend.good" });
     const report = await client.postRaw("/api/v1/frontend/upload", good.bytes, "application/zip");
-    assert.equal(String(report.id), "org.e2e.frontend.good");
+    assert.equal(String(report.package?.id), "org.e2e.frontend.good");
 
     // ── Activate it; the newtab surface serves the custom page.
     await client.post("/api/v1/frontend/active", { id: "org.e2e.frontend.good" });
