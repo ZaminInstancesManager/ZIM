@@ -320,7 +320,16 @@ fn build_create_body(
             format!("rw,exec,nosuid,size={}M", settings.tmpfs_size_mib),
         )])),
         port_bindings: Some(port_bindings),
-        cap_drop: Some(DOCKER_CAP_DROP.iter().map(|s| s.to_string()).collect()),
+        // M18: the per-instance capability posture — `None` keeps
+        // the Wings drop list; the spec-driven database engines
+        // carry their reduced list (the ownership-management
+        // capabilities restored for their entrypoints' data
+        // directory management).
+        cap_drop: Some(
+            cfg.cap_drop
+                .clone()
+                .unwrap_or_else(|| DOCKER_CAP_DROP.iter().map(|s| s.to_string()).collect()),
+        ),
         security_opt: Some(vec!["no-new-privileges".to_owned()]),
         network_mode: Some(settings.network_name.clone()),
         log_config: Some(HostConfigLogConfig {
@@ -531,6 +540,7 @@ mod tests {
             crash_detection_enabled: true,
             user: None,
             readonly_rootfs: None,
+            cap_drop: None,
         }
     }
 
@@ -612,6 +622,33 @@ mod tests {
             body.host_config.as_ref().unwrap().readonly_rootfs,
             Some(true)
         );
+    }
+
+    #[test]
+    fn the_per_instance_cap_drop_posture_wins() {
+        // M18: the database engines' reduced drop list (the
+        // ownership-management trio restored) replaces the Wings
+        // list exactly when the instance config carries it.
+        let settings = DockerSettings::default();
+        let mut cfg = test_config();
+        cfg.cap_drop = Some(vec!["mknod".to_owned(), "net_raw".to_owned()]);
+        let body = build_create_body(&cfg, &settings, None);
+        assert_eq!(
+            body.host_config.as_ref().unwrap().cap_drop,
+            Some(vec!["mknod".to_owned(), "net_raw".to_owned()])
+        );
+
+        // The unset posture keeps the Wings list.
+        let body = build_create_body(&test_config(), &settings, None);
+        let dropped = body
+            .host_config
+            .as_ref()
+            .unwrap()
+            .cap_drop
+            .as_deref()
+            .unwrap();
+        assert_eq!(dropped.len(), DOCKER_CAP_DROP.len());
+        assert!(dropped.contains(&"dac_override".to_owned()));
     }
 
     #[test]

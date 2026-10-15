@@ -131,7 +131,7 @@ fn db_config(spec: &DatabaseSpec, name: &str) -> (InstanceConfig, std::path::Pat
         });
     }
 
-    let (user, readonly_rootfs) = spec.container_posture();
+    let posture = spec.container_posture();
     let config = InstanceConfig {
         instance_id: zim_engine_domain::InstanceId::new(),
         container_name: name.to_owned(),
@@ -146,8 +146,9 @@ fn db_config(spec: &DatabaseSpec, name: &str) -> (InstanceConfig, std::path::Pat
         container_data_dir: std::path::PathBuf::from(spec.engine.default_container_data_dir()),
         labels: vec![("Service".to_owned(), "ZIM".to_owned())],
         crash_detection_enabled: true,
-        user: Some(user),
-        readonly_rootfs: Some(readonly_rootfs),
+        user: Some(posture.user),
+        readonly_rootfs: Some(posture.readonly_rootfs),
+        cap_drop: Some(posture.cap_drop),
     };
     (config, data_dir)
 }
@@ -325,6 +326,38 @@ async fn published_ports(docker: &Docker, name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Evaluate one statement through the engine's own client,
+/// retrying connection-shaped failures.
+///
+/// The database images' first boots *flap* readiness: Postgres's
+/// initialization runs an accepting temp server, stops it, then
+/// starts the real one — a caller that observed Ready can race the
+/// gap. Connection-shaped failures (psql's "could not connect",
+/// the clients' "Connection refused" / "starting up") are retried
+/// for the window; everything else fails immediately.
+async fn eval_ok_retrying(workload: &DatabaseWorkload, statement: &str) -> String {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+    loop {
+        let output = workload
+            .eval_async(statement)
+            .await
+            .expect("the engine client runs");
+        if output.exit_code == Some(0) {
+            return String::from_utf8_lossy(&output.stdout).into_owned();
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let connection_shaped = stderr.contains("could not connect")
+            || stderr.contains("Connection refused")
+            || stderr.contains("Can't connect")
+            || stdout.contains("Connection refused");
+        if !connection_shaped || tokio::time::Instant::now() >= deadline {
+            panic!("statement {statement:?} failed: {stdout}{stderr}");
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
 /// The §M18 acceptance, Postgres: install → start → query →
 /// snapshot → restore, with the readiness probe's NotReady window
 /// observed during first-boot initialization.
@@ -355,12 +388,12 @@ async fn the_postgres_acceptance_install_start_query_snapshot_restore() {
     // Query via the SQL client (psql over the container's socket,
     // the engine's own client — the acceptance's "queried via a
     // SQL client").
-    eval_ok(
+    eval_ok_retrying(
         &workload,
         "CREATE TABLE zim_acceptance (id serial PRIMARY KEY, note text NOT NULL)",
     )
     .await;
-    eval_ok(
+    eval_ok_retrying(
         &workload,
         "INSERT INTO zim_acceptance (note) VALUES ('first'), ('second')",
     )
@@ -437,12 +470,12 @@ async fn the_postgres_recovery_readiness_and_durability() {
 
     // Enough committed data that the kill leaves real WAL to
     // replay (a durable window the recovery poll can observe).
-    eval_ok(
+    eval_ok_retrying(
         &workload,
         "CREATE TABLE zim_recovery (id int PRIMARY KEY, payload text)",
     )
     .await;
-    eval_ok(
+    eval_ok_retrying(
         &workload,
         "INSERT INTO zim_recovery SELECT g, repeat('x', 32) FROM generate_series(1, 50000) g",
     )
@@ -520,8 +553,8 @@ async fn the_postgres_migration_to_a_second_node() {
     wait_until_running(runtime_a.as_ref()).await;
     wait_ready_logged(&source, &docker, &node_a, Duration::from_secs(180)).await;
 
-    eval_ok(&source, "CREATE TABLE zim_migration (note text NOT NULL)").await;
-    eval_ok(
+    eval_ok_retrying(&source, "CREATE TABLE zim_migration (note text NOT NULL)").await;
+    eval_ok_retrying(
         &source,
         "INSERT INTO zim_migration (note) VALUES ('migrated-row')",
     )
@@ -699,8 +732,8 @@ async fn the_mariadb_snapshot_under_flush_tables_with_read_lock() {
     wait_ready_logged(&workload, &docker, &name, Duration::from_secs(300)).await;
 
     // The workload's data.
-    eval_ok(&workload, "CREATE DATABASE IF NOT EXISTS zim").await;
-    eval_ok(
+    eval_ok_retrying(&workload, "CREATE DATABASE IF NOT EXISTS zim").await;
+    eval_ok_retrying(
         &workload,
         "CREATE TABLE zim.locked (id int PRIMARY KEY, note text NOT NULL)",
     )
@@ -850,7 +883,7 @@ async fn the_redis_snapshot_restore_and_marker() {
     wait_until_running(runtime.as_ref()).await;
     wait_ready_logged(&workload, &docker, &name, Duration::from_secs(60)).await;
 
-    eval_ok(&workload, "SET zim:key snapshot-era").await;
+    eval_ok_retrying(&workload, "SET zim:key snapshot-era").await;
     let value = eval_ok(&workload, "GET zim:key").await;
     assert_eq!(value.trim(), "snapshot-era");
 

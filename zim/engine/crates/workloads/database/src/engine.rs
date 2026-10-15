@@ -204,6 +204,35 @@ impl DatabaseEngine {
         "0:0"
     }
 
+    /// The database engines' capability-drop list (the runtime's
+    /// per-instance override carries it).
+    ///
+    /// The Wings posture drops `dac_override`/`fowner`/`fsetid`,
+    /// which makes even root unable to manage these images'
+    /// ownership-taken data directories: the entrypoints `chown`
+    /// the bind-mounted data directory to their own service user
+    /// (postgres/mysql/redis) at first boot, and from then on a
+    /// `dac_override`-less root can neither read MySQL's
+    /// `secure-file-priv` directory (its first-boot `find` dies, and
+    /// `set -e` takes the container with it) nor write the
+    /// snapshot store into the service-user-owned directory. The
+    /// reduced list keeps the genuinely dangerous capabilities
+    /// dropped — `mknod`, `net_raw`, `sys_chroot`, `setfcap`,
+    /// `setpcap`, `audit_write`, `net_bind_service` — and restores
+    /// the ownership-management trio the engines' entrypoints and
+    /// the snapshot/restore paths need.
+    pub fn default_cap_drop() -> &'static [&'static str] {
+        &[
+            "setpcap",
+            "mknod",
+            "audit_write",
+            "net_raw",
+            "net_bind_service",
+            "sys_chroot",
+            "setfcap",
+        ]
+    }
+
     /// The default rootfs posture: Postgres and Redis keep the
     /// engine's hardened read-only root filesystem (their writable
     /// surfaces are the bind mount and the `/tmp` tmpfs); the
@@ -232,6 +261,18 @@ impl DatabaseEngine {
                             .unwrap_or_else(|| "postgres".to_owned()),
                     ),
                     ("POSTGRES_PASSWORD".to_owned(), creds.password.clone()),
+                    // The engine's socket relocation
+                    // (`unix_socket_directories=/tmp`, the
+                    // read-only rootfs's one writable socket
+                    // surface) must reach the entrypoint's *clients*
+                    // too: the initialization temp server is
+                    // reachable only on that socket, and the
+                    // entrypoint's own psql (the CREATE ROLE /
+                    // CREATE DATABASE phase) defaults to the
+                    // compiled-in socket directory — read-only, so
+                    // nothing can ever listen there. PGHOST points
+                    // libpq at the real socket.
+                    ("PGHOST".to_owned(), "/tmp".to_owned()),
                 ];
                 if let Some(database) = &creds.database {
                     env.push(("POSTGRES_DB".to_owned(), database.clone()));

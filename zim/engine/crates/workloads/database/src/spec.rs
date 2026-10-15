@@ -78,6 +78,24 @@ impl SpecEndpoint {
     }
 }
 
+/// The runtime-facing container posture one engine needs: the
+/// entrypoint's user, the rootfs writability, and the capability
+/// drop list (the per-instance overrides the M18 engine-side
+/// carries).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContainerPosture {
+    /// The container user (`uid:gid` or name) — the database
+    /// images' root entrypoints, which `chown` the data directory
+    /// before self-demoting to their service user.
+    pub user: String,
+    /// Whether the container keeps the engine's hardened
+    /// read-only root filesystem.
+    pub readonly_rootfs: bool,
+    /// The capability-drop list (the reduced Wings posture: the
+    /// ownership-management trio restored).
+    pub cap_drop: Vec<String>,
+}
+
 /// The Database workload spec.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DatabaseSpec {
@@ -239,15 +257,22 @@ impl DatabaseSpec {
     }
 
     /// The engine's container posture for the runtime-facing
-    /// instance configuration: `(user, readonly_rootfs)`.
+    /// instance configuration.
     ///
-    /// M18's engine-side extension (the per-instance user and
-    /// rootfs overrides) exists precisely to carry this pair.
-    pub fn container_posture(&self) -> (String, bool) {
-        (
-            self.engine.default_container_user().to_owned(),
-            self.engine.default_readonly_rootfs(),
-        )
+    /// M18's engine-side extensions (the per-instance user,
+    /// rootfs, and capability-drop overrides) exist precisely to
+    /// carry this posture: the database images' root entrypoints,
+    /// their writable-surface needs, and their
+    /// ownership-management capabilities.
+    pub fn container_posture(&self) -> ContainerPosture {
+        ContainerPosture {
+            user: self.engine.default_container_user().to_owned(),
+            readonly_rootfs: self.engine.default_readonly_rootfs(),
+            cap_drop: DatabaseEngine::default_cap_drop()
+                .iter()
+                .map(|cap| (*cap).to_owned())
+                .collect(),
+        }
     }
 }
 
@@ -292,9 +317,21 @@ mod tests {
         let command = spec.resolved_command();
         assert_eq!(command[0], "postgres");
         assert!(command.contains(&"unix_socket_directories=/tmp".to_owned()));
-        let (user, readonly) = spec.container_posture();
-        assert_eq!(user, "0:0");
-        assert!(readonly);
+        let posture = spec.container_posture();
+        assert_eq!(posture.user, "0:0");
+        assert!(posture.readonly_rootfs);
+        // The reduced drop list restores the ownership trio.
+        assert!(!posture.cap_drop.contains(&"dac_override".to_owned()));
+        assert!(!posture.cap_drop.contains(&"fowner".to_owned()));
+        assert!(!posture.cap_drop.contains(&"fsetid".to_owned()));
+        // And keeps the dangerous ones dropped.
+        assert!(posture.cap_drop.contains(&"mknod".to_owned()));
+        assert!(posture.cap_drop.contains(&"net_raw".to_owned()));
+        assert!(posture.cap_drop.contains(&"sys_chroot".to_owned()));
+        // The PGHOST entry rides the bootstrap env.
+        assert!(spec
+            .resolved_env()
+            .contains(&("PGHOST".to_owned(), "/tmp".to_owned())));
     }
 
     #[test]
@@ -374,9 +411,10 @@ mod tests {
         assert!(env.contains(&("MYSQL_ROOT_PASSWORD".to_owned(), "rootpw".to_owned())));
         let command = spec.resolved_command();
         assert_eq!(command[0], "mysqld");
-        let (user, readonly) = spec.container_posture();
-        assert_eq!(user, "0:0");
-        assert!(!readonly);
+        let posture = spec.container_posture();
+        assert_eq!(posture.user, "0:0");
+        assert!(!posture.readonly_rootfs);
+        assert!(!posture.cap_drop.contains(&"dac_override".to_owned()));
     }
 
     #[test]

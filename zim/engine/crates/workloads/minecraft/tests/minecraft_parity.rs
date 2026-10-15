@@ -189,6 +189,7 @@ fn fakemc_config(name: &str, image: &str) -> (InstanceConfig, std::path::PathBuf
         crash_detection_enabled: true,
         user: None,
         readonly_rootfs: None,
+        cap_drop: None,
     };
     (config, data_dir)
 }

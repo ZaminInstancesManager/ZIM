@@ -96,6 +96,7 @@ fn busybox_config(
         crash_detection_enabled: true,
         user: None,
         readonly_rootfs: None,
+        cap_drop: None,
     };
     (config, data_dir)
 }
@@ -796,6 +797,7 @@ async fn supervisor_reconcile_over_docker() {
             crash_detection_enabled: true,
             user: None,
             readonly_rootfs: None,
+            cap_drop: None,
         })
         .await
         .expect("runtime");
@@ -819,6 +821,7 @@ async fn supervisor_reconcile_over_docker() {
             crash_detection_enabled: true,
             user: None,
             readonly_rootfs: None,
+            cap_drop: None,
         })
         .await
         .expect("bootstrap start");
@@ -1301,6 +1304,7 @@ async fn backup_and_restore_of_container_data() {
         crash_detection_enabled: false,
         user: None,
         readonly_rootfs: None,
+        cap_drop: None,
     };
     let factory = Arc::new(
         DockerRuntimeFactory::connect(test_settings())

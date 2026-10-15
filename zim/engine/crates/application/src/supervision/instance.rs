@@ -994,6 +994,7 @@ pub fn build_instance_config(
         // spec-less game-server path keeps the runtime defaults.
         user: None,
         readonly_rootfs: None,
+        cap_drop: None,
     })
 }
 

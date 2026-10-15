@@ -214,6 +214,23 @@ pub struct InstanceConfig {
     /// The override is spec-driven (the `DatabaseSpec` carries it
     /// per engine); game-server workloads leave it unset.
     pub user: Option<String>,
+    /// Per-instance capability-drop override (Docker capability
+    /// names); `None` keeps the Wings posture
+    /// ([`DOCKER_CAP_DROP`][crate::supervision] — the runtime's
+    /// exported list).
+    ///
+    /// The managed-database engines (M18) are the motivating case:
+    /// the Wings list drops `dac_override`/`fowner`/`fsetid`, which
+    /// makes even root unable to manage the database images'
+    /// ownership-taken data directories (the entrypoints `chown`
+    /// the bind mount to their own service user, then run with
+    /// `dac_override`-less root unable to read or write through
+    /// it — MySQL's first-boot `find` dies, every snapshot-side
+    /// `mkdir` fails). The database engine table carries a reduced
+    /// drop list that keeps the genuinely dangerous capabilities
+    /// dropped (`mknod`, `net_raw`, `sys_chroot`, `setfcap`, ...)
+    /// while restoring the ownership-management trio.
+    pub cap_drop: Option<Vec<String>>,
     /// Per-instance read-only-rootfs override; `None` keeps the
     /// engine's hardened default (`true`).
     ///
