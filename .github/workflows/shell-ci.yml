@@ -132,6 +132,8 @@ jobs:
           if (-not $dumpbin) { Write-Host 'dumpbin not found'; exit 0 }
           Write-Host "== resolving every import of $exe"
           $lines = & $dumpbin.FullName /imports $exe
+          Write-Host "== raw dumpbin excerpt (first 100 lines)"
+          $lines | Select-Object -First 100 | ForEach-Object { Write-Host $_ }
           $member = '[DllImport("kernel32", SetLastError=true, CharSet=CharSet.Ansi)] public static extern IntPtr LoadLibrary(string name); [DllImport("kernel32", SetLastError=true, CharSet=CharSet.Ansi)] public static extern IntPtr GetProcAddress(IntPtr module, string name);'
           $probe = Add-Type -MemberDefinition $member -Name NativeProbe -Namespace Zim -PassThru
           $currentDll = $null
@@ -143,7 +145,15 @@ jobs:
               $currentDll = $Matches[1]
               continue
             }
-            if ($null -ne $currentDll -and $trimmed -match '^[A-Za-z_][A-Za-z0-9_@]*$' -and $trimmed.Length -gt 2) {
+            # Symbol lines: bare names, or names with a leading hint
+            # ordinal ("3C ProcessProg").
+            $symbol = $null
+            if ($trimmed -match '^[A-Za-z_][A-Za-z0-9_@]*$') {
+              $symbol = $trimmed
+            } elseif ($trimmed -match '^\d+\s+([A-Za-z_][A-Za-z0-9_@]*)$') {
+              $symbol = $Matches[1]
+            }
+            if ($null -ne $currentDll -and $null -ne $symbol -and $symbol.Length -gt 2) {
               $checked += 1
               $module = $probe::LoadLibrary($currentDll)
               if ($module -eq [IntPtr]::Zero) {
@@ -151,9 +161,9 @@ jobs:
                 $missing += 1
                 continue
               }
-              $proc = $probe::GetProcAddress($module, $trimmed)
+              $proc = $probe::GetProcAddress($module, $symbol)
               if ($proc -eq [IntPtr]::Zero) {
-                Write-Host "MISSING EXPORT: $currentDll ! $trimmed"
+                Write-Host "MISSING EXPORT: $currentDll ! $symbol"
                 $missing += 1
               }
             }
