@@ -247,7 +247,7 @@ pub async fn grant(
                 None,
                 serde_json::json!({
                     "id": summary.id,
-                    "granted": permissions,
+                    "granted": request.permissions,
                     "total_granted": summary.permissions.granted,
                 }),
             )
