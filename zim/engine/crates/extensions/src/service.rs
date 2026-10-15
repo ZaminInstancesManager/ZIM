@@ -1417,12 +1417,15 @@ mod tests {
                 semver::Version::new(0, 0, 1),
                 "v1",
             ));
-            let service = ExtensionsService::new(
+            // seed_bundled: false — this test owns the registry;
+            // the bundled set has its own reboot test.
+            let service = ExtensionsService::with_bundled(
                 persistence.clone(),
                 frontend,
                 &dir.join("data"),
                 semver::Version::new(0, 0, 1),
                 "v1",
+                false,
             );
             let archive = zip_package(
                 &manifest_json(
@@ -1449,12 +1452,13 @@ mod tests {
                 semver::Version::new(0, 0, 1),
                 "v1",
             ));
-            let service = ExtensionsService::new(
+            let service = ExtensionsService::with_bundled(
                 persistence,
                 frontend,
                 &dir.join("data"),
                 semver::Version::new(0, 0, 1),
                 "v1",
+                false,
             );
             let summaries = service.list();
             assert_eq!(summaries.len(), 1);
