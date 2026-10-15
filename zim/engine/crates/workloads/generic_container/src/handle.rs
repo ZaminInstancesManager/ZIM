@@ -157,7 +157,7 @@ impl GenericContainerWorkload {
             // process's presence is the verdict.
             let running = matches!(
                 self.runtime.state().await.map_err(runtime_err)?,
-                zim_engine_application::supervision::ObservedState::Running
+                zim_engine_application::supervision::ObservedState::Running { .. }
             );
             return Ok(if running {
                 Health::Healthy
@@ -169,15 +169,13 @@ impl GenericContainerWorkload {
                 }
             });
         };
-        let port = self
-            .probe_host_port(&check)
-            .ok_or_else(|| {
-                IntegrationError::Runtime(format!(
-                    "the health check's endpoint {:?} is not placed (no host \
+        let port = self.probe_host_port(&check).ok_or_else(|| {
+            IntegrationError::Runtime(format!(
+                "the health check's endpoint {:?} is not placed (no host \
                      binding carries it)",
-                    check.port.as_deref().unwrap_or("primary")
-                ))
-            })?;
+                check.port.as_deref().unwrap_or("primary")
+            ))
+        })?;
         let host = self.probe_host_ip();
         let mut bounded = check;
         bounded.timeout_ms = self.probe_timeout.min(bounded.timeout()).as_millis() as u64;
@@ -191,12 +189,13 @@ impl GenericContainerWorkload {
             .read()
             .expect("the instance-config lock is only held briefly");
         let container_port = match check.port.as_deref() {
-            Some(name) => self
-                .spec
-                .endpoints
-                .iter()
-                .find(|endpoint| endpoint.name == name)?
-                .container_port,
+            Some(name) => {
+                self.spec
+                    .endpoints
+                    .iter()
+                    .find(|endpoint| endpoint.name == name)?
+                    .container_port
+            }
             None => self.spec.endpoints.first()?.container_port,
         };
         cfg.port_bindings
@@ -410,7 +409,11 @@ impl ExecCapable for GenericContainerWorkload {
                 working_dir: None,
                 timeout: Some(command.timeout),
             };
-            let output = self.runtime.exec(&runtime_command).await.map_err(runtime_err)?;
+            let output = self
+                .runtime
+                .exec(&runtime_command)
+                .await
+                .map_err(runtime_err)?;
             Ok(SdkExecOutput {
                 exit_code: output.exit_code.and_then(|code| i32::try_from(code).ok()),
                 stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -433,10 +436,7 @@ const FIRST_EXPOSED_HOST_PORT: u16 = 24700;
 /// Split one command line into argv (the SDK's ExecCommand
 /// carries a single command string; the runtime speaks argv).
 fn split_command(command: &str) -> Vec<String> {
-    command
-        .split_whitespace()
-        .map(str::to_owned)
-        .collect()
+    command.split_whitespace().map(str::to_owned).collect()
 }
 
 /// Map a runtime error into the integration vocabulary.

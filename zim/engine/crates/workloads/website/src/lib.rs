@@ -133,10 +133,7 @@ mod tests {
     #[test]
     fn the_manifest_declares_the_website_contract() {
         let integration = WebsiteIntegration;
-        assert_eq!(
-            integration.kind(),
-            zim_engine_domain::WorkloadKind::Website
-        );
+        assert_eq!(integration.kind(), zim_engine_domain::WorkloadKind::Website);
         let manifest = integration.manifest();
         assert_eq!(manifest.id, "org.zaminmc.workload.website");
         assert!(manifest.validate().is_ok());
@@ -157,7 +154,9 @@ mod tests {
     #[test]
     fn the_integration_validates_specs() {
         let integration = WebsiteIntegration;
-        integration.validate_spec(&integration.default_spec()).unwrap();
+        integration
+            .validate_spec(&integration.default_spec())
+            .unwrap();
 
         let bad = serde_json::json!({ "server": "apache" });
         assert!(integration.validate_spec(&bad).is_err());

@@ -76,7 +76,10 @@ pub struct WebsiteLifecyclePlan {
 ///
 /// Unknown actions answer
 /// [`IntegrationError::Unsupported`][IntegrationError::Unsupported].
-pub fn lifecycle_plan(spec: &WebsiteSpec, action: &str) -> Result<WebsiteLifecyclePlan, IntegrationError> {
+pub fn lifecycle_plan(
+    spec: &WebsiteSpec,
+    action: &str,
+) -> Result<WebsiteLifecyclePlan, IntegrationError> {
     let stop_semantics = stop_semantics(spec);
     match action {
         "start" => Ok(WebsiteLifecyclePlan {
@@ -109,11 +112,9 @@ pub fn lifecycle_plan(spec: &WebsiteSpec, action: &str) -> Result<WebsiteLifecyc
             requires_install: false,
             extended_state: WebsiteExtendedState::None,
             stop_semantics: stop_semantics.clone(),
-            notes: vec![
-                "restart is stop-then-start: in-flight requests drain \
+            notes: vec!["restart is stop-then-start: in-flight requests drain \
                  with the stop before the relaunch re-binds the listener"
-                    .to_owned(),
-            ],
+                .to_owned()],
         }),
         "kill" => Ok(WebsiteLifecyclePlan {
             action: action.to_owned(),
@@ -149,12 +150,10 @@ pub fn lifecycle_plan(spec: &WebsiteSpec, action: &str) -> Result<WebsiteLifecyc
             requires_install: false,
             extended_state: WebsiteExtendedState::Draining,
             stop_semantics,
-            notes: vec![
-                "drain is the deploy's own step (in-flight requests \
+            notes: vec!["drain is the deploy's own step (in-flight requests \
                  finish; the static carrier has no long-lived \
                  connections to refuse)"
-                    .to_owned(),
-            ],
+                .to_owned()],
         }),
         _ => Err(IntegrationError::unsupported(
             "org.zaminmc.workload.website",
@@ -167,12 +166,10 @@ pub fn lifecycle_plan(spec: &WebsiteSpec, action: &str) -> Result<WebsiteLifecyc
 /// `stop_semantics` payload).
 fn stop_semantics(spec: &WebsiteSpec) -> String {
     match spec.server {
-        crate::server::WebServer::Static => {
-            "SIGTERM drives nginx's fast shutdown: workers stop \
+        crate::server::WebServer::Static => "SIGTERM drives nginx's fast shutdown: workers stop \
              accepting, in-flight requests drain, and the master exits \
              cleanly within the deadline"
-                .to_owned()
-        }
+            .to_owned(),
         crate::server::WebServer::Node => {
             "SIGTERM reaches the Node process through the container's \
              PID 1; an application with a shutdown hook drains inside \

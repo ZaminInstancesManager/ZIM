@@ -224,9 +224,15 @@ mod tests {
             );
             let endpoints = server.default_endpoints();
             assert_eq!(endpoints[0].name, HTTP_ENDPOINT, "{server}");
-            assert!(endpoints.iter().any(|e| e.name == HTTPS_ENDPOINT), "{server}");
+            assert!(
+                endpoints.iter().any(|e| e.name == HTTPS_ENDPOINT),
+                "{server}"
+            );
             assert!(!server.default_command().is_empty(), "{server}");
-            assert!(server.docroot().contains(crate::deploy::CURRENT_LINK), "{server}");
+            assert!(
+                server.docroot().contains(crate::deploy::CURRENT_LINK),
+                "{server}"
+            );
         }
     }
 

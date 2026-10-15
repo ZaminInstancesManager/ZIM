@@ -59,8 +59,8 @@ use zim_engine_application::supervision::{
 use zim_engine_files::{FileError, Filesystem};
 use zim_engine_workloads_sdk::errors::IntegrationError;
 use zim_engine_workloads_sdk::traits::{
-    ArchiveFormat as SdkFormat, ArchiveRef, Endpoint, FilesystemCapable, Health, HealthCheckCapable,
-    MetricsCapable, NetworkCapable, PortSpec, ResourceUsage as SdkUsage,
+    ArchiveFormat as SdkFormat, ArchiveRef, Endpoint, FilesystemCapable, Health,
+    HealthCheckCapable, MetricsCapable, NetworkCapable, PortSpec, ResourceUsage as SdkUsage,
 };
 
 use crate::deploy;
@@ -199,14 +199,15 @@ impl WebsiteWorkload {
     /// The health check over the placed host binding.
     pub async fn health_async(&self) -> Result<Health, IntegrationError> {
         let check = self.spec.effective_health_check();
-        let port = self
-            .probe_host_port(&check)
-            .ok_or_else(|| {
-                IntegrationError::Runtime(format!(
-                    "the health check's endpoint {:?} is not placed (no host binding carries it)",
-                    check.port.as_deref().unwrap_or(crate::server::HTTP_ENDPOINT)
-                ))
-            })?;
+        let port = self.probe_host_port(&check).ok_or_else(|| {
+            IntegrationError::Runtime(format!(
+                "the health check's endpoint {:?} is not placed (no host binding carries it)",
+                check
+                    .port
+                    .as_deref()
+                    .unwrap_or(crate::server::HTTP_ENDPOINT)
+            ))
+        })?;
         let host = self.probe_host_ip();
         let bounded = HealthCheckSpecBounded {
             spec: &check,
@@ -225,10 +226,12 @@ impl WebsiteWorkload {
         // The named endpoint resolves to its container port; the
         // unnamed check targets the primary endpoint.
         let container_port = match check.port.as_deref() {
-            Some(name) => endpoints
-                .iter()
-                .find(|endpoint| endpoint.name == name)?
-                .container_port,
+            Some(name) => {
+                endpoints
+                    .iter()
+                    .find(|endpoint| endpoint.name == name)?
+                    .container_port
+            }
             None => endpoints.first()?.container_port,
         };
         cfg.port_bindings
@@ -311,7 +314,7 @@ impl WebsiteWorkload {
                 },
             ));
         }
-        let previous = self.current_release()?.map(str::to_owned);
+        let previous = self.current_release()?.as_deref().map(str::to_owned);
         let release_id = new_release_id();
         // 1-2. Upload (alongside: the write is invisible — the
         // document root resolves `current` per request).
@@ -336,7 +339,7 @@ impl WebsiteWorkload {
         // application servers relaunch to load the new code.
         let running = matches!(
             self.runtime.state().await.map_err(runtime_err)?,
-            zim_engine_application::supervision::ObservedState::Running
+            zim_engine_application::supervision::ObservedState::Running { .. }
         );
         if running && self.spec.server.release_entrypoint().is_some() {
             self.stop_async().await?;
@@ -392,7 +395,7 @@ impl WebsiteWorkload {
         let current = self.current_release()?;
         let current_index = releases
             .iter()
-            .position(|release| Some(release.as_str()) == current)
+            .position(|release| Some(release.as_str()) == current.as_deref())
             .unwrap_or(releases.len());
         if current_index == 0 {
             return Ok(None);
@@ -402,7 +405,7 @@ impl WebsiteWorkload {
         if self.spec.server.release_entrypoint().is_some() {
             let running = matches!(
                 self.runtime.state().await.map_err(runtime_err)?,
-                zim_engine_application::supervision::ObservedState::Running
+                zim_engine_application::supervision::ObservedState::Running { .. }
             );
             if running {
                 self.stop_async().await?;
@@ -419,9 +422,9 @@ impl WebsiteWorkload {
             .files
             .list_dir(deploy::RELEASES_DIR)
             .map_err(|err| match err {
-                FileError::NotFound(_) => IntegrationError::Runtime(format!(
-                    "the releases directory is absent (the workload is not installed)"
-                )),
+                FileError::NotFound(_) => IntegrationError::Runtime(
+                    "the releases directory is absent (the workload is not installed)".to_owned(),
+                ),
                 other => file_err(other),
             })?;
         let mut releases: Vec<String> = entries

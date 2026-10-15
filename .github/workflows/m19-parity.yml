@@ -33,11 +33,12 @@ env:
 
 jobs:
   resolve:
-    # Resolve the workspace lockfile for the M19 manifest changes
-    # (the notify dependency) and commit it back, so the repo
-    # carries a lockfile that matches its manifest — the same
-    # hygiene a local dev environment would provide.
-    name: Resolve the lockfile
+    # Verify the workspace lockfile is resolved against the
+    # manifest (the M19 batch's notify dependency is committed
+    # alongside it) — the batch's development environment
+    # resolved it before pushing; this job keeps the repo honest
+    # against future manifest changes drifting the lockfile.
+    name: Verify the lockfile
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -53,23 +54,17 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Resolve
+      - name: Verify the lockfile is resolved
         # `cargo fetch` resolves the manifest against the existing
-        # lockfile — adding only the new entries (notify and its
-        # transitive deps) without bumping anything already
-        # pinned — and writes the updated lockfile.
-        run: cargo fetch
-
-      - name: Commit the resolved lockfile (when it changed)
+        # lockfile; a diff means the lockfile is stale (the
+        # manifest gained or changed a dependency without the
+        # lockfile following).
         run: |
-          git config user.name "Abasing"
-          git config user.email "140362885+Abasing@users.noreply.github.com"
-          if git diff --quiet -- Cargo.lock; then
-            echo "the lockfile is already resolved"
-          else
-            git add Cargo.lock
-            git commit -m "M19: resolve the workspace lockfile (notify)"
-            git push
+          cargo fetch
+          if ! git diff --quiet -- Cargo.lock; then
+            echo "::error::Cargo.lock is stale — resolve it (cargo fetch) and commit it with the manifest change."
+            git --no-pager diff -- Cargo.lock
+            exit 1
           fi
 
   parity:

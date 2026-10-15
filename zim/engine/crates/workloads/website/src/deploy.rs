@@ -146,11 +146,10 @@ pub fn deploy_plan(spec: &WebsiteSpec) -> Vec<DeployStep> {
         DeployStep {
             step: 5,
             name: "verify".to_owned(),
-            detail: format!(
-                "the health check probes the live endpoint; a failed \
+            detail: "the health check probes the live endpoint; a failed \
                  verdict fails the deploy (the rollback window stays \
                  open)"
-            ),
+                .to_owned(),
         },
         DeployStep {
             step: 6,
@@ -168,11 +167,10 @@ pub fn rollback_plan() -> Vec<DeployStep> {
     vec![DeployStep {
         step: 1,
         name: "switch-back".to_owned(),
-        detail: format!(
-            "the current symlink is renamed back onto the previous \
+        detail: "the current symlink is renamed back onto the previous \
              release; the drain and retain semantics are the deploy's \
              own, in reverse"
-        ),
+            .to_owned(),
     }]
 }
 

@@ -25,16 +25,14 @@ use std::time::Duration;
 use bollard::Docker;
 
 use zim_engine_application::supervision::{
-    InstanceConfig, ObservedState, PortBinding, PortProtocol, Runtime,
+    InstanceConfig, ObservedState, PortBinding, PortProtocol, Runtime, RuntimeFactory,
 };
 use zim_engine_workloads_generic_container::{
-    negotiate, negotiate_or_reject, full_runtime, minimal_runtime, GenericContainerSpec,
+    full_runtime, minimal_runtime, negotiate, negotiate_or_reject, GenericContainerSpec,
     GenericContainerWorkload, SpecEndpoint,
 };
 use zim_engine_workloads_sdk::errors::IntegrationError;
-use zim_engine_workloads_sdk::traits::{
-    Endpoint, FilesystemCapable, Health, NetworkCapable,
-};
+use zim_engine_workloads_sdk::traits::{Endpoint, FilesystemCapable, Health, NetworkCapable};
 use zim_engine_workloads_sdk::{Capability, CapabilitySet, HealthCheckSpec};
 
 /// A unique container name per test run.
@@ -76,10 +74,7 @@ fn test_settings() -> zim_engine_runtime_docker::DockerSettings {
 }
 
 /// Build the instance configuration for one generic spec.
-fn generic_config(
-    spec: &GenericContainerSpec,
-    name: &str,
-) -> (InstanceConfig, PathBuf) {
+fn generic_config(spec: &GenericContainerSpec, name: &str) -> (InstanceConfig, PathBuf) {
     let data_dir = std::env::temp_dir().join(format!("zim-generic-data-{name}"));
     std::fs::create_dir_all(&data_dir).expect("create data dir");
 
@@ -132,7 +127,13 @@ fn port_protocol(protocol: &str) -> PortProtocol {
 async fn place(
     spec: GenericContainerSpec,
     name: &str,
-) -> (GenericContainerWorkload, Arc<dyn Runtime>, Docker, String, PathBuf) {
+) -> (
+    GenericContainerWorkload,
+    Arc<dyn Runtime>,
+    Docker,
+    String,
+    PathBuf,
+) {
     let docker = bollard::Docker::connect_with_local_defaults().expect("docker client");
     let (config, data_dir) = generic_config(&spec, name);
     let factory = zim_engine_runtime_docker::DockerRuntimeFactory::connect(test_settings())
@@ -172,7 +173,7 @@ async fn wait_until_running(runtime: &dyn Runtime) -> ObservedState {
 }
 
 /// The suite gate: one suite at a time.
-static SUITE_GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static SUITE_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The §M19 headline acceptance: the negotiation places a
 /// satisfying runtime, rejects a deficient one with the
@@ -183,9 +184,7 @@ async fn the_placement_negotiation_and_lifecycle() {
     let Some(docker) = docker_or_skip().await else {
         return;
     };
-    let _gate = SUITE_GATE
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _gate = SUITE_GATE.lock().await;
 
     // A spec that needs the health + network surfaces.
     let mut spec = base_listener_spec();
@@ -204,10 +203,7 @@ async fn the_placement_negotiation_and_lifecycle() {
     assert!(!verdict.placed);
     assert_eq!(
         verdict.missing,
-        vec![
-            Capability::HealthCheckCapable,
-            Capability::NetworkCapable
-        ],
+        vec![Capability::HealthCheckCapable, Capability::NetworkCapable],
         "{:?}",
         verdict.missing
     );
@@ -233,9 +229,7 @@ async fn the_placement_negotiation_and_lifecycle() {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     let health = loop {
         let health = workload.health_async().await.expect("health call");
-        if matches!(health, Health::Healthy)
-            || tokio::time::Instant::now() > deadline
-        {
+        if matches!(health, Health::Healthy) || tokio::time::Instant::now() > deadline {
             break health;
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
@@ -250,7 +244,9 @@ async fn the_placement_negotiation_and_lifecycle() {
             // The stopped container's port refuses — the probe's
             // own vocabulary — or the check reports it.
             assert!(
-                reason.contains("refuse") || reason.contains("not running") || reason.contains("connect"),
+                reason.contains("refuse")
+                    || reason.contains("not running")
+                    || reason.contains("connect"),
                 "{reason}"
             );
         }
@@ -268,9 +264,7 @@ async fn the_capability_family() {
     let Some(docker) = docker_or_skip().await else {
         return;
     };
-    let _gate = SUITE_GATE
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _gate = SUITE_GATE.lock().await;
 
     let spec = base_listener_spec();
     let name = unique_name("generic-family");
@@ -280,7 +274,10 @@ async fn the_capability_family() {
 
     // Exec: a command inside the container answers.
     let output = workload
-        .exec_argv_async(&["echo".to_owned(), "zim-generic".to_owned()], Duration::from_secs(15))
+        .exec_argv_async(
+            &["echo".to_owned(), "zim-generic".to_owned()],
+            Duration::from_secs(15),
+        )
         .await
         .expect("exec");
     assert_eq!(output.exit_code, Some(0));
@@ -316,7 +313,10 @@ async fn the_capability_family() {
         .write_file("hello.txt", b"generic workloads")
         .expect("write");
     let listing = workload.list_dir(".").expect("list");
-    assert!(listing.iter().any(|entry| entry.contains("hello.txt")), "{listing:?}");
+    assert!(
+        listing.iter().any(|entry| entry.contains("hello.txt")),
+        "{listing:?}"
+    );
     let content = workload.read_file("hello.txt").expect("read");
     assert_eq!(content, b"generic workloads");
     workload.delete("hello.txt").expect("delete");
@@ -338,7 +338,7 @@ async fn the_capability_family() {
 /// protocol vocabulary is not silently TCP-only).
 #[tokio::test]
 async fn the_udp_endpoint_declares_and_surfaces() {
-    let mut spec = GenericContainerSpec {
+    let spec = GenericContainerSpec {
         image: "busybox:1.36".to_owned(),
         command: Some(vec![
             "sh".to_owned(),
@@ -364,9 +364,7 @@ async fn the_udp_endpoint_declares_and_surfaces() {
     let Some(docker) = docker_or_skip().await else {
         return;
     };
-    let _gate = SUITE_GATE
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _gate = SUITE_GATE.lock().await;
 
     let name = unique_name("generic-udp");
     let (workload, runtime, _docker, _, _) = place(spec, &name).await;
@@ -393,10 +391,7 @@ fn the_negotiation_names_every_missing_capability() {
         endpoints: Vec::new(),
         health_check: None,
         resource_limits: None,
-        required_capabilities: vec![
-            Capability::ConsoleCapable,
-            Capability::SnapshotCapable,
-        ],
+        required_capabilities: vec![Capability::ConsoleCapable, Capability::SnapshotCapable],
     };
     let provided: CapabilitySet = [Capability::ConsoleCapable, Capability::ExecCapable]
         .into_iter()
@@ -410,10 +405,7 @@ fn the_negotiation_names_every_missing_capability() {
     let verdict = negotiate(&spec, &provided);
     assert_eq!(
         verdict.missing,
-        vec![
-            Capability::HealthCheckCapable,
-            Capability::SnapshotCapable
-        ],
+        vec![Capability::HealthCheckCapable, Capability::SnapshotCapable],
         "{:?}",
         verdict.missing
     );

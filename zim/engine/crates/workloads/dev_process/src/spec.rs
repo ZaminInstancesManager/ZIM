@@ -50,10 +50,14 @@ impl DevRestartPolicy {
     /// The policy's semantics, in words.
     pub fn semantics(self) -> &'static str {
         match self {
-            Self::Never => "the process runs until it exits or is stopped; \
-                     file changes restart nothing",
-            Self::OnFileChange => "the process restarts when a watched file \
-                             changes (debounced)",
+            Self::Never => {
+                "the process runs until it exits or is stopped; \
+                     file changes restart nothing"
+            }
+            Self::OnFileChange => {
+                "the process restarts when a watched file \
+                             changes (debounced)"
+            }
             Self::Always => "the process restarts whenever it exits",
         }
     }
@@ -179,10 +183,7 @@ impl DevProcessSpec {
             if !names.insert(binding.name.clone()) {
                 return Err(SpecError::Invalid {
                     field: "env".to_owned(),
-                    message: format!(
-                        "the environment name {:?} is declared twice",
-                        binding.name
-                    ),
+                    message: format!("the environment name {:?} is declared twice", binding.name),
                 });
             }
         }
@@ -285,9 +286,15 @@ mod tests {
 
     #[test]
     fn the_policies_speak_their_semantics() {
-        assert!(DevRestartPolicy::Never.semantics().contains("file changes restart nothing"));
-        assert!(DevRestartPolicy::OnFileChange.semantics().contains("debounced"));
-        assert!(DevRestartPolicy::Always.semantics().contains("whenever it exits"));
+        assert!(DevRestartPolicy::Never
+            .semantics()
+            .contains("file changes restart nothing"));
+        assert!(DevRestartPolicy::OnFileChange
+            .semantics()
+            .contains("debounced"));
+        assert!(DevRestartPolicy::Always
+            .semantics()
+            .contains("whenever it exits"));
         assert!(!DevRestartPolicy::Never.watches());
         assert!(DevRestartPolicy::OnFileChange.watches());
         assert!(!DevRestartPolicy::Always.watches());

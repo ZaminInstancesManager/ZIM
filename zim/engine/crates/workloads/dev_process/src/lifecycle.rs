@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 
 use zim_engine_workloads_sdk::errors::IntegrationError;
 
-use crate::spec::{DevProcessSpec, DevRestartPolicy};
+use crate::spec::DevProcessSpec;
 
 /// The default graceful-stop deadline (the engine's 30-second
 /// posture; a dev process's own cleanup — the toolchain's
@@ -131,12 +131,10 @@ pub fn lifecycle_plan(
             requires_install: false,
             extended_state: DevProcessExtendedState::None,
             restart_semantics: restart_semantics.clone(),
-            notes: vec![
-                "kill skips the orderly path: the toolchain's children \
+            notes: vec!["kill skips the orderly path: the toolchain's children \
                  reset with the container; the sources are untouched \
                  (they live in the bind-mounted data directory)"
-                    .to_owned(),
-            ],
+                .to_owned()],
         }),
         "watch-restart" => Ok(DevProcessLifecyclePlan {
             action: action.to_owned(),
@@ -164,6 +162,7 @@ pub fn lifecycle_plan(
 mod tests {
     use super::*;
     use crate::spec::default_spec;
+    use crate::spec::DevRestartPolicy;
 
     #[test]
     fn a_watching_policy_surfaces_the_watching_state() {

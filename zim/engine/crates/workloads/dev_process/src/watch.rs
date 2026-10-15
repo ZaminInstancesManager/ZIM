@@ -86,7 +86,11 @@ struct WatchShared {
 pub struct FileWatcher {
     shared: Arc<WatchShared>,
     requests: Mutex<std::sync::mpsc::Receiver<RestartRequest>>,
-    watcher: notify::RecommendedWatcher,
+    /// The notify watcher itself — held (never read) so its
+    /// lifetime bounds the event channel's producer side: when
+    /// this handle drops, the watcher drops, the producer closes,
+    /// and the consumer thread exits.
+    _watcher: notify::RecommendedWatcher,
 }
 
 impl FileWatcher {
@@ -126,20 +130,27 @@ impl FileWatcher {
         let _detached = std::thread::Builder::new()
             .name("zim-dev-watch".to_owned())
             .spawn(move || {
-                let mut last_fired: Option<SystemTime> = None;
                 let mut pending: Vec<String> = Vec::new();
+                let mut last_event: Option<SystemTime> = None;
                 loop {
-                    // Coalesce a burst: drain everything already
-                    // queued before deciding to fire.
+                    // The trailing debounce: consume every event
+                    // as it arrives (updating the burst's last-event
+                    // stamp), and fire only after the burst has
+                    // settled — `debounce` of quiet since its last
+                    // event. One save (which the filesystem reports
+                    // as a create-modify pair) is one restart, not
+                    // one per raw event.
                     match event_rx.recv_timeout(Duration::from_millis(50)) {
                         Ok(event) => {
                             consumer_shared.events_seen.fetch_add(1, Ordering::Relaxed);
                             if let Some(relative) =
                                 matching_paths(&event, &consumer_root, &patterns)
                             {
+                                let now = SystemTime::now();
                                 if let Ok(mut last) = consumer_shared.last_event.lock() {
-                                    *last = Some(SystemTime::now());
+                                    *last = Some(now);
                                 }
+                                last_event = Some(now);
                                 for path in relative {
                                     if !pending.contains(&path) {
                                         pending.push(path);
@@ -151,27 +162,28 @@ impl FileWatcher {
                         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                     }
                     // Fire when the burst has settled: something
-                    // is pending and the debounce window since
-                    // the last fire has passed.
-                    if pending.is_empty() {
-                        continue;
-                    }
-                    let now = SystemTime::now();
-                    let window_passed = match last_fired {
-                        None => true,
-                        Some(fired) => {
-                            now.duration_since(fired).unwrap_or(Duration::ZERO) >= debounce
+                    // is pending and the quiet window since its
+                    // last matching event has passed.
+                    if !pending.is_empty() {
+                        let settled = last_event
+                            .map(|last| {
+                                SystemTime::now()
+                                    .duration_since(last)
+                                    .unwrap_or(Duration::ZERO)
+                                    >= debounce
+                            })
+                            .unwrap_or(false);
+                        if settled {
+                            let request = RestartRequest {
+                                trigger_paths: std::mem::take(&mut pending),
+                            };
+                            consumer_shared
+                                .requests_fired
+                                .fetch_add(1, Ordering::Relaxed);
+                            if request_tx.send(request).is_err() {
+                                break; // The supervisor side is gone.
+                            }
                         }
-                    };
-                    if window_passed {
-                        let request = RestartRequest {
-                            trigger_paths: std::mem::take(&mut pending),
-                        };
-                        consumer_shared.requests_fired.fetch_add(1, Ordering::Relaxed);
-                        if request_tx.send(request).is_err() {
-                            break; // The supervisor side is gone.
-                        }
-                        last_fired = Some(now);
                     }
                 }
             })?;
@@ -179,7 +191,7 @@ impl FileWatcher {
         Ok(Self {
             shared,
             requests: Mutex::new(request_rx),
-            watcher,
+            _watcher: watcher,
         })
     }
 
@@ -239,8 +251,8 @@ fn matching_paths(event: &Event, root: &Path, patterns: &[String]) -> Option<Vec
         .iter()
         .filter_map(|path| path.strip_prefix(root).ok())
         .map(|relative| {
-            let text = relative.to_string_lossy().trim_start_matches('/');
-            text.to_owned()
+            let text = relative.to_string_lossy();
+            text.trim_start_matches('/').to_owned()
         })
         .filter(|relative| {
             !relative.is_empty()
@@ -275,6 +287,12 @@ pub fn glob_matches(pattern: &str, path: &str) -> bool {
 /// The recursive matcher: `pattern` against `path`, both as char
 /// slices.
 fn glob_match_inner(pattern: &[char], path: &[char]) -> bool {
+    // A trailing `/**` matches the directory itself as well as
+    // everything under it (`src/**` covers `src` and
+    // `src/a/b.rs`) — the watch vocabulary's own convention.
+    if pattern.len() == 3 && pattern[0] == '/' && pattern[1] == '*' && pattern[2] == '*' {
+        return path.is_empty() || path[0] == '/';
+    }
     // `**` in the pattern: either it consumes nothing, or it
     // consumes at least one segment (the cross-separator form).
     if pattern.len() >= 2 && pattern[0] == '*' && pattern[1] == '*' {
@@ -320,9 +338,7 @@ fn glob_match_inner(pattern: &[char], path: &[char]) -> bool {
             false
         }
         '?' => path[0] != '/' && glob_match_inner(&pattern[1..], &path[1..]),
-        literal => {
-            path[0] == literal && glob_match_inner(&pattern[1..], &path[1..])
-        }
+        literal => path[0] == literal && glob_match_inner(&pattern[1..], &path[1..]),
     }
 }
 
@@ -372,10 +388,8 @@ mod tests {
 
     #[test]
     fn a_watcher_over_a_live_directory_fires_for_matching_changes() {
-        let dir = std::env::temp_dir().join(format!(
-            "zim-watch-test-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("zim-watch-test-{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(dir.join("src")).expect("create the watch root");
         let spec = crate::spec::DevProcessSpec {
             command: vec!["true".to_owned()],
@@ -402,7 +416,10 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         };
         assert!(
-            request.trigger_paths.iter().any(|path| path == "src/main.rs"),
+            request
+                .trigger_paths
+                .iter()
+                .any(|path| path == "src/main.rs"),
             "{:?}",
             request.trigger_paths
         );
@@ -414,17 +431,20 @@ mod tests {
         assert_eq!(watcher.requests_fired(), 1);
 
         // The state carries the last event's stamp.
-        assert!(matches!(watcher.state(), WatchState::Active { last_event: Some(_) }));
+        assert!(matches!(
+            watcher.state(),
+            WatchState::Active {
+                last_event: Some(_)
+            }
+        ));
 
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn a_burst_of_changes_coalesces_into_one_request() {
-        let dir = std::env::temp_dir().join(format!(
-            "zim-watch-burst-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("zim-watch-burst-{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(dir.join("src")).expect("create the watch root");
         let spec = crate::spec::DevProcessSpec {
             command: vec!["true".to_owned()],
@@ -444,8 +464,7 @@ mod tests {
         // Let the window settle.
         std::thread::sleep(Duration::from_millis(700));
 
-        let requests: Vec<RestartRequest> =
-            std::iter::from_fn(|| watcher.take_request()).collect();
+        let requests: Vec<RestartRequest> = std::iter::from_fn(|| watcher.take_request()).collect();
         assert_eq!(requests.len(), 1, "the burst coalesces: {requests:?}");
         assert!(requests[0].trigger_paths.len() >= 2, "{requests:?}");
 

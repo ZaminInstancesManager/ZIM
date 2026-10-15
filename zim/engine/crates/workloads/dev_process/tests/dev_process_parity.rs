@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 
 use bollard::Docker;
 
-use zim_engine_application::supervision::{InstanceConfig, ObservedState, Runtime};
+use zim_engine_application::supervision::{InstanceConfig, ObservedState, Runtime, RuntimeFactory};
 use zim_engine_workloads_dev_process::{
     DevProcessSpec, DevProcessWorkload, DevRestartPolicy, WatchState,
 };
@@ -117,7 +117,13 @@ fn process_config(spec: &DevProcessSpec, name: &str, marker: &str) -> (InstanceC
 async fn place_and_start(
     spec: DevProcessSpec,
     name: &str,
-) -> (DevProcessWorkload, Arc<dyn Runtime>, Docker, String, PathBuf) {
+) -> (
+    DevProcessWorkload,
+    Arc<dyn Runtime>,
+    Docker,
+    String,
+    PathBuf,
+) {
     let docker = bollard::Docker::connect_with_local_defaults().expect("docker client");
     let marker: String = unique_name("m").chars().take(8).collect();
     let (config, data_dir) = process_config(&spec, name, &marker);
@@ -192,7 +198,7 @@ async fn wait_for_restarts(workload: &DevProcessWorkload, want: u32) -> bool {
 
 /// The suite gate: one suite at a time (the same posture the
 /// M18/M19 sibling parity suites take).
-static SUITE_GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static SUITE_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The §M19 headline acceptance: a watching policy's process
 /// restarts when a matching file changes.
@@ -201,9 +207,7 @@ async fn the_watch_restart_supervision() {
     let Some(docker) = docker_or_skip().await else {
         return;
     };
-    let _gate = SUITE_GATE
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _gate = SUITE_GATE.lock().await;
 
     let name = unique_name("devproc-watch");
     let spec = DevProcessSpec {
@@ -224,10 +228,7 @@ async fn the_watch_restart_supervision() {
 
     // Supervise: the watcher + the restart task go live.
     workload.supervise().expect("supervise");
-    assert!(matches!(
-        workload.watch_state(),
-        WatchState::Active { .. }
-    ));
+    assert!(matches!(workload.watch_state(), WatchState::Active { .. }));
     assert_eq!(workload.restarts(), 0);
 
     // A matching write under the data root: the restart fires.
@@ -242,7 +243,7 @@ async fn the_watch_restart_supervision() {
     // The process is Running again (the relaunch).
     assert!(matches!(
         runtime.state().await.unwrap(),
-        ObservedState::Running
+        ObservedState::Running { .. }
     ));
 
     // The console generation reset: the new run's boot line
@@ -264,9 +265,7 @@ async fn the_console_surface_and_generation_reset() {
     let Some(docker) = docker_or_skip().await else {
         return;
     };
-    let _gate = SUITE_GATE
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _gate = SUITE_GATE.lock().await;
 
     let name = unique_name("devproc-console");
     // A dev-process spec (the stand-in loop's carrier — the
@@ -303,9 +302,7 @@ async fn the_never_policy_watches_nothing() {
     let Some(docker) = docker_or_skip().await else {
         return;
     };
-    let _gate = SUITE_GATE
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _gate = SUITE_GATE.lock().await;
 
     let name = unique_name("devproc-never");
     let spec = DevProcessSpec {
@@ -339,9 +336,7 @@ async fn the_patterns_decide_what_matches() {
     let Some(docker) = docker_or_skip().await else {
         return;
     };
-    let _gate = SUITE_GATE
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _gate = SUITE_GATE.lock().await;
 
     let name = unique_name("devproc-pattern");
     let spec = DevProcessSpec {
@@ -358,7 +353,11 @@ async fn the_patterns_decide_what_matches() {
     // A non-matching write: no restart.
     std::fs::write(data_dir.join("notes.txt"), b"not rust").expect("write the unwatched file");
     tokio::time::sleep(Duration::from_secs(2)).await;
-    assert_eq!(workload.restarts(), 0, "a non-matching change restarts nothing");
+    assert_eq!(
+        workload.restarts(),
+        0,
+        "a non-matching change restarts nothing"
+    );
 
     let _ = workload.stop_async().await;
     remove_quietly(&docker, &name).await;

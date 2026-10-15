@@ -31,7 +31,7 @@ use bollard::Docker;
 use futures_util::StreamExt;
 
 use zim_engine_application::supervision::{
-    InstanceConfig, ObservedState, PortBinding, PortProtocol, Runtime,
+    InstanceConfig, ObservedState, PortBinding, PortProtocol, Runtime, RuntimeFactory,
 };
 use zim_engine_workloads_sdk::traits::{Health, NetworkCapable};
 use zim_engine_workloads_website::{DeployOutcome, WebsiteSpec, WebsiteWorkload};
@@ -194,7 +194,7 @@ fn http_get(port: u16, path: &str) -> Result<(u16, String), String> {
 
 /// The suite gate: one suite at a time (the same posture the
 /// M18 parity suite takes — the containers' boots serialize).
-static SUITE_GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static SUITE_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The §M19 headline acceptance: a static website installed,
 /// served, deployed (a new version switched in atomically), and
@@ -204,9 +204,7 @@ async fn the_static_website_acceptance() {
     let Some(docker) = docker_or_skip().await else {
         return;
     };
-    let _gate = SUITE_GATE
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _gate = SUITE_GATE.lock().await;
 
     let name = unique_name("web-static");
     let (workload, runtime, _docker, _, _) = place(default_spec_for_test(), &name).await;
@@ -240,7 +238,10 @@ async fn the_static_website_acceptance() {
         .await
         .expect("deploy");
     assert_eq!(
-        workload.current_release().expect("current readable").as_deref(),
+        workload
+            .current_release()
+            .expect("current readable")
+            .as_deref(),
         Some(outcome.release_id.as_str())
     );
     let (_, body) = http_get(port, "/").expect("the deployed version serves");
@@ -276,9 +277,7 @@ async fn the_health_check_family() {
     let Some(docker) = docker_or_skip().await else {
         return;
     };
-    let _gate = SUITE_GATE
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _gate = SUITE_GATE.lock().await;
 
     // A TCP check against a stopped workload's unbound port: the
     // endpoint is not placed, the error explains itself.
@@ -306,8 +305,7 @@ async fn the_health_check_family() {
     // missing file — an honest verdict).
     let mut spec = default_spec_for_test();
     spec.health_check = Some(zim_engine_workloads_sdk::HealthCheckSpec::http(
-        "http",
-        "/absent",
+        "http", "/absent",
     ));
     let name2 = unique_name("web-health2");
     let (workload2, runtime2, _docker, _, _) = place(spec, &name2).await;
@@ -340,9 +338,7 @@ async fn the_deploy_lifecycle_and_rollback() {
     let Some(docker) = docker_or_skip().await else {
         return;
     };
-    let _gate = SUITE_GATE
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _gate = SUITE_GATE.lock().await;
 
     let name = unique_name("web-deploy");
     let (workload, runtime, _docker, _, _) = place(default_spec_for_test(), &name).await;
@@ -364,7 +360,10 @@ async fn the_deploy_lifecycle_and_rollback() {
             .await
             .expect("deploy");
         assert_eq!(
-            workload.current_release().expect("current readable").as_deref(),
+            workload
+                .current_release()
+                .expect("current readable")
+                .as_deref(),
             Some(outcome.release_id.as_str())
         );
         let (_, served) = http_get(port, "/").expect("the deployed version serves");
@@ -386,10 +385,7 @@ async fn the_deploy_lifecycle_and_rollback() {
     assert!(served.contains("serve-me-4"), "{served:?}");
 
     // An empty deploy is refused with the structured spec error.
-    let err = workload
-        .deploy_async(&[])
-        .await
-        .expect_err("empty deploy");
+    let err = workload.deploy_async(&[]).await.expect_err("empty deploy");
     assert!(err.to_string().contains("at least one file"), "{err}");
 
     let _ = runtime.stop(Duration::from_secs(30)).await;
@@ -404,9 +400,7 @@ async fn the_network_endpoint_family() {
     let Some(docker) = docker_or_skip().await else {
         return;
     };
-    let _gate = SUITE_GATE
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    let _gate = SUITE_GATE.lock().await;
 
     let name = unique_name("web-net");
     let (workload, runtime, _docker, _, _) = place(default_spec_for_test(), &name).await;
@@ -459,12 +453,10 @@ async fn the_network_endpoint_family() {
 /// console stream would carry).
 #[tokio::test]
 async fn the_access_log_lands_on_stdout() {
-    let Some(docker) = docker_or_skip().await else {
+    if docker_or_skip().await.is_none() {
         return;
-    };
-    let _gate = SUITE_GATE
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
+    }
+    let _gate = SUITE_GATE.lock().await;
 
     let name = unique_name("web-logs");
     let (workload, runtime, docker, _, _) = place(default_spec_for_test(), &name).await;
@@ -533,17 +525,24 @@ fn wait_for_http(port: u16, path: &str, marker: &str, deadline: Duration) -> boo
 }
 
 /// The container's log tail (bollard's logs surface, drained to
-/// a string).
+/// a string — the same helper shape the M18 database parity
+/// suite carries).
 async fn docker_logs(docker: &Docker, name: &str) -> String {
-    use bollard::container::LogsOptions;
-    let options = LogsOptions::<String> {
-        tail: 50,
-        ..Default::default()
-    };
+    let options = bollard::query_parameters::LogsOptionsBuilder::new()
+        .stdout(true)
+        .stderr(true)
+        .tail("50")
+        .timestamps(false)
+        .build();
     let mut stream = docker.logs(name, Some(options));
     let mut collected = String::new();
-    while let Some(Ok(chunk)) = stream.next().await {
-        collected.push_str(&chunk.into_string());
+    while let Some(Ok(log)) = stream.next().await {
+        let message: &[u8] = match &log {
+            bollard::container::LogOutput::StdOut { message } => message,
+            bollard::container::LogOutput::StdErr { message } => message,
+            other => other.as_ref(),
+        };
+        collected.push_str(&String::from_utf8_lossy(message));
     }
     collected
 }

@@ -58,7 +58,11 @@ impl SpecEndpoint {
 /// spec-shaped half; the engine folds them into the `Instance`
 /// row's own limits at placement, which is what the runtime
 /// enforces).
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+///
+/// (`Eq` is deliberately absent: the CPU limit is an `f32`, which
+/// carries no total-order — the same reason the SDK's usage
+/// sample is `PartialEq` only.)
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ResourceLimitsSpec {
     /// The memory limit, in whole megabytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -254,7 +258,9 @@ mod tests {
 
         // The explicit list rides along.
         spec.required_capabilities = vec![Capability::ExecCapable];
-        assert!(spec.derived_requirements().contains(Capability::ExecCapable));
+        assert!(spec
+            .derived_requirements()
+            .contains(Capability::ExecCapable));
     }
 
     #[test]
@@ -282,10 +288,7 @@ mod tests {
         let mut spec = default_spec();
         spec.endpoints = vec![SpecEndpoint::new("", 80)];
         assert!(spec.validate().is_err());
-        spec.endpoints = vec![
-            SpecEndpoint::new("http", 80),
-            SpecEndpoint::new("http", 81),
-        ];
+        spec.endpoints = vec![SpecEndpoint::new("http", 80), SpecEndpoint::new("http", 81)];
         assert!(spec.validate().is_err());
         spec.endpoints = vec![SpecEndpoint::new("http", 0)];
         assert!(spec.validate().is_err());

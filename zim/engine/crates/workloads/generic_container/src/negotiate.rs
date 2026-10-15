@@ -130,7 +130,10 @@ mod tests {
         let verdict = negotiate(&spec, &minimal_runtime());
         assert!(verdict.placed);
         assert!(verdict.missing.is_empty());
-        assert_eq!(verdict.reason(), "the runtime provides all 2 required capabilities");
+        assert_eq!(
+            verdict.reason(),
+            "the runtime provides all 2 required capabilities"
+        );
     }
 
     #[test]
@@ -177,7 +180,10 @@ mod tests {
         let spec = default_spec();
         let verdict = negotiate(&spec, &CapabilitySet::EMPTY);
         assert!(verdict.placed);
-        assert_eq!(verdict.reason(), "the runtime provides all 0 required capabilities");
+        assert_eq!(
+            verdict.reason(),
+            "the runtime provides all 0 required capabilities"
+        );
     }
 
     #[test]

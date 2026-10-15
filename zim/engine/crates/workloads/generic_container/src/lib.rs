@@ -52,7 +52,9 @@ use zim_engine_workloads_sdk::{
 
 pub use handle::GenericContainerWorkload;
 pub use lifecycle::{lifecycle_plan, GenericContainerLifecyclePlan};
-pub use negotiate::{negotiate, negotiate_or_reject, full_runtime, minimal_runtime, PlacementVerdict};
+pub use negotiate::{
+    full_runtime, minimal_runtime, negotiate, negotiate_or_reject, PlacementVerdict,
+};
 pub use spec::{default_spec, GenericContainerSpec, ResourceLimitsSpec, SpecEndpoint};
 
 /// The integration's declaration, validated at first access.
@@ -134,16 +136,15 @@ mod tests {
         // The kind's own posture: nothing required, everything
         // optional (the spec's declarations are the requirements).
         assert_eq!(manifest.required_capabilities.len(), 0);
-        assert_eq!(
-            manifest.optional_capabilities.len(),
-            Capability::ALL.len()
-        );
+        assert_eq!(manifest.optional_capabilities.len(), Capability::ALL.len());
     }
 
     #[test]
     fn the_integration_validates_specs() {
         let integration = GenericContainerIntegration;
-        integration.validate_spec(&integration.default_spec()).unwrap();
+        integration
+            .validate_spec(&integration.default_spec())
+            .unwrap();
 
         let empty = serde_json::json!({ "image": "" });
         assert!(integration.validate_spec(&empty).is_err());
@@ -169,8 +170,7 @@ mod tests {
         let integration = GenericContainerIntegration;
         for action in ["start", "stop", "restart", "kill"] {
             let plan = integration.lifecycle_plan(action).unwrap();
-            let parsed: GenericContainerLifecyclePlan =
-                serde_json::from_value(plan).unwrap();
+            let parsed: GenericContainerLifecyclePlan = serde_json::from_value(plan).unwrap();
             assert_eq!(parsed.action, action);
             assert!(!parsed.requires_install);
         }

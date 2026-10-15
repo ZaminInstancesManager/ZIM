@@ -146,7 +146,9 @@ mod tests {
     #[test]
     fn the_integration_validates_specs() {
         let integration = DevProcessIntegration;
-        integration.validate_spec(&integration.default_spec()).unwrap();
+        integration
+            .validate_spec(&integration.default_spec())
+            .unwrap();
 
         let empty = serde_json::json!({ "command": [] });
         assert!(integration.validate_spec(&empty).is_err());

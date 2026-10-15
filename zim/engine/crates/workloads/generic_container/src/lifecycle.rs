@@ -81,11 +81,9 @@ pub fn lifecycle_plan(
             graceful_deadline_secs: DEFAULT_STOP_DEADLINE.as_secs(),
             requires_install: false,
             stop_semantics: stop_semantics.clone(),
-            notes: vec![
-                "restart is stop-then-start: the image's own shutdown \
+            notes: vec!["restart is stop-then-start: the image's own shutdown \
                  behavior completes before the relaunch"
-                    .to_owned(),
-            ],
+                .to_owned()],
         }),
         "kill" => Ok(GenericContainerLifecyclePlan {
             action: action.to_owned(),

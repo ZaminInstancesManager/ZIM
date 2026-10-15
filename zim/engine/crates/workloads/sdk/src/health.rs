@@ -144,7 +144,10 @@ impl HealthCheckSpec {
         }
         match &self.kind {
             HealthCheckKind::Tcp => Ok(()),
-            HealthCheckKind::Http { path, expected_status } => {
+            HealthCheckKind::Http {
+                path,
+                expected_status,
+            } => {
                 if path.is_empty() {
                     return Err(SpecError::Invalid {
                         field: "health_check.path".to_owned(),
@@ -154,9 +157,7 @@ impl HealthCheckSpec {
                 if path.len() > MAX_HTTP_PATH_LEN {
                     return Err(SpecError::Invalid {
                         field: "health_check.path".to_owned(),
-                        message: format!(
-                            "the HTTP probe path exceeds {MAX_HTTP_PATH_LEN} bytes"
-                        ),
+                        message: format!("the HTTP probe path exceeds {MAX_HTTP_PATH_LEN} bytes"),
                     });
                 }
                 if path.contains(['\r', '\n', ' ']) {
@@ -187,17 +188,14 @@ impl HealthCheckSpec {
 /// of the workload's container). The verdict's reasons carry the
 /// probe's own vocabulary — refused, timeout, status mismatch —
 /// so the surfaced `Unhealthy` explains itself.
-pub async fn run_health_probe(
-    spec: &HealthCheckSpec,
-    host: IpAddr,
-    port: u16,
-) -> Health {
+pub async fn run_health_probe(spec: &HealthCheckSpec, host: IpAddr, port: u16) -> Health {
     let timeout = spec.timeout();
     let attempt = match &spec.kind {
         HealthCheckKind::Tcp => probe_tcp(host, port, timeout).await,
-        HealthCheckKind::Http { path, expected_status } => {
-            probe_http(host, port, path, *expected_status, timeout).await
-        }
+        HealthCheckKind::Http {
+            path,
+            expected_status,
+        } => probe_http(host, port, path, *expected_status, timeout).await,
     };
     match attempt {
         Ok(()) => Health::Healthy,
@@ -228,13 +226,10 @@ async fn probe_http(
 ) -> Result<(), ProbeFailure> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    let mut stream = tokio::time::timeout(
-        timeout,
-        tokio::net::TcpStream::connect((host, port)),
-    )
-    .await
-    .map_err(|_| format!("the http probe timed out after {timeout:?}"))?
-    .map_err(|err| format!("the http probe could not connect: {err}"))?;
+    let mut stream = tokio::time::timeout(timeout, tokio::net::TcpStream::connect((host, port)))
+        .await
+        .map_err(|_| format!("the http probe timed out after {timeout:?}"))?
+        .map_err(|err| format!("the http probe could not connect: {err}"))?;
 
     let host_header = match host {
         IpAddr::V4(addr) => addr.to_string(),
@@ -379,7 +374,9 @@ mod tests {
     #[tokio::test]
     async fn a_live_http_listener_answers_healthy() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
@@ -401,7 +398,9 @@ mod tests {
     #[tokio::test]
     async fn an_unacceptable_status_is_unhealthy() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();

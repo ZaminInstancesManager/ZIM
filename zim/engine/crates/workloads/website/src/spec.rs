@@ -25,7 +25,7 @@ use zim_engine_workloads_sdk::errors::SpecError;
 use zim_engine_workloads_sdk::HealthCheckSpec;
 
 use crate::deploy::DEFAULT_RETAINED_RELEASES;
-use crate::server::{HTTPS_ENDPOINT, HTTP_ENDPOINT, WebServer};
+use crate::server::{WebServer, HTTPS_ENDPOINT, HTTP_ENDPOINT};
 
 /// The runtime-facing container posture the static carrier needs
 /// (the same per-instance overrides the Database kind introduced
@@ -148,14 +148,17 @@ impl WebsiteSpec {
     /// The effective health check (the spec's own, or the default
     /// HTTP probe against the primary endpoint).
     pub fn effective_health_check(&self) -> HealthCheckSpec {
-        self.health_check.clone().unwrap_or_else(|| HealthCheckSpec {
-            kind: zim_engine_workloads_sdk::HealthCheckKind::Http {
-                path: "/".to_owned(),
-                expected_status: None,
-            },
-            port: Some(HTTP_ENDPOINT.to_owned()),
-            timeout_ms: zim_engine_workloads_sdk::health::DEFAULT_PROBE_TIMEOUT.as_millis() as u64,
-        })
+        self.health_check
+            .clone()
+            .unwrap_or_else(|| HealthCheckSpec {
+                kind: zim_engine_workloads_sdk::HealthCheckKind::Http {
+                    path: "/".to_owned(),
+                    expected_status: None,
+                },
+                port: Some(HTTP_ENDPOINT.to_owned()),
+                timeout_ms: zim_engine_workloads_sdk::health::DEFAULT_PROBE_TIMEOUT.as_millis()
+                    as u64,
+            })
     }
 
     /// The release retention (the rollback window's width).
@@ -227,10 +230,7 @@ impl WebsiteSpec {
             if endpoint.container_port == 0 {
                 return Err(SpecError::Invalid {
                     field: "endpoints".to_owned(),
-                    message: format!(
-                        "the endpoint {:?} declares port 0",
-                        endpoint.name
-                    ),
+                    message: format!("the endpoint {:?} declares port 0", endpoint.name),
                 });
             }
         }

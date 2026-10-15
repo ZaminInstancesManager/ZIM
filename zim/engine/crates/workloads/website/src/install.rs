@@ -131,7 +131,10 @@ mod tests {
         let spec = default_spec();
         let plan = build_install_plan(&spec);
         let names: Vec<&str> = plan.iter().map(|step| step.name.as_str()).collect();
-        assert_eq!(names, vec!["write-config", "first-release", "switch-current"]);
+        assert_eq!(
+            names,
+            vec!["write-config", "first-release", "switch-current"]
+        );
         assert!(plan[0].detail.contains("nginx.conf"));
         assert!(plan[1].detail.contains("placeholder"));
         assert!(plan[2].detail.contains("current"));

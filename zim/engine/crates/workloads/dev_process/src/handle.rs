@@ -40,9 +40,7 @@ use zim_engine_application::supervision::{
     InstanceConfig, ObservedState, ResourceUsage as RuntimeUsage, Runtime, RuntimeError,
 };
 use zim_engine_workloads_sdk::errors::IntegrationError;
-use zim_engine_workloads_sdk::traits::{
-    ConsoleCapable, MetricsCapable, ResourceUsage as SdkUsage,
-};
+use zim_engine_workloads_sdk::traits::{ConsoleCapable, MetricsCapable, ResourceUsage as SdkUsage};
 
 use crate::console::ConsoleBuffer;
 use crate::lifecycle::DEFAULT_STOP_DEADLINE;
@@ -167,10 +165,7 @@ impl DevProcessWorkload {
     pub async fn send_input_async(&self, line: &str) -> Result<(), IntegrationError> {
         let mut payload = line.as_bytes().to_vec();
         payload.push(b'\n');
-        self.runtime
-            .send_input(&payload)
-            .await
-            .map_err(runtime_err)
+        self.runtime.send_input(&payload).await.map_err(runtime_err)
     }
 
     /// One resource-usage sample.
@@ -205,8 +200,9 @@ impl DevProcessWorkload {
             // Already supervising.
             return Ok(());
         }
-        let watcher = FileWatcher::start(self.cfg.data_dir.clone(), &self.spec)
-            .map_err(|err| IntegrationError::Runtime(format!("the file watcher failed to start: {err}")))?;
+        let watcher = FileWatcher::start(self.cfg.data_dir.clone(), &self.spec).map_err(|err| {
+            IntegrationError::Runtime(format!("the file watcher failed to start: {err}"))
+        })?;
         *slot = Some(watcher);
         drop(slot);
 
@@ -262,9 +258,7 @@ impl DevProcessWorkload {
                             }
                         }
                         Err(err) => {
-                            eprintln!(
-                                "zim dev-process: watch-restart relaunch failed: {err}"
-                            );
+                            eprintln!("zim dev-process: watch-restart relaunch failed: {err}");
                         }
                     }
                 }
@@ -312,7 +306,7 @@ impl DevProcessWorkload {
     pub async fn is_running_async(&self) -> Result<bool, IntegrationError> {
         Ok(matches!(
             self.runtime.state().await.map_err(runtime_err)?,
-            ObservedState::Running
+            ObservedState::Running { .. }
         ))
     }
 }
@@ -382,6 +376,8 @@ mod tests {
             system_cpu_total_ns: Some(1_000_000_000),
             online_cpus: Some(2),
             memory_usage_bytes: Some(1024),
+            memory_limit_bytes: None,
+            pids_current: None,
             network_rx_bytes: Some(10),
             network_tx_bytes: Some(15),
         };
