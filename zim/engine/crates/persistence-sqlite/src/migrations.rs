@@ -48,6 +48,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "instance_variables",
         sql: include_str!("../migrations/0004_instance_variables.sql"),
     },
+    Migration {
+        version: 5,
+        name: "user_recents",
+        sql: include_str!("../migrations/0005_user_recents.sql"),
+    },
 ];
 
 /// The highest version this binary knows how to apply.

@@ -1,5 +1,6 @@
 /**
- * ZIM default frontend — the tab model and session format (M22).
+ * ZIM default frontend — the tab model and session formats (M22,
+ * M23).
  *
  * Pure, DOM-free state for the tab strip: one tab per server or
  * workload view, addressed by `zim://` path (never tab index —
@@ -8,14 +9,34 @@
  * layer (`app.ts`) renders it and never re-derives tab state.
  *
  * The session format (§7) is deliberately boring: an array of
- * `zim://` URLs plus the active index. Restoration re-opens views
- * only — no lifecycle API is ever called as a side effect of
- * restoring (architecture invariants 3–6, and the roadmap's M22
- * acceptance line).
+ * tab entries (a `zim://` path, plus — since M23 — an optional
+ * split-view pairing) and the active index. Restoration re-opens
+ * views only — no lifecycle API is ever called as a side effect
+ * of restoring (architecture invariants 3–6, and the roadmap's
+ * acceptance lines).
+ *
+ * Format history: `zim.session.v1` (M22) stored bare path strings;
+ * `zim.session.v2` (M23) stores `{ path, split? }` entries. The
+ * v1 key is still read for upgrade; every write is v2.
  */
 import { isSafePath } from "./zimurl.js";
-/** localStorage key for the persisted tab set (§7). */
-export const SESSION_KEY = "zim.session.v1";
+import { clampRatio } from "./split.js";
+/** localStorage key for the persisted tab set (v2, M23). */
+export const SESSION_KEY = "zim.session.v2";
+/** The M22 key, read once more on upgrade (then superseded). */
+export const LEGACY_SESSION_KEY = "zim.session.v1";
+/** The per-window session key: the chrome's main window uses the
+ * primary key; a torn-off window (M23 multi-window) keeps its own
+ * tab set under a window-scoped key, so windows never clobber each
+ * other's sessions on the shared origin. Labels are shell-issued
+ * (`chrome-1`, …); an untrusted/odd label falls back to the primary
+ * key rather than reaching deeper into storage. */
+export function sessionKeyForWindow(label) {
+    if (label === null || !/^[A-Za-z0-9-]{1,64}$/.test(label) || label === "main") {
+        return SESSION_KEY;
+    }
+    return `${SESSION_KEY}.w:${label}`;
+}
 /** The tab strip's state machine. */
 export class TabModel {
     constructor() {
@@ -60,6 +81,9 @@ export class TabModel {
         const anchor = this.indexOf(this.activeIdInternal ?? -1);
         const at = options.index ?? (anchor >= 0 ? anchor + 1 : this.tabsInternal.length);
         const tab = { id: this.nextId++, path };
+        if (options.split !== undefined) {
+            tab.split = options.split;
+        }
         this.tabsInternal.splice(Math.min(Math.max(at, 0), this.tabsInternal.length), 0, tab);
         if (activate) {
             this.activeIdInternal = tab.id;
@@ -115,57 +139,167 @@ export class TabModel {
         tab.path = path;
         return true;
     }
+    /** The tab's split pairing, when it hosts two panes. */
+    splitOf(id) {
+        return this.byId(id)?.split ?? null;
+    }
+    /**
+     * Set (or clear) a tab's split. Setting a split on an already
+     * split tab re-pairs it (the old secondary pane is the caller's
+     * business — it unsubscribes before this is called). Returns
+     * whether anything changed.
+     */
+    setSplit(id, split) {
+        const tab = this.byId(id);
+        if (tab === null) {
+            return false;
+        }
+        if (split === null) {
+            if (tab.split === undefined) {
+                return false;
+            }
+            delete tab.split;
+            return true;
+        }
+        const clamped = clampRatio(split.ratio);
+        if (tab.split !== undefined && tab.split.path === split.path && tab.split.ratio === clamped) {
+            return false;
+        }
+        tab.split = { path: split.path, ratio: clamped };
+        return true;
+    }
+    /**
+     * Collapse a split to its secondary pane: the secondary surface
+     * becomes the tab's whole content (Chrome's "the surviving pane
+     * takes over"). Returns whether anything changed.
+     */
+    collapseSplitToSecondary(id) {
+        const tab = this.byId(id);
+        if (tab === null || tab.split === undefined) {
+            return false;
+        }
+        tab.path = tab.split.path;
+        delete tab.split;
+        return true;
+    }
+    /**
+     * Update the secondary pane's path (in-pane navigation inside a
+     * split). Returns whether anything changed.
+     */
+    updateSplitPath(id, path) {
+        const tab = this.byId(id);
+        if (tab === null || tab.split === undefined || tab.split.path === path) {
+            return false;
+        }
+        tab.split.path = path;
+        return true;
+    }
+    /**
+     * Update the divider position (drag / snap / double-click reset).
+     * The ratio is clamped here — the drag math may overshoot. Returns
+     * whether anything changed.
+     */
+    updateSplitRatio(id, ratio) {
+        const tab = this.byId(id);
+        if (tab === null || tab.split === undefined) {
+            return false;
+        }
+        const clamped = clampRatio(ratio);
+        if (tab.split.ratio === clamped) {
+            return false;
+        }
+        tab.split.ratio = clamped;
+        return true;
+    }
     /** Serialize the session (§7: `zim://` URLs, stable identifiers). */
     serialize() {
         const activeIndex = this.activeIdInternal === null ? -1 : this.indexOf(this.activeIdInternal);
         return {
-            v: 1,
-            tabs: this.tabsInternal.map((tab) => tab.path),
+            v: 2,
+            tabs: this.tabsInternal.map((tab) => {
+                const entry = { path: tab.path };
+                if (tab.split !== undefined) {
+                    // Three decimals: divider positions are visual, and tidy
+                    // numbers keep debounced writes diffable.
+                    entry.split = { path: tab.split.path, ratio: Math.round(tab.split.ratio * 1000) / 1000 };
+                }
+                return entry;
+            }),
             active: activeIndex,
         };
     }
 }
 /** The default session: one new-tab, active. */
 export function defaultSession() {
-    return { paths: ["newtab"], active: 0 };
+    return { tabs: [{ path: "newtab" }], active: 0 };
 }
 /**
- * Validate and revive a persisted session. Corrupt input (wrong
- * shape, unsafe paths) yields `null` — the caller falls back to
- * the default session. Duplicated URLs are legitimate (Chrome
- * allows two tabs on one page; so does ZIM — invariant 6: tabs are
- * views, not processes).
+ * Validate and revive a persisted session (v2 or legacy v1).
+ * Corrupt input (wrong shape, unsafe paths) yields `null` — the
+ * caller falls back to the default session. Duplicated URLs are
+ * legitimate (Chrome allows two tabs on one page; so does ZIM —
+ * invariant 6: tabs are views, not processes).
  */
 export function restoreSession(stored) {
     if (stored === null || typeof stored !== "object") {
         return null;
     }
+    // Validated field-by-field on purpose: the snapshot is machine-
+    // written but treated as untrusted, so the loose read comes
+    // first and every field proves itself below.
     const snapshot = stored;
-    if (snapshot.v !== 1 || !Array.isArray(snapshot.tabs) || snapshot.tabs.length === 0) {
+    const version = snapshot.v;
+    if (version !== 1 && version !== 2) {
+        return null;
+    }
+    if (!Array.isArray(snapshot.tabs) || snapshot.tabs.length === 0) {
         return null;
     }
     if (snapshot.tabs.length > 64) {
         // An absurd tab count is corruption, not a session.
         return null;
     }
-    const paths = [];
+    const tabs = [];
     for (const entry of snapshot.tabs) {
-        if (typeof entry !== "string" || entry.length === 0 || entry.length > 512) {
+        if (version === 1) {
+            // Legacy: bare path strings (no splits existed in M22).
+            if (typeof entry !== "string" || !safeStoredPath(entry)) {
+                return null;
+            }
+            tabs.push({ path: entry });
+            continue;
+        }
+        if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
             return null;
         }
-        // The session is machine-written (serialize()), but treat it
-        // as untrusted anyway: one bad path voids the session rather
-        // than being silently dropped (a dropped middle tab would
-        // silently renumber `active`).
-        if (!safeStoredPath(entry)) {
+        const shape = entry;
+        if (typeof shape.path !== "string" || !safeStoredPath(shape.path)) {
             return null;
         }
-        paths.push(entry);
+        const tab = { path: shape.path };
+        if (shape.split !== undefined) {
+            // Same discipline as paths: one bad split voids the session
+            // (a missing pane would silently change what restores).
+            if (shape.split === null || typeof shape.split !== "object") {
+                return null;
+            }
+            const split = shape.split;
+            if (typeof split.path !== "string" || !safeStoredPath(split.path)) {
+                return null;
+            }
+            if (typeof split.ratio !== "number" || !Number.isFinite(split.ratio)) {
+                return null;
+            }
+            // Ratio drift is not corruption — clamp, don't reject.
+            tab.split = { path: split.path, ratio: clampRatio(split.ratio) };
+        }
+        tabs.push(tab);
     }
-    const active = typeof snapshot.active === "number" ? snapshot.active : 0;
+    const activeRaw = snapshot.active;
+    const active = typeof activeRaw === "number" ? activeRaw : 0;
     return {
-        paths,
-        active: Math.min(Math.max(active, 0), paths.length - 1),
+        tabs,
+        active: Math.min(Math.max(active, 0), tabs.length - 1),
     };
 }
 /** Session entries carry bare paths (no scheme), so the predicate

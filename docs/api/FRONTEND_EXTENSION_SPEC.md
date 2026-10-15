@@ -86,6 +86,13 @@ in `zim/contracts/theme-tokens.v1.json`.
 A theme cannot introduce new tokens (the engine wouldn't know what
 to do with them). It can only override existing ones.
 
+**Status (M23):** the contract file exists and is canonical
+(`zim/contracts/theme-tokens.v1.json` — values, types, and the CSS
+custom-property each token maps onto). The default frontend's
+presets + accent pip (AD-27) apply this vocabulary live via CSSOM
+custom properties; the *package* machinery of §2.3 below remains
+M24 work — the spec is the contract it will implement.
+
 ### 2.3 Theme packaging and installation
 
 A theme is a `.zip` archive containing `zim.theme.json` at the

@@ -194,6 +194,22 @@ export interface FrontendActive {
   [key: string]: unknown;
 }
 
+/** One recent-servers row (`GET /me/recents`, M23): engine-backed
+ * app state per §11 — not a browser-history database. */
+export interface RecentEntry {
+  instance_id: string;
+  last_opened_at: string;
+  open_count: number;
+}
+
+/** One node row (`GET /nodes`) — the create-server dialog's node list. */
+export interface NodeRow {
+  id: string;
+  name: string;
+  status?: string;
+  [key: string]: unknown;
+}
+
 // ── Typed endpoint helpers ────────────────────────────────────────
 
 /** Engine health (unauthenticated). */
@@ -257,6 +273,53 @@ export async function power(id: string, operation: string): Promise<void> {
 /** The active frontend package's info (M11). */
 export async function frontendActive(): Promise<FrontendActive> {
   return api("/frontend/active");
+}
+
+// ── Recent servers, nodes, instance creation (M23 NTP) ───────────
+
+/** The caller's recent servers (most-recent first). */
+export async function listRecents(limit = 8): Promise<RecentEntry[]> {
+  const clamped = Math.min(Math.max(Math.floor(limit), 1), 32);
+  const body = await api<{ data: RecentEntry[] }>(`/me/recents?limit=${clamped}`);
+  return body.data;
+}
+
+/** Record that the caller opened a server view (fire-and-forget by
+ * design: recents are a nicety — failures are swallowed by the
+ * caller, never surfaced as chrome errors). */
+export async function recordRecent(instanceId: string): Promise<void> {
+  await api("/me/recents", { body: { instance_id: instanceId } });
+}
+
+/** List nodes (admin-visible; the create dialog degrades honestly
+ * when this is a 403). */
+export async function listNodes(): Promise<NodeRow[]> {
+  const envelope = await api<ListEnvelope<NodeRow>>("/nodes");
+  return envelope.data;
+}
+
+/** The engine's `POST /instances` request shape (create + import). */
+export interface CreateInstanceRequest {
+  name: string;
+  node_id: string;
+  owner_id?: string;
+  egg_id?: string;
+  allocation_id?: number;
+  limits?: Record<string, unknown>;
+  startup?: string;
+  image?: string;
+  description?: string;
+  external_id?: string;
+  allocation_limit?: number;
+  database_limit?: number;
+  backup_limit?: number;
+  crash_detection_enabled?: boolean;
+  kind?: string;
+}
+
+/** Create a server (admin-only engine-side; 201 returns the row). */
+export async function createInstance(request: CreateInstanceRequest): Promise<Instance> {
+  return api("/instances", { body: request });
 }
 
 /** The recent resource-usage view (`GET /instances/{id}/metrics`):

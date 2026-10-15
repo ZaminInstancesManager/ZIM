@@ -2394,3 +2394,117 @@ async fn install_endpoint_runs_the_script_and_stamps_installed_at() {
         .unwrap()
         .contains("not found"));
 }
+
+// ── Recent servers (M23 NTP quick-access) ─────────────────────────
+
+#[tokio::test]
+async fn recents_record_rank_and_isolate_per_user() {
+    let engine = TestEngine::start().await;
+    engine.seed_user("admin@zim.local", "admin pass", true);
+    engine.seed_user("stranger@zim.local", "stranger pass", false);
+    let admin_cookie = login(&engine, "admin@zim.local", "admin pass")
+        .await
+        .expect("admin login");
+    let stranger_cookie = login(&engine, "stranger@zim.local", "stranger pass")
+        .await
+        .expect("stranger login");
+
+    // Anonymous access is a 401 — recents are user-scoped state.
+    let response = engine
+        .client
+        .get(engine.url("/me/recents"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 401);
+    let response = engine
+        .client
+        .post(engine.url("/me/recents"))
+        .json(&json!({ "instance_id": "00000000-0000-0000-0000-000000000000" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 401);
+
+    // Two real servers (node + free allocation first, per the M5 flow).
+    let (node, _) = seed_node_with_allocations(&engine, &admin_cookie).await;
+    let mut instances = Vec::new();
+    for name in ["alpha", "beta"] {
+        let response = engine
+            .client
+            .post(engine.url("/instances"))
+            .header("Cookie", format!("zim_session={admin_cookie}"))
+            .json(&json!({ "name": name, "node_id": node["id"] }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 201);
+        instances.push(response.json::<Value>().await.unwrap());
+    }
+    let alpha = instances[0]["id"].as_str().unwrap().to_owned();
+    let beta = instances[1]["id"].as_str().unwrap().to_owned();
+
+    // Recording an unknown instance is a 404, not a silent row.
+    let response = engine
+        .client
+        .post(engine.url("/me/recents"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .json(&json!({ "instance_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 404);
+
+    // Open alpha twice, then beta once: rank by recency, count opens.
+    for id in [&alpha, &alpha, &beta] {
+        let response = engine
+            .client
+            .post(engine.url("/me/recents"))
+            .header("Cookie", format!("zim_session={admin_cookie}"))
+            .json(&json!({ "instance_id": id }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 204);
+    }
+
+    let response = engine
+        .client
+        .get(engine.url("/me/recents"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
+    let data = body["data"].as_array().unwrap();
+    assert_eq!(data.len(), 2);
+    assert_eq!(data[0]["instance_id"].as_str().unwrap(), beta);
+    assert_eq!(data[0]["open_count"].as_u64().unwrap(), 1);
+    assert!(data[0]["last_opened_at"].as_str().is_some());
+    assert_eq!(data[1]["instance_id"].as_str().unwrap(), alpha);
+    assert_eq!(data[1]["open_count"].as_u64().unwrap(), 2);
+
+    // `limit` is honored.
+    let response = engine
+        .client
+        .get(engine.url("/me/recents?limit=1"))
+        .header("Cookie", format!("zim_session={admin_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["data"].as_array().unwrap().len(), 1);
+
+    // The stranger's recents stay empty (per-user state).
+    let response = engine
+        .client
+        .get(engine.url("/me/recents"))
+        .header("Cookie", format!("zim_session={stranger_cookie}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["data"].as_array().unwrap().len(), 0);
+}

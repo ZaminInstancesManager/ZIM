@@ -140,7 +140,7 @@ export function buildSuggestions(
 
 /** The empty-query rows: surfaces first, then a handful of
  * consoles (Chrome shows most-visited tiles; ZIM's equivalent is
- * the instance list, M23's NTP work turns this into recency). */
+ * the instance list — the NTP's recents rank the tiles since M23). */
 function defaultRows(context: { instances: SuggestibleInstance[]; signedIn: boolean }): Suggestion[] {
   const rows: Suggestion[] = STATIC_SURFACES.map((surface) => ({
     kind: "surface" as const,

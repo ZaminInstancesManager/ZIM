@@ -18,7 +18,7 @@ use zim_engine_domain::{
     Allocation, AllocationId, AuditRecord, Backup, BackupId, CommandTemplate, Egg, EggId,
     EggVariable, ExtensionId, ExtensionRegistration, ExtensionSignature, Instance, InstanceId,
     InstanceStatus, InstanceVariable, Job, JobId, JobState, Node, NodeId, Permission,
-    PermissionSet, Schedule, ScheduleId, Transfer, TransferId, User, UserId,
+    PermissionSet, RecentServer, Schedule, ScheduleId, Transfer, TransferId, User, UserId,
 };
 
 // ─── Error & conversion helpers ───────────────────────────────────────────
@@ -661,6 +661,61 @@ impl Persistence for crate::SqlitePersistence {
 
     fn list_permissions_by_user(&self, user: &UserId) -> Result<Vec<Permission>, PersistenceError> {
         self.list_permissions_where("WHERE user_id = ?1", params![uuid_to_text(user)])
+    }
+
+    // ── Recent servers (M23 NTP quick-access, §11) ──────────────
+
+    fn record_recent_server(
+        &self,
+        user: &UserId,
+        instance: &InstanceId,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), PersistenceError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO user_recents (user_id, instance_id, last_opened_at, open_count)
+                 VALUES (?1, ?2, ?3, 1)
+                 ON CONFLICT (user_id, instance_id) DO UPDATE SET
+                    last_opened_at = excluded.last_opened_at,
+                    open_count = user_recents.open_count + 1",
+                params![uuid_to_text(user), uuid_to_text(instance), ts(&now)],
+            )
+            .map_err(db_err)?;
+            // The cap: keep the newest 32 per user — quick access,
+            // not a history database (§11).
+            conn.execute(
+                "DELETE FROM user_recents WHERE user_id = ?1 AND rowid NOT IN (
+                     SELECT rowid FROM user_recents WHERE user_id = ?1
+                     ORDER BY last_opened_at DESC, instance_id LIMIT 32
+                 )",
+                params![uuid_to_text(user)],
+            )
+            .map(|_| ())
+            .map_err(db_err)
+        })
+    }
+
+    fn list_recent_servers(
+        &self,
+        user: &UserId,
+        limit: u32,
+    ) -> Result<Vec<RecentServer>, PersistenceError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT instance_id, last_opened_at, open_count FROM user_recents
+                     WHERE user_id = ?1
+                     ORDER BY last_opened_at DESC, instance_id
+                     LIMIT ?2",
+                )
+                .map_err(db_err)?;
+            let capped = i64::from(limit.min(64));
+            let mut rows = stmt
+                .query(params![uuid_to_text(user), capped])
+                .map_err(db_err)?;
+            let owner = *user;
+            collect_rows(&mut rows, move |row| row_to_recent(row, owner))
+        })
     }
 
     // ── Jobs ────────────────────────────────────────────────────────
@@ -1442,6 +1497,15 @@ fn row_to_allocation(row: &rusqlite::Row<'_>) -> Result<Allocation, PersistenceE
             .transpose()?
             .map(UuidInto::into_id),
         note: row.get(5).map_err(db_err)?,
+    })
+}
+
+fn row_to_recent(row: &rusqlite::Row<'_>, user: UserId) -> Result<RecentServer, PersistenceError> {
+    Ok(RecentServer {
+        user_id: user,
+        instance_id: uuid_from_text(&row.get::<_, String>(0).map_err(db_err)?, "instance")?.into(),
+        last_opened_at: parse_ts(&row.get::<_, String>(1).map_err(db_err)?)?,
+        open_count: row.get::<_, i64>(2).map_err(db_err)?.max(1) as u64,
     })
 }
 

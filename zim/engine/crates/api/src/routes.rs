@@ -10,7 +10,9 @@ use axum::middleware::from_fn_with_state;
 use axum::routing::{delete, get, patch, post};
 use axum::Router;
 
-use crate::handlers::{audit, auth, eggs, frontend, instances, misc, nodes, pages, stream, users};
+use crate::handlers::{
+    audit, auth, eggs, frontend, instances, misc, nodes, pages, recents, stream, users,
+};
 use crate::middleware;
 use crate::state::AppState;
 
@@ -57,6 +59,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/auth/oauth/{provider}/callback", get(auth::oauth_callback))
         // ── Users (§10.2) ─────────────────────────────────────────
         .route("/users/me", get(users::me))
+        .route("/me/recents", get(recents::list).post(recents::record))
         .route("/users", get(users::list).post(users::create))
         .route(
             "/users/{id}",

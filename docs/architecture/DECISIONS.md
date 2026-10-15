@@ -687,6 +687,134 @@ no lifecycle API is called as a side effect of loading the chrome.
   so the embedded bytes actually execute.
 
 
+### AD-25: The split view is tab-level state — two panes, one divider, one stream each. (2026-10-15)
+
+**Status:** Accepted (implements `BROWSER_INTEGRATION.md` §8; the
+M23 split-view deliverable).
+
+**Context:** §8 requires two panes per split with independent
+streams and per-tab metadata, with Chrome 126's split-tab
+interaction (divider drag, pane focus, resize snapping). The shape
+of the model — a pane tree (arbitrary nesting), a window-level
+pane grid, or a tab-level pairing — determines the session format,
+the DOM, and the close semantics.
+
+**Decision:** A split is a property of a tab: `{path, ratio}` —
+the secondary pane's `zim://` path and the divider position,
+clamped to `[0.2, 0.8]`, snapped to halves and thirds during
+drags (3% tolerance, visibly marked). One split per tab, no
+nesting (Chrome's split tab is two panes, not a tree). Each pane
+is its own iframe with its own §11 stream subscription; the
+omnibox navigates the focused pane. Closing the secondary pane
+(`setSplit(null)`) unsubscribes only that pane; collapsing to the
+secondary promotes its path. The pairing serializes into session
+v2; a torn-out split tab carries both paths and the ratio. Not
+shipped: split-all and cross-window drag-merge (polish behind the
+acceptance line; the merge path is AD-26's).
+
+**Consequences:** the model stays pure and unit-testable
+(`src/split.ts`, the `tabs.ts` v2 round-trips); the DOM layer
+reconciles panes like it reconciles the strip; and the §8
+acceptance ("closing a pane unsubscribes only that pane") is true
+by construction — the close path touches exactly one pane's
+stream.
+
+### AD-26: Multi-window is shell-owned webviews with per-window session keys; the chrome reaches the shell through Tauri commands. (2026-10-15)
+
+**Status:** Accepted (completes AD-24's deferred multi-window; the
+M23 window deliverable).
+
+**Context:** AD-24 left tear-off/merge to M23: page JS cannot
+create native windows, and all chrome windows share one engine
+origin — a shared session key would make windows clobber each
+other's tab sets.
+
+**Decision:** Four parts:
+
+1. **Windows are shell state.** `zim_tear_off` (paths validated
+   through the `zim://` grammar, AD-23) and `zim_new_window`
+   create `chrome-{n}` webview windows at
+   `/zim/app?window={label}`; `windows.json` persists the window
+   set (corrupt = empty) and remembered windows are recreated
+   after attach. The main window stays the disposable M21 window.
+2. **Sessions are per-window.** Each chrome window persists under
+   `zim.session.v2.w:{label}` (hostile labels fall back to the
+   primary key); the shell never learns tab state — it stores
+   labels only.
+3. **Merge is an event relay.** `zim_merge_to_main` forwards the
+   caller's whole v2 session (size-capped) to the main window as
+   `zim:merge-session`; the main chrome validates it with the same
+   restore discipline as its own storage (corrupt input ignored,
+   never fatal) and the shell closes the merged window.
+4. **The tray's "New tab" is in-place** (`zim:new-tab` event, no
+   reload — panes keep streams and console buffers), with the
+   `?newtab=1` navigation as the fallback.
+
+**CSP consequence:** the engine's page CSP gains `ipc:` and
+`http://ipc.localhost` in `connect-src` — Tauri's IPC schemes, the
+same direction of trust the shell's bundled pages already use. The
+schemes terminate in the shell process (no network reach); in
+plain browsers they never resolve and every caller degrades
+(tear-off falls back to `window.open`, merge never appears).
+
+### AD-27: Themes ship as frontend presets + an accent pip, applied live via CSSOM; the token vocabulary is a versioned contract file. (2026-10-15)
+
+**Status:** Accepted (the M23 themes deliverable; the Themes row of
+`BROWSER_INTEGRATION.md` §12).
+
+**Context:** `FRONTEND_EXTENSION_SPEC.md` §2 specifies a full theme
+*package* system (`.zip` upload, `POST /api/v1/themes`, admin-only)
+— but M23's acceptance line is "themes apply live" with presets,
+and the package machinery is the addon milestone's (M24) problem.
+
+**Decision:** The default frontend ships five presets (ZIM Dark —
+the defaults; Midnight; Forest; Ember; Paper, one light theme)
+plus a user accent pip, persisted under `zim.theme.v1` and applied
+live by writing CSS custom properties onto `:root` through the
+CSSOM — CSSOM property writes are not markup style attributes, so
+`style-src 'self'` (§3.8 CSP) is untouched. The shadow-root
+component styles are re-tokenized to `var(--…, fallback)` so
+custom properties inherit through the shadow boundaries. The
+engine-defined token vocabulary ships as
+`zim/contracts/theme-tokens.v1.json` (values-only, no new tokens,
+documented mappings to the CSS properties) — the vocabulary
+M24's package upload will validate against. Packaged-theme upload
+itself stays M24.
+
+**Consequences:** the same token names now live in three
+lockstep places (`main.css` `:root`, `theme.ts` `DEFAULT_TOKENS`,
+the contract file) — deliberate, documented in the contract, and
+diffable; a future linter can check it.
+
+### AD-28: Recent/frequent servers are engine-backed per-user state, capped and unaudited. (2026-10-15)
+
+**Status:** Accepted (implements §11's quick-access rule; the M23
+NTP recents deliverable).
+
+**Context:** §11 says ZIM's quick-access and recent-servers
+features are *engine-backed app state, not a browser-history
+database*. The pre-M23 seed was a single localStorage key
+(`zim.lastConsole`), which is browser state — the honest fix is an
+engine endpoint.
+
+**Decision:** `GET/POST /api/v1/me/recents` — user-scoped rows
+`(user, instance, last_opened_at, open_count)`, persisted
+(migration 0005), capped at the newest 32 per user on write
+(quick access, not history), listed most-recent-first with
+`limit` clamped to `[1, 32]`. Recording requires the instance to
+exist (404 otherwise). Opens are **not audited**: an open is
+high-frequency nicety state, not a lifecycle mutation — the audit
+log stays for actions that move engine authority. Stale rows for
+deleted instances are harmless orphans; the NTP filters them by
+merging with the visible instance list. The chrome records pane
+adoptions fire-and-forget, once per adoption, only while signed
+in.
+
+**Consequences:** recents survive engine restarts (durable rows)
+and reset never silently on cache clears; the localStorage seed
+(`zim.lastConsole`) remains as the console page's own quick link.
+
+
 ## 2. Unresolved questions
 
 These are open architectural questions that need further

@@ -689,8 +689,8 @@ fn port_trait_object_dispatch_works() {
     let node = sample_node("via-trait");
     port.put_node(&node).unwrap();
     assert_eq!(port.get_node(&node.id).unwrap().unwrap(), node);
-    // Migration 0004 (instance_variables) is the current head.
-    assert_eq!(port.schema_version().unwrap(), 4);
+    // Migration 0005 (user_recents) is the current head.
+    assert_eq!(port.schema_version().unwrap(), 5);
 }
 
 #[test]
@@ -926,4 +926,79 @@ fn instance_variables_upsert_and_round_trip() {
     assert!(overrides
         .iter()
         .all(|variable| variable.value != "other.jar"));
+}
+
+#[test]
+fn recents_roundtrip_rank_counts_and_isolation() {
+    // M23: the NTP quick-access state — one row per (user, instance),
+    // ranked by recency, counted per open, isolated per user.
+    let store = migrated_store();
+    let node = sample_node("recents-node");
+    store.put_node(&node).unwrap();
+    let owner = sample_user("recents@example.org");
+    store.put_user(&owner).unwrap();
+    let allocation = sample_allocation(&node, 25565);
+    store.put_allocation(&allocation).unwrap();
+    let mut a = sample_instance(&node, &owner, &allocation);
+    let mut b = sample_instance(&node, &owner, &allocation);
+    // `external_id` is UNIQUE; the samples share the placeholder.
+    a.external_id = Some("recents-a".to_owned());
+    b.external_id = Some("recents-b".to_owned());
+    store.put_instance(&a).unwrap();
+    store.put_instance(&b).unwrap();
+
+    // Open A twice, then B once: B ranks first (recency), A keeps
+    // its count.
+    let t0 = chrono::Utc::now();
+    store.record_recent_server(&owner.id, &a.id, t0).unwrap();
+    store
+        .record_recent_server(&owner.id, &a.id, t0 + chrono::Duration::seconds(5))
+        .unwrap();
+    store
+        .record_recent_server(&owner.id, &b.id, t0 + chrono::Duration::seconds(10))
+        .unwrap();
+
+    let rows = store.list_recent_servers(&owner.id, 8).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].instance_id, b.id);
+    assert_eq!(rows[0].open_count, 1);
+    assert_eq!(rows[1].instance_id, a.id);
+    assert_eq!(rows[1].open_count, 2);
+    assert_eq!(rows[1].user_id, owner.id);
+    assert!(rows[0].last_opened_at >= rows[1].last_opened_at);
+
+    // The limit is honored.
+    assert_eq!(store.list_recent_servers(&owner.id, 1).unwrap().len(), 1);
+
+    // Another user sees nothing (user-scoped state).
+    let other = sample_user("other@example.org");
+    store.put_user(&other).unwrap();
+    assert!(store.list_recent_servers(&other.id, 8).unwrap().is_empty());
+}
+
+#[test]
+fn recents_cap_keeps_the_newest_32() {
+    // Quick access, not a history database (§11): the store trims
+    // to the newest 32 per user on every record.
+    let store = migrated_store();
+    let node = sample_node("cap-node");
+    store.put_node(&node).unwrap();
+    let owner = sample_user("cap@example.org");
+    store.put_user(&owner).unwrap();
+    let allocation = sample_allocation(&node, 25566);
+    store.put_allocation(&allocation).unwrap();
+    let base = chrono::Utc::now();
+    for i in 0..40 {
+        let mut instance = sample_instance(&node, &owner, &allocation);
+        instance.external_id = None; // UNIQUE; the placeholder would collide.
+        store.put_instance(&instance).unwrap();
+        store
+            .record_recent_server(&owner.id, &instance.id, base + chrono::Duration::seconds(i))
+            .unwrap();
+    }
+    let rows = store.list_recent_servers(&owner.id, 64).unwrap();
+    assert_eq!(rows.len(), 32);
+    // The newest opening survived the trim; the oldest did not.
+    assert_eq!(rows[0].open_count, 1);
+    assert!(rows[0].last_opened_at > rows[31].last_opened_at);
 }

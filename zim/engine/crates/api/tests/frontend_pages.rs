@@ -325,10 +325,20 @@ async fn pages_serve_the_default_frontend_with_csp() {
     // M22 (AD-24): the app chrome's same-origin iframe panes.
     assert!(csp.contains("frame-src 'self'"));
     assert!(csp.contains("frame-ancestors 'self'"));
+    // M23 (AD-26): the chrome's shell-command channel (Tauri IPC).
+    assert!(csp.contains("ipc:"));
+    assert!(csp.contains("http://ipc.localhost"));
     assert_eq!(response.headers()["x-content-type-options"], "nosniff");
     assert_eq!(response.headers()["x-frame-options"], "SAMEORIGIN");
     let body = response.text().await.unwrap();
     assert!(body.contains("ZIM"));
+    // M23: the completed NTP grammar — centered search, tile grid,
+    // actions, customization entry point (§9/§12).
+    assert!(body.contains("id=\"ntp-search\""));
+    assert!(body.contains("id=\"recent-tiles\""));
+    assert!(body.contains("id=\"all-tiles\""));
+    assert!(body.contains("id=\"theme-presets\""));
+    assert!(body.contains("id=\"create-dialog\""));
 
     // The M22 application chrome surface.
     let response = engine

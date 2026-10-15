@@ -544,20 +544,71 @@ a:hover, a:focus-visible { text-decoration: underline; }
   opacity: 0.75;
 }
 
-/* The panes: one iframe per tab; only the active one shows, all
- * stay loaded (background tabs keep their streams). */
+/* The panes: one host per tab (primary iframe, split divider,
+ * secondary iframe); only the active host shows, all stay loaded
+ * (background tabs keep their streams). */
 .panes {
   flex: 1;
   position: relative;
   background: var(--color-background);
 }
-.pane-frame {
+.pane-host {
   position: absolute;
   inset: 0;
-  width: 100%;
+  display: flex;
+  flex-direction: row;
+}
+.pane-host[hidden] { display: none; }
+.pane-frame {
+  flex: 1 1 0;
+  min-width: 0;
   height: 100%;
   border: none;
   background: var(--color-background);
+}
+/* Split (§8): the primary pane takes `ratio` of the content width
+ * (minus the divider); the secondary takes the rest. The ratio is
+ * a CSSOM-written custom property (CSP-clean live layout). */
+.pane-host[data-split="1"] .pane-primary {
+  flex: 0 0 calc(var(--split-ratio, 0.5) * (100% - 6px));
+}
+.pane-host[data-split="1"] .pane-secondary {
+  flex: 1 1 0;
+}
+.split-divider {
+  position: relative;
+  flex: 0 0 6px;
+  margin: 0;
+  background: var(--color-surface-2);
+  cursor: col-resize;
+  touch-action: none;
+}
+.split-divider:hover, .split-divider:focus-visible {
+  background: var(--color-text-secondary);
+  outline: none;
+}
+.split-divider.split-snap { background: var(--color-accent); }
+.split-close {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--color-surface-2);
+  border-radius: var(--radius-small);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.split-close:hover { color: var(--color-danger); border-color: var(--color-danger); }
+/* The focused pane gets a hairline — Chrome's split-pane focus. */
+.pane-focused {
+  box-shadow: inset 0 0 0 1px var(--color-text-secondary);
 }
 
 /* The suggestion dropdown (under the omnibox pill, Chrome's
@@ -646,3 +697,305 @@ a:hover, a:focus-visible { text-decoration: underline; }
 
 /* The stub pages' shared bits. */
 .page-stub .quicklinks { margin-top: var(--spacing-unit); }
+
+/* ── The new-tab page (§9: Chrome NTP grammar) ─────────────────── */
+
+/* Centered identity + search, Chrome-NTP style. */
+.ntp-hero { text-align: center; }
+.ntp-search-row {
+  max-width: 560px;
+  margin: 14px auto 0;
+}
+.ntp-search {
+  width: 100%;
+  padding: 10px 16px;
+  border: 1px solid var(--color-surface-2);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 14px;
+}
+.ntp-search:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+.ntp-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.ntp-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid var(--color-surface-2);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.ntp-action:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.ntp-action[hidden] { display: none; }
+
+/* The tile grid: recents + all servers. */
+.ntp-section { margin-top: 22px; }
+.ntp-heading {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+.ntp-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+.ntp-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-surface-2);
+  border-radius: var(--radius-medium);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  text-decoration: none;
+}
+.ntp-tile:hover, .ntp-tile:focus-visible {
+  border-color: var(--color-accent);
+  text-decoration: none;
+}
+.ntp-tile-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  margin-bottom: 2px;
+}
+.ntp-tile-dot[data-color="green"]  { background: var(--color-indicator-running); }
+.ntp-tile-dot[data-color="yellow"] { background: var(--color-indicator-starting); }
+.ntp-tile-dot[data-color="red"]    { background: var(--color-indicator-crashed); }
+.ntp-tile-dot[data-color="blue"]   { background: var(--color-indicator-stopped); }
+.ntp-tile-dot[data-color="gray"]   { background: var(--color-indicator-unknown); }
+.ntp-tile-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ntp-tile-meta {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+.ntp-empty {
+  margin: 6px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+}
+
+/* Workload-type browsing (game servers now; kinds land with M16). */
+.ntp-workloads {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.ntp-workload {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: 1px solid var(--color-surface-2);
+  border-radius: var(--radius-medium);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  text-decoration: none;
+}
+a.ntp-workload:hover { border-color: var(--color-accent); }
+.ntp-workload-icon { color: var(--color-accent); }
+.ntp-workload-soon {
+  color: var(--color-text-secondary);
+  cursor: default;
+}
+.ntp-workload-soon-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--color-surface-2);
+}
+
+/* ── Dialogs (create / import / customize) ─────────────────────── */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 8;
+  padding: 24px;
+}
+.dialog-backdrop[hidden] { display: none; }
+.dialog {
+  width: min(520px, 100%);
+  max-height: 86vh;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-surface-2);
+  border-radius: var(--radius-large);
+  padding: 20px 22px;
+}
+.dialog-title {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+.dialog-note {
+  margin: 0 0 14px;
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+}
+.dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
+}
+.dialog-field em { text-transform: none; letter-spacing: 0; }
+.dialog-field input, .dialog-field select, .dialog-field textarea {
+  padding: 8px 10px;
+  border: 1px solid var(--color-surface-2);
+  border-radius: var(--radius-small);
+  background: var(--color-background);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.dialog-field textarea {
+  font-family: var(--typography-mono-family);
+  resize: vertical;
+}
+.dialog-field input:focus-visible, .dialog-field select:focus-visible,
+.dialog-field textarea:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+.dialog-problem {
+  margin: 0;
+  min-height: 1em;
+  color: var(--color-danger);
+  font-size: 12px;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.dialog-cancel, .dialog-go {
+  padding: 7px 16px;
+  border-radius: var(--radius-small);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.dialog-cancel {
+  border: 1px solid var(--color-surface-2);
+  background: transparent;
+  color: var(--color-text-primary);
+}
+.dialog-go {
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-background);
+}
+.dialog-go[aria-busy="true"] { opacity: 0.6; cursor: progress; }
+
+/* ── The customize panel (theme presets + accent pip) ──────────── */
+
+.theme-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.theme-preset {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  border: 1px solid var(--color-surface-2);
+  border-radius: var(--radius-medium);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.theme-preset[aria-checked="true"] { border-color: var(--color-accent); }
+.theme-pip {
+  grid-row: 1 / span 2;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid var(--color-surface-2);
+}
+.theme-preset-name { font-size: 13px; font-weight: 600; }
+.theme-preset-note {
+  grid-column: 2;
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+}
+.theme-accent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+}
+.theme-accent-row input[type="color"] {
+  width: 32px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--color-surface-2);
+  border-radius: var(--radius-small);
+  background: none;
+  cursor: pointer;
+}
+.theme-accent-reset {
+  border: 1px solid var(--color-surface-2);
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 11.5px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+/* ── Split-tab hint in the strip ───────────────────────────────── */
+
+.tab.tab-split .tab-title::after {
+  content: "◫";
+  margin-left: 5px;
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}

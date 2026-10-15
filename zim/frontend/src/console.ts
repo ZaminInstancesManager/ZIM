@@ -10,6 +10,10 @@
 import { ApiError, consoleBuffer, consoleInput, getInstance, getState, power } from "./api";
 import { ZimStream } from "./stream";
 import "./components";
+import { initThemeFromStorage } from "./theme";
+
+// The theme applies before anything renders (M23: live, everywhere).
+initThemeFromStorage();
 
 /** Where the instance id lives: `/zim/servers/{id}/console`. */
 function instanceIdFromPath(): string | null {

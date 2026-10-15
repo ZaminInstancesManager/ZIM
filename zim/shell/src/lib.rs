@@ -23,6 +23,7 @@ pub mod engine;
 pub mod state;
 pub mod tray;
 pub mod trust;
+pub mod windows;
 pub mod zim_url;
 
 use std::sync::atomic::Ordering;
@@ -35,7 +36,11 @@ use crate::state::{EngineStatus, Phase, Shared};
 /// The event the bundled pages listen for (`engine-status`).
 const STATUS_EVENT: &str = "engine-status";
 
-/// The window label (M21 keeps exactly one).
+/// The shell→chrome in-place channel events (M23).
+const NEW_TAB_EVENT: &str = "zim:new-tab";
+
+/// The window label (M21 keeps exactly one *main* window; torn-out
+/// chrome windows carry `chrome-{n}` labels since M23).
 const MAIN_WINDOW: &str = "main";
 
 /// Entry: parse, build, run.
@@ -50,9 +55,19 @@ pub fn run() {
         .manage(Arc::new(Shared::new(options)))
         .invoke_handler(tauri::generate_handler![
             commands::engine_status,
-            commands::engine_retry
+            commands::engine_retry,
+            commands::zim_window_label,
+            commands::zim_tear_off,
+            commands::zim_merge_to_main,
+            commands::zim_new_window
         ])
         .setup(|app| {
+            // The window registry lives in the app-data dir; load it
+            // before anything might read it.
+            if let Ok(dir) = app.path().app_data_dir() {
+                let shared = app.state::<Arc<Shared>>();
+                shared.windows.load(&dir);
+            }
             tray::init(app.handle())?;
             spawn_attach_thread(
                 app.handle().clone(),
@@ -130,6 +145,11 @@ fn run_attach(app: &AppHandle, shared: &Arc<Shared>) {
                         let _ = window.set_title(&format!("ZIM — 127.0.0.1:{port}"));
                     }
                     tray::set_engine_tooltip(app, &format!("ZIM — engine 127.0.0.1:{port}"));
+                    // M23: recreate the remembered chrome windows —
+                    // each restores its own per-window session from
+                    // the engine origin's storage; nothing about tab
+                    // state crosses the IPC boundary.
+                    restore_chrome_windows(app, &origin);
                 }
                 Err(e) => {
                     let status = EngineStatus {
@@ -148,6 +168,23 @@ fn run_attach(app: &AppHandle, shared: &Arc<Shared>) {
             tray::set_engine_tooltip(app, "ZIM — engine unreachable");
         }
         _ => {}
+    }
+}
+
+/// Recreate the remembered chrome windows at the engine origin
+/// (M23 multi-window restore). Windows whose label already exists
+/// (a fast retry inside one boot) are left alone.
+fn restore_chrome_windows(app: &AppHandle, origin: &str) {
+    let shared = app.state::<Arc<Shared>>();
+    for label in shared.windows.labels() {
+        if app.get_webview_window(&label).is_some() {
+            continue;
+        }
+        let url = format!("{origin}/zim/app?window={label}");
+        if let Err(e) = commands::create_chrome_window(app, &label, &url) {
+            eprintln!("zim_shell: restoring window {label} failed: {e}");
+            shared.windows.remove(&label);
+        }
     }
 }
 
@@ -217,21 +254,31 @@ fn navigate_to_page(app: &AppHandle, page: &str) {
     }
 }
 
-/// The tray's "New tab" (M22): open the application chrome with a
-/// fresh tab. `zim_url::resolve` deliberately rejects query strings
-/// (the identifier grammar, AD-23), so this builds the loadable HTTP
-/// form directly — the chrome reads `?newtab=1` on load and restores
-/// the session plus one new tab. Reloading the chrome page is the
-/// honest cost here: session restore re-opens every tab as a view,
-/// and the panes re-fetch their own data (console buffers included);
-/// an in-place event channel arrives with the M23 window work.
+/// The tray's "New tab" (M23): an in-place event to the loaded
+/// chrome — no reload, the panes keep their streams and console
+/// buffers. The `?newtab=1` navigation remains as the fallback for
+/// the rare case the chrome is not yet listening (the emit failed
+/// or the page is still booting).
 pub fn open_new_tab(app: &AppHandle) -> Result<(), String> {
     let shared = app.state::<Arc<Shared>>();
-    let port = shared
-        .get()
-        .port
-        .ok_or_else(|| "the engine is not attached yet".to_owned())?;
-    navigate_to_engine_url(app, &format!("https://127.0.0.1:{port}/zim/app?newtab=1"))
+    if shared.get().port.is_none() {
+        return Err("the engine is not attached yet".to_owned());
+    }
+    if app.get_webview_window(MAIN_WINDOW).is_none() {
+        return Err("the main window is gone".to_owned());
+    }
+    match app.emit_to(MAIN_WINDOW, NEW_TAB_EVENT, ()) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            // Fallback: the honest reload (M22 behavior).
+            let port = shared
+                .get()
+                .port
+                .ok_or_else(|| "the engine is not attached yet".to_owned())?;
+            eprintln!("zim_shell: in-place new-tab event failed ({e}); reloading");
+            navigate_to_engine_url(app, &format!("https://127.0.0.1:{port}/zim/app?newtab=1"))
+        }
+    }
 }
 
 /// Emit a status snapshot to the bundled pages.

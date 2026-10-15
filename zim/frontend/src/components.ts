@@ -26,7 +26,13 @@ function relayToParent(type: string, detail?: unknown): void {
   }
 }
 
-/** Shared constructable stylesheet for the shadow roots. */
+/** Shared constructable stylesheet for the shadow roots.
+ *
+ * Tokenized against the theme custom properties (M23): custom
+ * properties inherit through shadow boundaries, so a live theme
+ * recolors the components too. The `var(--…, fallback)` spellings
+ * keep the components honest when embedded outside the app's
+ * stylesheet (each fallback is the default theme's value). */
 const shadowCss = new CSSStyleSheet();
 shadowCss.replaceSync(`
   :host { display: block; }
@@ -38,22 +44,22 @@ shadowCss.replaceSync(`
     border-radius: 999px;
     vertical-align: middle;
     margin-right: 6px;
-    background: #9ca3af;
+    background: var(--color-indicator-unknown, #9ca3af);
     flex: none;
   }
-  .dot-green  { background: #22c55e; }
-  .dot-yellow { background: #f59e0b; }
-  .dot-red    { background: #ef4444; }
-  .dot-blue   { background: #3b82f6; }
-  .dot-gray   { background: #9ca3af; }
+  .dot-green  { background: var(--color-indicator-running, #22c55e); }
+  .dot-yellow { background: var(--color-indicator-starting, #f59e0b); }
+  .dot-red    { background: var(--color-indicator-crashed, #ef4444); }
+  .dot-blue   { background: var(--color-indicator-stopped, #3b82f6); }
+  .dot-gray   { background: var(--color-indicator-unknown, #9ca3af); }
   .dot-label {
     font-size: 12px;
-    color: #9aa1ac;
+    color: var(--color-text-secondary, #9aa1ac);
     vertical-align: middle;
   }
   .dot-crash::after {
     content: "!";
-    color: #ef4444;
+    color: var(--color-indicator-crashed, #ef4444);
     font-weight: 700;
     font-size: 11px;
     margin-left: 3px;
@@ -75,7 +81,7 @@ shadowCss.replaceSync(`
    * maps onto --progress via the CSSOM — CSP forbids style
    * attributes in markup, not CSSOM writes). */
   .dot-progress {
-    background: conic-gradient(#f59e0b calc(var(--progress, 0) * 360deg), #24282f 0);
+    background: conic-gradient(var(--color-indicator-starting, #f59e0b) calc(var(--progress, 0) * 360deg), var(--color-surface-2, #24282f) 0);
   }
   /* The small tab-strip variant (favicon-slot sized). */
   :host([data-size="sm"]) .dot { width: 8px; height: 8px; margin-right: 0; }
@@ -85,32 +91,32 @@ shadowCss.replaceSync(`
   /* login form */
   form { display: flex; flex-direction: column; gap: 8px; margin: 0; }
   label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
-          color: #9aa1ac; display: flex; flex-direction: column; gap: 4px; }
+          color: var(--color-text-secondary, #9aa1ac); display: flex; flex-direction: column; gap: 4px; }
   input {
-    padding: 8px 10px; border: 1px solid #24282f; border-radius: 4px;
-    background: #14161a; color: #e6e8ec; font: inherit; font-size: 13px;
+    padding: 8px 10px; border: 1px solid var(--color-surface-2, #24282f); border-radius: 4px;
+    background: var(--color-background, #14161a); color: var(--color-text-primary, #e6e8ec); font: inherit; font-size: 13px;
   }
-  input:focus-visible { outline: 2px solid #3b82f6; outline-offset: 1px; }
+  input:focus-visible { outline: 2px solid var(--color-accent, #3b82f6); outline-offset: 1px; }
   button {
     align-self: flex-start;
     padding: 6px 14px; border-radius: 4px; cursor: pointer;
-    border: 1px solid #3b82f6; background: #3b82f6; color: #fff;
+    border: 1px solid var(--color-accent, #3b82f6); background: var(--color-accent, #3b82f6); color: var(--color-background, #14161a);
     font: inherit; font-size: 13px;
   }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
-  .error { color: #ef4444; font-size: 12px; min-height: 1em; }
+  .error { color: var(--color-danger, #ef4444); font-size: 12px; min-height: 1em; }
   .row { display: flex; align-items: center; gap: 8px; }
-  .who { font-size: 12px; color: #9aa1ac; }
-  .linkish { background: none; border: none; color: #3b82f6; cursor: pointer;
+  .who { font-size: 12px; color: var(--color-text-secondary, #9aa1ac); }
+  .linkish { background: none; border: none; color: var(--color-accent, #3b82f6); cursor: pointer;
              font: inherit; font-size: 12px; padding: 0; }
   .linkish:hover { text-decoration: underline; }
 
   /* console view */
   .console {
     display: block;
-    background: #101216;
+    background: var(--console-ink, #101216);
     border-radius: 6px;
-    border: 1px solid #24282f;
+    border: 1px solid var(--color-surface-2, #24282f);
     min-height: 320px;
     max-height: 60vh;
     overflow-y: auto;
@@ -122,16 +128,16 @@ shadowCss.replaceSync(`
     white-space: pre-wrap;
     word-break: break-all;
   }
-  .console:focus-visible { outline: 2px solid #3b82f6; }
+  .console:focus-visible { outline: 2px solid var(--color-accent, #3b82f6); }
   .line { display: block; }
-  .line-dim { color: #6b7280; }
-  .line-err { color: #ef4444; }
+  .line-dim { color: var(--color-text-secondary, #6b7280); }
+  .line-err { color: var(--color-danger, #ef4444); }
 
   /* notices */
   .notice {
     border-radius: 6px; padding: 12px 16px; margin: 0;
-    border: 1px solid #f59e0b; color: #f59e0b;
-    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid var(--color-warning, #f59e0b); color: var(--color-warning, #f59e0b);
+    background: color-mix(in srgb, var(--color-warning, #f59e0b) 8%, transparent);
     font-size: 13px;
   }
   .notice strong { display: block; margin-bottom: 2px; }

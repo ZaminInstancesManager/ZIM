@@ -227,6 +227,8 @@ or for cursor pagination:
 | Method | Path                          | Description                          | Required grants |
 |--------|-------------------------------|--------------------------------------|------------------|
 | GET    | `/api/v1/users/me`            | Current user.                        | (any session)    |
+| GET    | `/api/v1/me/recents`          | Caller's recent servers (M23; `?limit=` clamped `[1,32]`, default 8; most-recent-first). | (any session) |
+| POST   | `/api/v1/me/recents`          | Record an opened server view (`{instance_id}`; 404 when unknown). | (any session) |
 | GET    | `/api/v1/users`               | List users.                          | admin            |
 | POST   | `/api/v1/users`               | Create user.                         | admin            |
 | GET    | `/api/v1/users/{id}`          | Get user.                            | self or admin    |

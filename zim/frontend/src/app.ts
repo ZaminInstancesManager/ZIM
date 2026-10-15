@@ -1,13 +1,13 @@
 /**
- * `zim://app` — the ZIM application chrome (M22).
+ * `zim://app` — the ZIM application chrome (M22, M23).
  *
  * The Chrome interaction model, replicated in the frontend's own
- * TypeScript (the roadmap's M22 goal): a tab strip across the top
- * (one tab per server/workload view, drag-reorder, close, tear-off,
- * overflow, Chrome's animation curves), the omnibox beneath it
- * (`zim://` navigation with a suggestion dropdown and engine-
- * identity indication, AD-23's visible-canonical-identifier
- * obligation), and one content pane per tab.
+ * TypeScript: a tab strip across the top (one tab per
+ * server/workload view, drag-reorder, close, tear-off, overflow,
+ * Chrome's animation curves), the omnibox beneath it (`zim://`
+ * navigation with a suggestion dropdown and engine-identity
+ * indication, AD-23's visible-canonical-identifier obligation),
+ * and one content pane per tab.
  *
  * Panes are same-origin iframes onto the engine's own page surface
  * (AD-24): every tab loads the same pages any browser can load at
@@ -15,26 +15,45 @@
  * pages' view-only semantics — closing a tab only unsubscribes,
  * never stops a server (invariants 3–6).
  *
- * The tab strip holds one §11 events stream per server tab (the
- * §9 "events stream" slot of a tab's budget): `instance.state_change`
- * drives the §4 indicator dot in real time, `instance.install_progress`
- * drives the progress ring, and a gap re-fetches state over HTTP.
+ * M23 adds the split view (§8): a tab may host two panes — the
+ * primary surface plus a secondary one — with a draggable,
+ * snapping divider (Chrome 126+ split-tab physics). Each pane owns
+ * its own stream subscription; closing one pane unsubscribes only
+ * that pane. The session format grew a v2 to carry the pairing
+ * (`tabs.ts`).
+ *
+ * M23 also completes multi-window: inside the desktop shell, a
+ * torn-off tab becomes a real shell window (`zim_tear_off`, AD-26),
+ * the tray's "New tab" arrives as an in-place event instead of a
+ * reload, and a torn-off window can merge its whole tab set back
+ * into the main window. In plain browsers, `window.open` remains
+ * the tear-off path (M22 behavior).
+ *
+ * The tab strip holds one §11 events stream per server pane: the
+ * §4 indicator dot in real time, `instance.install_progress` as
+ * the progress ring, gaps re-fetched over HTTP. Pane opens are
+ * recorded as engine-backed recents (`POST /me/recents`, §11) so
+ * the new-tab page can rank what was actually used.
  *
  * Session persistence (§7): the tab set is stored as `zim://` URLs
- * (stable identifiers, never indexes) under `zim.session.v1`, and
- * restoration re-opens views only — no lifecycle API is called as a
+ * (stable identifiers, never indexes) — v2 under a per-window key
+ * (torn-off windows never clobber the main session) — and
+ * restoration re-opens views only: no lifecycle API is called as a
  * side effect of loading this page.
  */
 
-import { ApiError, getInstance, getState, health, listInstances, power, visualStatus, whoami } from "./api";
+import { ApiError, getInstance, getState, health, listInstances, power, recordRecent, visualStatus, whoami } from "./api";
 import type { Instance, Me } from "./api";
 import { ZimStream } from "./stream";
 import "./components";
-import { SESSION_KEY, TabModel, defaultSession, restoreSession } from "./tabs";
-import type { Tab } from "./tabs";
+import { initThemeFromStorage } from "./theme";
+import { LEGACY_SESSION_KEY, SESSION_KEY, TabModel, defaultSession, restoreSession, sessionKeyForWindow } from "./tabs";
+import type { SerializedTab, Tab } from "./tabs";
 import { buildSuggestions } from "./omnibox";
 import type { SuggestibleInstance, Suggestion } from "./omnibox";
+import { ratioFromPointer, snapRatio } from "./split";
 import { canonicalZim, httpForm, instanceIdOf, parseZimUrl, pathFromLocation, serverSurfaceOf, staticTitle } from "./zimurl";
+
 // ── Tunables (Chrome-derived motion values; see §12's note) ──────
 
 /** Tab open/close/drag animation: Chrome's tab-animation curve. */
@@ -47,6 +66,23 @@ const DRAG_SLOP_PX = 5;
 const TEAR_OFF_PX = 90;
 /** Session writes are debounced; the flush is eager on unload. */
 const SAVE_DEBOUNCE_MS = 300;
+/** The divider's default (and double-click reset) position. */
+const SPLIT_CENTER = 1 / 2;
+
+// ── The desktop-shell bridge (present only inside the shell) ─────
+
+/** The `withGlobalTauri` surface the shell injects, as this page
+ * may use it — null in plain browsers, so every call degrades. */
+interface TauriBridge {
+  core?: { invoke(command: string, args?: Record<string, unknown>): Promise<unknown> };
+  event?: { listen(event: string, handler: (event: { payload: unknown }) => void): Promise<() => void> };
+}
+
+/** The shell bridge, or `null` when running in a plain browser. */
+function shellBridge(): TauriBridge | null {
+  const candidate = (window as unknown as { __TAURI__?: TauriBridge }).__TAURI__;
+  return candidate ?? null;
+}
 
 // ── DOM refs ─────────────────────────────────────────────────────
 
@@ -66,9 +102,12 @@ const toastBox = document.getElementById("toast");
 
 // ── State ────────────────────────────────────────────────────────
 
-/** One pane per tab: the iframe, its indicator stream, its status. */
+/** One pane per (tab, slot): the iframe, its indicator stream, its
+ * status. A split tab has two; both stay independent (§8). */
 interface Pane {
   tabId: number;
+  /** Which half of the (possibly split) tab this pane is. */
+  slot: "primary" | "secondary";
   frame: HTMLIFrameElement;
   stream: ZimStream | null;
   /** Last-known lifecycle status (`unknown` until proven). */
@@ -79,30 +118,84 @@ interface Pane {
   instanceId: string | null;
   /** The live stream is unusable (auth/permission) — HTTP fallback. */
   degraded: boolean;
+  /** The instance whose open was last recorded for this pane
+   * (recents fire once per adoption, not per re-render). */
+  recordedInstance: string | null;
 }
 
+/** The per-tab pane host: `.pane-host` div holding the primary
+ * iframe, the split divider, and the secondary iframe. */
+const hostById = new Map<number, HTMLDivElement>();
+/** Panes keyed `${tabId}:primary` / `${tabId}:secondary`. */
+const paneById = new Map<string, Pane>();
+/** The focused pane per tab (omnibox + navigation target). */
+const focusedSlotById = new Map<number, "primary" | "secondary">();
+
 const model = new TabModel();
-const paneById = new Map<number, Pane>();
 const instanceCache = new Map<string, Instance>();
 let me: Me | null = null;
 let suggestContext: SuggestibleInstance[] = [];
 let saveTimer: number | undefined;
+/** This window's shell label (null for the main window / plain
+ * browsers); torn-off windows carry `?window=chrome-N`. */
+let windowLabel: string | null = null;
+/** The session key this window persists under (per-window, M23). */
+let sessionStoreKey = SESSION_KEY;
+
+/** The composite pane key. */
+function paneKey(tabId: number, slot: "primary" | "secondary"): string {
+  return `${tabId}:${slot}`;
+}
+
+/** The focused slot of a tab (primary by default). */
+function focusedSlot(tabId: number): "primary" | "secondary" {
+  return focusedSlotById.get(tabId) ?? "primary";
+}
+
+/** The path a tab's focused pane is showing. */
+function focusedPath(tab: Tab): string {
+  if (tab.split !== undefined && focusedSlot(tab.id) === "secondary") {
+    return tab.split.path;
+  }
+  return tab.path;
+}
 
 // ── Boot ─────────────────────────────────────────────────────────
 
 function boot(): void {
+  // The theme applies before anything else renders (M23: live,
+  // CSP-clean CSSOM custom properties).
+  initThemeFromStorage();
+
   const params = new URLSearchParams(window.location.search);
   const deepLink = params.get("tab");
+  const deepSplit = params.get("split");
+  const deepRatio = params.get("ratio");
   const askNewTab = params.get("newtab") === "1";
+  windowLabel = params.get("window");
+  sessionStoreKey = sessionKeyForWindow(windowLabel);
 
   // §7: restore the persisted tab set — views only, never
   // lifecycle. A `?tab=` deep link (tear-off target) REPLACES the
-  // session, like Chrome opening with a URL argument.
+  // session, like Chrome opening with a URL argument; the shell's
+  // tear-off also passes `?split=` + `?ratio=` when a split tab
+  // was torn out, so the pairing survives the new window.
   let restored = defaultSession();
   if (deepLink !== null) {
     const parsed = parseZimUrl(deepLink);
     if ("url" in parsed) {
-      restored = { paths: [parsed.url.path], active: 0 };
+      const entry: SerializedTab = { path: parsed.url.path };
+      if (deepSplit !== null) {
+        const splitParsed = parseZimUrl(deepSplit);
+        if ("url" in splitParsed) {
+          const ratio = deepRatio !== null ? Number(deepRatio) : NaN;
+          entry.split = {
+            path: splitParsed.url.path,
+            ratio: Number.isFinite(ratio) ? ratio : SPLIT_CENTER,
+          };
+        }
+      }
+      restored = { tabs: [entry], active: 0 };
     }
   } else {
     const stored = readStoredSession();
@@ -112,8 +205,8 @@ function boot(): void {
     }
   }
 
-  for (const path of restored.paths) {
-    openTabSilent(path);
+  for (const entry of restored.tabs) {
+    openTabSilent(entry);
   }
   const tabs = model.tabs;
   const active = tabs[Math.min(Math.max(restored.active, 0), tabs.length - 1)];
@@ -121,8 +214,9 @@ function boot(): void {
     model.activate(active.id);
   }
   if (askNewTab) {
-    // The tray's "New tab" lands here: session restored + one more.
-    model.add("newtab");
+    // The tray's "New tab" fallback (a reload with `?newtab=1`);
+    // inside the shell the in-place event is the primary path.
+    openTabSilent({ path: "newtab" });
   }
 
   syncStrip();
@@ -132,13 +226,26 @@ function boot(): void {
   void refreshIdentity();
 
   attachGlobalListeners();
+  attachShellListeners();
 }
 
 /** localStorage may throw (privacy modes); a session is a nicety. */
 function readStoredSession(): unknown {
   try {
-    const raw = window.localStorage.getItem(SESSION_KEY);
-    return raw === null ? null : (JSON.parse(raw) as unknown);
+    const raw = window.localStorage.getItem(sessionStoreKey);
+    if (raw !== null) {
+      return JSON.parse(raw) as unknown;
+    }
+    // The M22 key is read exactly once more on the main window
+    // (upgrade); torn-off windows start fresh rather than
+    // inheriting the main session.
+    if (sessionStoreKey === SESSION_KEY) {
+      const legacy = window.localStorage.getItem(LEGACY_SESSION_KEY);
+      if (legacy !== null) {
+        return JSON.parse(legacy) as unknown;
+      }
+    }
+    return null;
   } catch {
     return null;
   }
@@ -202,19 +309,24 @@ function renderChip(version: string): void {
  * per-tab indicators from the instance rows. */
 function refreshTabTitlesAndStatuses(): void {
   for (const tab of model.tabs) {
-    const pane = paneById.get(tab.id);
-    if (pane === undefined) {
-      continue;
-    }
-    if (pane.instanceId !== null) {
-      const row = instanceCache.get(pane.instanceId);
-      if (row !== undefined && pane.status === "unknown") {
-        pane.status = row.status;
+    for (const pane of panesOf(tab.id)) {
+      if (pane.instanceId !== null) {
+        const row = instanceCache.get(pane.instanceId);
+        if (row !== undefined && pane.status === "unknown") {
+          pane.status = row.status;
+        }
       }
+      renderPaneIndicator(pane);
     }
     renderTab(tab);
-    renderPaneIndicator(pane);
   }
+}
+
+/** Both panes of a tab (primary first), in slot order. */
+function panesOf(tabId: number): Pane[] {
+  const primary = paneById.get(paneKey(tabId, "primary"));
+  const secondary = paneById.get(paneKey(tabId, "secondary"));
+  return secondary === undefined ? (primary === undefined ? [] : [primary]) : primary === undefined ? [secondary] : [primary, secondary];
 }
 
 // ── Tab strip DOM ────────────────────────────────────────────────
@@ -288,7 +400,7 @@ function renderTab(tab: Tab): void {
   if (element === null || element === undefined) {
     return;
   }
-  const pane = paneById.get(tab.id);
+  const pane = paneById.get(paneKey(tab.id, "primary"));
   const title = element.querySelector(".tab-title");
   const glyph = element.querySelector(".tab-glyph");
   const instanceId = instanceIdOf(tab.path);
@@ -332,6 +444,7 @@ function renderTab(tab: Tab): void {
   const selected = model.activeId === tab.id;
   element.setAttribute("aria-selected", String(selected));
   element.classList.toggle("tab-active", selected);
+  element.classList.toggle("tab-split", tab.split !== undefined);
   element.classList.toggle("tab-degraded", pane !== undefined && pane.degraded);
   const label = pane !== undefined ? visualStatus(pane.status).label : text;
   element.setAttribute(
@@ -396,36 +509,75 @@ function syncStrip(): void {
   updateOverflow();
 }
 
-// ── Panes (one same-origin iframe per tab, AD-24) ────────────────
+// ── Panes (one same-origin iframe per pane, AD-24; two per split
+//    tab since M23 — §8) ─────────────────────────────────────────
 
-function openTabSilent(path: string): Tab {
-  const tab = model.add(path, { activate: false });
-  createPane(tab);
+/** The per-tab pane host: primary iframe, split divider, secondary
+ * iframe. Created once per tab; reconciled by `syncSplit`. */
+function ensureHost(tabId: number): HTMLDivElement {
+  const existing = hostById.get(tabId);
+  if (existing !== undefined) {
+    return existing;
+  }
+  const host = document.createElement("div");
+  host.className = "pane-host";
+  host.dataset.tabId = String(tabId);
+  hostById.set(tabId, host);
+  if (panes !== null) {
+    panes.append(host);
+  }
+  return host;
+}
+
+function openTabSilent(entry: SerializedTab): Tab {
+  const tab = model.add(entry.path, {
+    activate: false,
+    split: entry.split === undefined ? undefined : { ...entry.split },
+  });
+  ensureHost(tab.id);
+  createPane(tab.id, "primary", entry.path);
+  if (entry.split !== undefined) {
+    createPane(tab.id, "secondary", entry.split.path);
+  }
+  syncSplit(model.byId(tab.id) ?? tab);
   return tab;
 }
 
-function createPane(tab: Tab): Pane {
+/** Create one pane (iframe + subscription bookkeeping) for a tab's
+ * slot; the host owns the DOM order. */
+function createPane(tabId: number, slot: "primary" | "secondary", path: string): Pane {
+  const host = ensureHost(tabId);
   const frame = document.createElement("iframe");
-  frame.className = "pane-frame";
-  frame.src = httpForm(tab.path);
-  frame.title = `${staticTitle(tab.path)} — ${canonicalZim(tab.path)}`;
+  frame.className = `pane-frame pane-${slot}`;
+  frame.src = httpForm(path);
+  frame.title = `${staticTitle(path)} — ${canonicalZim(path)}`;
   const pane: Pane = {
-    tabId: tab.id,
+    tabId,
+    slot,
     frame,
     stream: null,
     status: "unknown",
     progress: undefined,
-    instanceId: instanceIdOf(tab.path),
+    instanceId: instanceIdOf(path),
     degraded: false,
+    recordedInstance: null,
   };
   // Pane resync: the page inside may navigate itself (links); the
-  // tab follows the pane, not the other way round.
+  // pane follows the page, not the other way round.
   frame.addEventListener("load", () => {
     void resyncPanePath(pane);
   });
-  paneById.set(tab.id, pane);
-  if (panes !== null) {
-    panes.append(frame);
+  // Pane focus: clicks inside an iframe surface as focus on the
+  // iframe element here — that is the split's focus signal (§8).
+  frame.addEventListener("focus", () => {
+    setFocusedPane(tabId, slot);
+  });
+  paneById.set(paneKey(tabId, slot), pane);
+  const divider = host.querySelector<HTMLElement>(".split-divider");
+  if (slot === "secondary" && divider !== null) {
+    host.insertBefore(frame, divider.nextSibling);
+  } else {
+    host.append(frame);
   }
   renderPaneIndicator(pane);
   return pane;
@@ -448,7 +600,9 @@ async function resyncPanePath(pane: Pane): Promise<void> {
   if (path === null || tab === null) {
     return;
   }
-  if (model.updatePath(tab.id, path)) {
+  const changed =
+    pane.slot === "secondary" ? model.updateSplitPath(pane.tabId, path) : model.updatePath(pane.tabId, path);
+  if (changed) {
     const nextInstance = instanceIdOf(path);
     if (nextInstance !== pane.instanceId) {
       pane.stream?.close();
@@ -465,24 +619,181 @@ async function resyncPanePath(pane: Pane): Promise<void> {
   }
 }
 
-/** Show only the active pane; every pane keeps running (background
- * tabs stay loaded, like Chrome's — streams included). */
+/** Show only the active tab's panes; every pane keeps running
+ * (background tabs stay loaded, like Chrome's — streams included). */
 function syncPanes(): void {
-  for (const pane of paneById.values()) {
-    const active = model.activeId === pane.tabId;
-    pane.frame.hidden = !active;
-    if (active) {
-      pane.frame.focus({ preventScroll: true });
-    }
+  for (const host of hostById.values()) {
+    const tabId = Number(host.dataset.tabId);
+    host.hidden = model.activeId !== tabId;
   }
   const tab = model.active;
   if (tab !== null) {
+    const focusTarget = paneById.get(paneKey(tab.id, focusedSlot(tab.id)));
+    focusTarget?.frame.focus({ preventScroll: true });
     document.title = `ZIM — ${staticTitle(tab.path)}`;
     renderTab(tab);
   }
 }
 
-// ── Per-tab indicator (the §4 dot, live over §11) ────────────────
+/** Reconcile a tab's split DOM with the model: create the divider +
+ * secondary pane when a split exists, tear them down when it does
+ * not, and keep the ratio variable current. Idempotent. */
+function syncSplit(tab: Tab): void {
+  const host = hostById.get(tab.id);
+  if (host === undefined) {
+    return;
+  }
+  if (tab.split === undefined) {
+    const secondary = paneById.get(paneKey(tab.id, "secondary"));
+    if (secondary !== undefined) {
+      // Closing one pane unsubscribes only that pane (§8).
+      secondary.stream?.close();
+      secondary.frame.remove();
+      paneById.delete(paneKey(tab.id, "secondary"));
+    }
+    host.querySelector(".split-divider")?.remove();
+    delete host.dataset.split;
+    host.style.removeProperty("--split-ratio");
+    focusedSlotById.delete(tab.id);
+    return;
+  }
+  let divider = host.querySelector<HTMLElement>(".split-divider");
+  if (divider === null) {
+    divider = document.createElement("div");
+    divider.className = "split-divider";
+    divider.setAttribute("role", "separator");
+    divider.setAttribute("aria-orientation", "vertical");
+    divider.setAttribute("aria-label", "Split view divider — drag to resize, double-click to center");
+    divider.tabIndex = 0;
+
+    const close = document.createElement("button");
+    close.className = "split-close";
+    close.type = "button";
+    close.textContent = "×";
+    close.setAttribute("aria-label", "Close split pane");
+    close.title = "Close split pane";
+    close.addEventListener("click", (event) => {
+      event.stopPropagation();
+      closeSplitSecondary(tab.id);
+    });
+    divider.append(close);
+
+    attachDividerDrag(tab.id, host, divider);
+    divider.addEventListener("dblclick", () => {
+      if (model.updateSplitRatio(tab.id, SPLIT_CENTER)) {
+        syncSplit(model.byId(tab.id) ?? tab);
+        saveSessionSoon();
+      }
+    });
+    divider.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        const current = model.splitOf(tab.id)?.ratio ?? SPLIT_CENTER;
+        const step = event.key === "ArrowLeft" ? -0.02 : 0.02;
+        if (model.updateSplitRatio(tab.id, current + step)) {
+          syncSplit(model.byId(tab.id) ?? tab);
+          saveSessionSoon();
+        }
+      }
+    });
+    // DOM order: primary iframe, divider, secondary iframe.
+    const primaryFrame = host.querySelector(".pane-primary");
+    if (primaryFrame !== null) {
+      host.insertBefore(divider, primaryFrame.nextSibling);
+    } else {
+      host.append(divider);
+    }
+  }
+  if (paneById.get(paneKey(tab.id, "secondary")) === undefined) {
+    createPane(tab.id, "secondary", tab.split.path);
+  }
+  host.dataset.split = "1";
+  host.style.setProperty("--split-ratio", String(tab.split.ratio));
+  renderTab(tab);
+}
+
+/** Divider drag: pointer-driven ratio with Chrome's snap points;
+ * the snap moment is visible (the divider blushes). */
+function attachDividerDrag(tabId: number, host: HTMLDivElement, divider: HTMLElement): void {
+  const drag = { active: false, pointerId: -1 };
+  divider.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || (event.target as HTMLElement).closest(".split-close") !== null) {
+      return;
+    }
+    drag.active = true;
+    drag.pointerId = event.pointerId;
+    divider.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  divider.addEventListener("pointermove", (event) => {
+    if (!drag.active || event.pointerId !== drag.pointerId) {
+      return;
+    }
+    const raw = ratioFromPointer(event.clientX, host.getBoundingClientRect());
+    const snapped = snapRatio(raw);
+    divider.classList.toggle("split-snap", snapped !== raw);
+    if (model.updateSplitRatio(tabId, snapped)) {
+      host.style.setProperty("--split-ratio", String(snapped));
+      saveSessionSoon();
+    }
+  });
+  const end = (event: PointerEvent) => {
+    if (!drag.active || event.pointerId !== drag.pointerId) {
+      return;
+    }
+    drag.active = false;
+    divider.classList.remove("split-snap");
+    saveSessionSoon();
+  };
+  divider.addEventListener("pointerup", end);
+  divider.addEventListener("pointercancel", end);
+}
+
+/** Mark a tab's focused pane (omnibox target + focus ring). */
+function setFocusedPane(tabId: number, slot: "primary" | "secondary"): void {
+  if (focusedSlot(tabId) === slot) {
+    return;
+  }
+  focusedSlotById.set(tabId, slot);
+  for (const pane of panesOf(tabId)) {
+    pane.frame.classList.toggle("pane-focused", pane.slot === slot);
+  }
+  if (model.activeId === tabId) {
+    refreshOmniboxDisplay();
+  }
+}
+
+/** Open a split on a tab (Chrome copies the tab into the second
+ * pane; the panes then navigate independently). No-op when the tab
+ * is already split — one split per tab (§8). */
+function startSplit(tabId: number, secondaryPath?: string): void {
+  const tab = model.byId(tabId);
+  if (tab === null || tab.split !== undefined) {
+    return;
+  }
+  const split = { path: secondaryPath ?? tab.path, ratio: SPLIT_CENTER };
+  model.setSplit(tabId, split);
+  createPane(tabId, "secondary", split.path);
+  syncSplit(model.byId(tabId) ?? tab);
+  setFocusedPane(tabId, "secondary");
+  saveSessionSoon();
+  showToast("split view — drag the divider; the × on it closes this pane");
+}
+
+/** Close a tab's secondary pane: unsubscribe only that pane; the
+ * primary pane and the server are untouched (§8's acceptance). */
+function closeSplitSecondary(tabId: number): void {
+  const tab = model.byId(tabId);
+  if (tab === null || tab.split === undefined) {
+    return;
+  }
+  model.setSplit(tabId, null);
+  syncSplit(model.byId(tabId) ?? tab);
+  refreshOmniboxDisplay();
+  saveSessionSoon();
+}
+
+// ── Per-pane indicator (the §4 dot, live over §11) ───────────────
 
 /** (Re)subscribe the pane's indicator stream for its current
  * instance; non-instance panes carry no subscription. */
@@ -512,6 +823,13 @@ function renderPaneIndicator(pane: Pane): void {
         }
       })
       .catch(() => undefined);
+  }
+  // Record the open (engine-backed recents, §11): once per pane
+  // adoption, fire-and-forget, only while signed in (the engine
+  // would 401 otherwise — noise, not signal).
+  if (me !== null && pane.recordedInstance !== wantedInstance) {
+    pane.recordedInstance = wantedInstance;
+    void recordRecent(wantedInstance).catch(() => undefined);
   }
   if (pane.stream !== null) {
     // The stream is instance-scoped; a surface change on the same
@@ -548,7 +866,7 @@ function renderPaneIndicator(pane: Pane): void {
       void refetchPaneState(pane);
     },
     onFatal: () => {
-      // Anonymous or permission-denied: the tab still renders; the
+      // Anonymous or permission-denied: the pane still renders; the
       // indicator falls back to one HTTP fetch and a muted dot.
       pane.degraded = true;
       pane.stream?.close();
@@ -580,7 +898,6 @@ async function refetchPaneState(pane: Pane): Promise<void> {
 // ── Tab lifecycle ────────────────────────────────────────────────
 
 function closeTab(id: number): void {
-  const pane = paneById.get(id);
   const element = strip?.querySelector<HTMLElement>(`[data-tab-id="${id}"]`);
   // Chrome keeps at least one tab; so does the ZIM chrome.
   if (model.size <= 1) {
@@ -592,12 +909,16 @@ function closeTab(id: number): void {
     return;
   }
   model.close(id);
-  if (pane !== undefined) {
-    // Closing a tab only unsubscribes (invariant 4).
+  // Closing a tab unsubscribes its panes (invariant 4) — both, if
+  // the tab was split; each pane's stream is its own.
+  for (const pane of panesOf(id)) {
     pane.stream?.close();
     pane.frame.remove();
-    paneById.delete(id);
+    paneById.delete(paneKey(id, pane.slot));
   }
+  hostById.get(id)?.remove();
+  hostById.delete(id);
+  focusedSlotById.delete(id);
   if (element !== null && element !== undefined) {
     element.classList.add("tab-closing");
     window.setTimeout(() => {
@@ -611,23 +932,33 @@ function closeTab(id: number): void {
 }
 
 /** Omnibox navigation (and the context menu's "Open …" items):
- * the ACTIVE-tab form navigates in place. */
+ * the ACTIVE-tab primary-pane form navigates in place. */
 function navigateTab(id: number, path: string): void {
+  navigatePane(id, "primary", path);
+}
+
+/** Navigate one pane of a tab (omnibox acts on the focused pane;
+ * menu items act on the primary pane). */
+function navigatePane(id: number, slot: "primary" | "secondary", path: string): void {
   const tab = model.byId(id);
-  const pane = paneById.get(id);
+  const pane = paneById.get(paneKey(id, slot));
   if (tab === null || pane === undefined) {
     return;
   }
   // A different instance means a different subscription — the old
   // stream closes before the new one attaches (§4: one stream per
-  // tab, following the tab's instance).
+  // pane, following the pane's instance).
   const nextInstance = instanceIdOf(path);
   if (nextInstance !== pane.instanceId) {
     pane.stream?.close();
     pane.stream = null;
     pane.degraded = false;
   }
-  model.updatePath(id, path);
+  if (slot === "secondary") {
+    model.updateSplitPath(id, path);
+  } else {
+    model.updatePath(id, path);
+  }
   pane.instanceId = nextInstance;
   pane.status = "unknown";
   pane.progress = undefined;
@@ -651,7 +982,8 @@ function newTab(path = "newtab"): void {
       element.classList.remove("tab-opening");
     }, TAB_MS);
   });
-  createPane(tab);
+  ensureHost(tab.id);
+  createPane(tab.id, "primary", path);
   syncStrip();
   syncPanes();
   refreshOmniboxDisplay();
@@ -824,21 +1156,58 @@ function cleanupDragListeners(element: HTMLElement | null): void {
   element?.removeEventListener("pointermove", onDragMove);
 }
 
-/** Tear-off: open the tab in its own window. In a plain browser
- * this is a `window.open` of the chrome with a `?tab=` deep link;
- * inside the desktop shell, popups are not available — the M23
- * multi-window milestone completes this natively (the event hook
- * below is what M22 ships for the shell side). */
+/** Tear-off (M23): inside the desktop shell the page asks the shell
+ * for a real window (`zim_tear_off`) carrying the tab — split
+ * pairing included — then closes the tab here. In plain browsers,
+ * `window.open` with a `?tab=` deep link remains the path (M22). */
 function tearOff(tab: Tab): void {
+  const bridge = shellBridge();
+  if (bridge?.core !== undefined) {
+    const paths = [canonicalZim(tab.path)];
+    const split = model.splitOf(tab.id);
+    if (split !== null) {
+      paths.push(canonicalZim(split.path));
+    }
+    bridge.core
+      .invoke("zim_tear_off", { paths, ratio: split !== null ? split.ratio : null })
+      .then(() => {
+        closeTab(tab.id);
+      })
+      .catch((error: unknown) => {
+        showToast(`tear-off failed: ${String(error)}`);
+        syncStrip();
+      });
+    return;
+  }
   const url = `/zim/app?tab=${encodeURIComponent(canonicalZim(tab.path))}`;
   const opened = window.open(url, "_blank", "noopener");
   if (opened === null) {
     window.dispatchEvent(new CustomEvent("zim:tear-off", { detail: { path: tab.path } }));
-    showToast("tear-off needs a window the page may open — the desktop shell's multi-window lands with M23");
+    showToast("tear-off needs a window the page may open — open ZIM in the desktop shell for multi-window");
     syncStrip();
     return;
   }
   closeTab(tab.id);
+}
+
+/** Merge (M23): a torn-off window hands its whole tab set to the
+ * main window via the shell (`zim_merge_to_main`), which relays it
+ * as a `zim:merge-session` event; the shell then closes this
+ * window. Plain browsers have no merge path (no windows to merge
+ * into) — the item simply does not appear. */
+async function mergeToMain(): Promise<void> {
+  const bridge = shellBridge();
+  if (bridge?.core === undefined) {
+    return;
+  }
+  try {
+    await bridge.core.invoke("zim_merge_to_main", { session: JSON.stringify(model.serialize()) });
+    // The shell closes this window once the emit lands; flushing
+    // first means nothing is lost if the close races the storage.
+    saveSessionNow();
+  } catch (error) {
+    showToast(`merge failed: ${String(error)}`);
+  }
 }
 
 // ── Overflow ─────────────────────────────────────────────────────
@@ -862,7 +1231,9 @@ function refreshOmniboxDisplay(): void {
     return;
   }
   if (document.activeElement !== omniboxInput) {
-    omniboxInput.value = tab.path;
+    // The focused pane's path (split-aware, §8): the omnibox edits
+    // what the user is looking at.
+    omniboxInput.value = focusedPath(tab);
   }
 }
 
@@ -910,7 +1281,7 @@ function chooseSuggestion(index: number): void {
 function navigateFromOmnibox(path: string): void {
   const tab = model.active;
   if (tab !== null) {
-    navigateTab(tab.id, path);
+    navigatePane(tab.id, focusedSlot(tab.id), path);
   }
   omniboxInput?.blur();
   hideSuggestions();
@@ -983,9 +1354,13 @@ function contextItems(tab: Tab): MenuItem[] {
   items.push({
     label: "Reload",
     action: () => {
-      const pane = paneById.get(tab.id);
+      const pane = paneById.get(paneKey(tab.id, "primary"));
       if (pane !== undefined) {
         pane.frame.src = httpForm(tab.path);
+      }
+      const secondary = paneById.get(paneKey(tab.id, "secondary"));
+      if (secondary !== undefined && tab.split !== undefined) {
+        secondary.frame.src = httpForm(tab.split.path);
       }
     },
   });
@@ -995,6 +1370,32 @@ function contextItems(tab: Tab): MenuItem[] {
       newTab(tab.path);
     },
   });
+  if (tab.split === undefined) {
+    items.push({
+      label: "Open in split view",
+      hint: "§8",
+      action: () => {
+        startSplit(tab.id);
+      },
+    });
+  } else {
+    items.push({
+      label: "Close split pane",
+      hint: "keeps this pane",
+      action: () => {
+        closeSplitSecondary(tab.id);
+      },
+    });
+  }
+  if (windowLabel !== null && shellBridge()?.core !== undefined) {
+    items.push({
+      label: "Merge back to the main window",
+      hint: "moves every tab",
+      action: () => {
+        void mergeToMain();
+      },
+    });
+  }
   if (instanceId === null) {
     items.push({
       label: "Copy address",
@@ -1004,7 +1405,7 @@ function contextItems(tab: Tab): MenuItem[] {
     });
     return items;
   }
-  const pane = paneById.get(tab.id);
+  const pane = paneById.get(paneKey(tab.id, "primary"));
   const status = pane !== undefined ? pane.status : "unknown";
   const row = instanceCache.get(instanceId);
   const name = row !== undefined ? row.name : instanceId.slice(0, 8);
@@ -1047,11 +1448,6 @@ function contextItems(tab: Tab): MenuItem[] {
     },
   });
   items.push({ label: "—", disabled: true });
-  items.push({
-    label: "Open in split view",
-    hint: "arrives with M23",
-    disabled: true,
-  });
   items.push({
     label: "Copy server URL",
     action: () => {
@@ -1170,7 +1566,9 @@ function saveSessionSoon(): void {
 
 function saveSessionNow(): void {
   try {
-    window.localStorage.setItem(SESSION_KEY, JSON.stringify(model.serialize()));
+    // Per-window key (M23): torn-off windows keep their own tab
+    // sets on the shared origin; the main window owns the primary.
+    window.localStorage.setItem(sessionStoreKey, JSON.stringify(model.serialize()));
   } catch {
     // Private modes / quota: a session is a nicety, never a crash.
   }
@@ -1232,9 +1630,9 @@ function attachGlobalListeners(): void {
     }
   });
 
-  // The tray's "New tab" navigates here with ?newtab=1; while the
-  // chrome is already loaded, a same-URL navigation reloads — the
-  // desktop shell's event channel (when available) avoids that.
+  // The same-document channel (plain-browser fallback for shells
+  // that dispatch it; the desktop shell's event arrives via the
+  // bridge below).
   window.addEventListener("zim-new-tab", () => {
     newTab();
   });
@@ -1268,6 +1666,45 @@ function attachGlobalListeners(): void {
   });
 }
 
+/** The desktop-shell event channel (M23): the tray's "New tab"
+ * arrives in place (no reload), and a merging window's tab set
+ * lands as `zim:merge-session`. Absent in plain browsers — every
+ * listener is additive, nothing depends on the bridge existing. */
+function attachShellListeners(): void {
+  const bridge = shellBridge();
+  if (bridge?.event === undefined) {
+    return;
+  }
+  void bridge.event.listen("zim:new-tab", () => {
+    newTab();
+  });
+  void bridge.event.listen("zim:merge-session", (event) => {
+    const payload = event.payload as { session?: string } | null;
+    if (payload === null || typeof payload.session !== "string") {
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(payload.session) as unknown;
+    } catch {
+      return; // A corrupt merge payload is ignored, never fatal.
+    }
+    const revived = restoreSession(parsed);
+    if (revived === null) {
+      return;
+    }
+    for (const entry of revived.tabs) {
+      openTabSilent(entry);
+    }
+    syncStrip();
+    syncPanes();
+    refreshOmniboxDisplay();
+    saveSessionSoon();
+    showToast(`merged ${revived.tabs.length} tab${revived.tabs.length === 1 ? "" : "s"} from a window`);
+  });
+}
+
 // ── go ───────────────────────────────────────────────────────────
 
 boot();
+

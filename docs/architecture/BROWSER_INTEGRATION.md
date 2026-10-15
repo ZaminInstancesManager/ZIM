@@ -244,6 +244,19 @@ subscription and per-tab metadata; closing one pane only
 unsubscribes that pane. Layout switching, resizing, and focus order
 follow the Chrome split-view interaction patterns in §12.
 
+**Implementation (M23):** a split is tab-level state — `{path,
+ratio}` on the tab, one split per tab (Chrome's split tab is two
+panes, not a tree). Each pane is its own iframe with its own §11
+stream; the divider drags with snap points at the halves and
+thirds (3% tolerance, visibly marked), double-click re-centers,
+arrow keys nudge, and the divider's close affordance (or the tab
+menu's "Close split pane") closes only the secondary pane — one
+`stream.close()`, the primary pane and the server untouched. The
+omnibox navigates the focused pane. The pairing serializes into
+session v2 (`tabs.ts`) with a clamped ratio; a torn-out split tab
+carries both paths. Not shipped: split-all and cross-window
+drag-merge (polish; the menu-driven merge is the M23 path).
+
 ## 9. New-tab page
 
 The new-tab page (`zim://newtab`) is the surface for discovering,
@@ -252,6 +265,22 @@ frontend package; replacing the frontend package replaces the NTP.
 Its layout follows the Chrome NTP structure adapted to ZIM: a search
 /filter field, frequently- and recently-opened servers, create/import
 actions, and workload-type browsing.
+
+**Implementation (M23):** the centered search filters the tile grids
+live (name or id). Recents are engine-backed — `GET /me/recents`
+(user-scoped rows, capped at the newest 32, ranked by last-open)
+and the chrome records pane adoptions fire-and-forget (`POST
+/me/recents`); frequent tiles badge their open counts. Create is the
+engine's admin-gated `POST /instances` (node picker included; a 403
+on node listing says so instead of offering a doomed button);
+import parses a pasted ZIM server-definition JSON through the same
+field validation (pure, unit-tested) and points panel migrations at
+the `zim-migrate-pterodactyl` CLI — a paste box does not migrate a
+database. Workload-type browsing shows the live game-server surface
+and honestly marks the other kinds "later" (engine support is
+M16). The customization entry point is the theme panel (§12's
+Themes row). Successful create/import opens the new server's
+console — the §9 end-to-end flow.
 
 ## 10. Diagnostics
 
@@ -307,11 +336,19 @@ source.
 **M22 status:** the tab strip, tab state indicators, animations,
 address bar, session restore, and context menu rows are implemented
 (`zim/frontend/src/app.ts` + `tabs.ts` + `omnibox.ts` + `zimurl.ts`,
-with `tests/` covering the pure logic). Split view, the NTP layout
-grammar, and themes remain M23. One honest scope note: tear-off
+with `tests/` covering the pure logic). One honest scope note: tear-off
 opens the tab in a new window where `window.open` is available
 (plain browsers); inside the desktop shell it reports that
 multi-window lands with M23, which owns native window management.
+
+**M23 status:** the split view (§8), the NTP layout grammar (§9),
+themes (the Themes row), and native tear-out/merge are implemented
+(`src/split.ts` + `src/theme.ts` + `src/instanceForm.ts` + the v2
+session in `tabs.ts` + the rewritten NTP + the split/multi-window
+`app.ts`; shell window registry + tear-off/merge commands; engine
+`/me/recents` + the IPC CSP sources). Remaining polish, honestly:
+split-all, cross-window drag-merge, and the packaged-shell visual
+fidelity pass (M25's E2E is where window flows get pressed).
 
 ## 13. Open integration questions
 
@@ -378,7 +415,7 @@ multi-window lands with M23, which owns native window management.
   (`zim/frontend/src/app.ts`), served by the engine like every
   other page. The shell's default attach target changed from
   `zim://newtab` to `zim://app`; `--open` still deep-links.
-- **Panies are same-origin iframes**: the engine's page CSP gained
+- **Panes are same-origin iframes**: the engine's page CSP gained
   `frame-src 'self'` and `frame-ancestors 'self'` with
   `X-Frame-Options: SAMEORIGIN` — same-origin framing in both
   directions, cross-origin embedding still denied (and the loopback
@@ -406,3 +443,59 @@ multi-window lands with M23, which owns native window management.
   browser-level execution had ever exercised the pages. The build
   now post-processes the emitted files (`scripts/fix-imports.mjs`)
   and the freshness gate in CI catches drift.
+
+### M23 resolution notes (recorded for M24/M25)
+
+- **Multi-window without session IPC**: torn-out tabs are real
+  shell windows (`chrome-{n}` labels) pointed at
+  `/zim/app?window={label}`; each chrome window persists its tab
+  set under a per-window session key on the engine origin
+  (`zim.session.v2.w:{label}`), so windows never clobber each
+  other and the main window keeps the primary key. The shell
+  persists only the *window set* (`windows.json` in its app-data
+  dir; corrupt = empty) and recreates the windows after attach —
+  each page restores its own session. No tab state crosses the
+  IPC boundary; sessions stay view-only data in the frontend.
+- **The chrome→shell channel**: the engine's page CSP gained
+  `ipc:` and `http://ipc.localhost` in `connect-src` (Tauri's IPC
+  schemes) so the chrome page can invoke the shell's four commands
+  — `zim_tear_off`, `zim_merge_to_main`, `zim_new_window`,
+  `zim_window_label`. The shell resolves every `zim://` path
+  through the identifier grammar (AD-23) before building a window
+  URL, so a hostile page cannot aim a window at an arbitrary
+  target; the schemes terminate in the shell process (no network
+  reach). In plain browsers the bridge is absent and every caller
+  degrades (tear-off falls back to `window.open`, merge never
+  appears).
+- **Tear-off formula (AD-24 realized)**: `zim_tear_off` builds
+  `/zim/app?tab={primary}&split={secondary}&ratio={r}&window={label}`
+  — a split tab's pairing survives the new window; the ratio is
+  clamped engine-side of the grammar (0.2–0.8) by the receiving
+  chrome, which validates every path through the same restore
+  discipline as its storage.
+- **Merge**: a torn-off window's menu item hands its whole v2
+  session to `zim_merge_to_main`; the shell relays it to the main
+  window as a `zim:merge-session` event (payload validated by the
+  same `restoreSession` — corrupt input is ignored, never fatal)
+  and closes the window. Cross-window *drag* merge stays polish.
+- **The in-place new-tab channel**: the tray's "New tab" emits
+  `zim:new-tab` to the main window's chrome (no reload — panes
+  keep their streams and console buffers); the `?newtab=1`
+  navigation remains the fallback when the emit fails. The tray
+  also gained "New window".
+- **Themes are CSSOM, not markup**: live application writes CSS
+  custom properties onto `:root` through the CSSOM (not style
+  attributes — `style-src 'self'` is untouched), and the components'
+  shadow-root styles were re-tokenized to `var(--…, fallback)` so
+  custom properties inherit through the shadow boundaries. The
+  vocabulary contract is `zim/contracts/theme-tokens.v1.json`;
+  packaged-theme upload stays with M24's addon system.
+- **Recents are engine state (§11 honored)**: `GET/POST
+  /me/recents` (user-scoped, capped at the newest 32 per user,
+  404 on unknown instances, unaudited — an open is nicety state).
+  The chrome records pane adoptions fire-and-forget; stale rows
+  for deleted instances are filtered by the NTP's merge with the
+  visible instance list.
+- **Fixed on the way**: `restoreTheme` now omits the `accent` key
+  when unset (byte-stable round-trips); `clampRatio` maps
+  degenerate drag math to the centered fallback rather than NaN.

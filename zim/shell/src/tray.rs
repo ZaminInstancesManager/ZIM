@@ -14,7 +14,14 @@ use tauri::{AppHandle, Manager, WebviewWindow};
 /// Build and attach the tray for the app.
 pub fn init(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Show ZIM", true, None::<&str>)?;
-    let newtab = MenuItem::with_id(app, "newtab", "New tab — zim://app", true, None::<&str>)?;
+    let newtab = MenuItem::with_id(
+        app,
+        "newtab",
+        "New tab — in this window",
+        true,
+        None::<&str>,
+    )?;
+    let newwin = MenuItem::with_id(app, "newwin", "New window — zim://app", true, None::<&str>)?;
     let quit = MenuItem::with_id(
         app,
         "quit",
@@ -24,7 +31,13 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
     )?;
     let menu = Menu::with_items(
         app,
-        &[&show, &newtab, &PredefinedMenuItem::separator(app)?, &quit],
+        &[
+            &show,
+            &newtab,
+            &newwin,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
     )?;
 
     let mut builder = TrayIconBuilder::with_id("zim-tray")
@@ -35,7 +48,13 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
             "show" => show_main(app),
             "newtab" => {
                 if let Err(e) = crate::open_new_tab(app) {
-                    eprintln!("zim_shell: tray new-tab navigation failed: {e}");
+                    eprintln!("zim_shell: tray new-tab failed: {e}");
+                }
+            }
+            "newwin" => {
+                let shared = app.state::<std::sync::Arc<crate::state::Shared>>();
+                if let Err(e) = crate::commands::zim_new_window(app.clone(), shared) {
+                    eprintln!("zim_shell: tray new-window failed: {e}");
                 }
             }
             "quit" => app.exit(0),
@@ -70,10 +89,10 @@ fn show_main(app: &AppHandle) {
             let _ = window.set_focus();
         }
         None => {
-            // M21 keeps a single window; M22 (multiple windows and
-            // session restore) generalizes this — the chrome page
-            // restores its own tab set, and M23 owns real
-            // multi-window.
+            // The main window rebuilds on the bundled boot page and
+            // the attach sequence re-navigates it (a running engine
+            // is probed, not respawned). Torn-out chrome windows are
+            // the registry's business (M23), not this one's.
             let _ = WebviewWindow::builder(app, "main", tauri::WebviewUrl::App("boot.html".into()))
                 .title("ZIM")
                 .inner_size(1280.0, 800.0)

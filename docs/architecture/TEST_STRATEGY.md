@@ -32,12 +32,17 @@ ZIM uses five test types:
    - Run in seconds.
    - May use Docker-in-Docker for runtime tests.
 3. **Frontend unit tests** (node:test over the compiled TS —
-   delivered by M22; `zim/frontend/tests/`, `npm test`).
+   delivered by M22, extended by M23; `zim/frontend/tests/`,
+   `npm test`).
    - Cover the frontend's pure logic: the `zim://` URL grammar,
-   the tab model + session format, the omnibox ranking, the §4
-   indicator mapping. DOM-layer behavior is not unit-tested here —
-   it is covered by the engine's page tests and the shell's
-   engine-attach integration, and will be by the M25 E2E suite.
+   the tab model + session formats (v1 upgrade + v2 splits), the
+   omnibox ranking, the §4 indicator mapping, the split-view math
+   (clamping, snapping, pointer→ratio), the theme resolution +
+   persistence validation, and the NTP form model (create/import
+   validation, the search predicate). DOM-layer behavior is not
+   unit-tested here — it is covered by the engine's page tests
+   and the shell's engine-attach integration, and will be by the
+   M25 E2E suite.
    - Run in milliseconds; part of the Engine CI frontend job.
    - (The pre-correction plan called for Chromium `browser_tests`
    on a C++ integration layer — cancelled with AD-20; the
