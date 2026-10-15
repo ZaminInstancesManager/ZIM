@@ -10,6 +10,8 @@
 
 import { run } from "./util.js";
 
+import { existsSync } from "node:fs";
+
 export type Tier = "docker" | "null";
 
 /** The tier's provenance, for skip messages and diagnostics. */
@@ -36,7 +38,7 @@ export async function detectTier(): Promise<TierInfo> {
     // answer, not a suite failure.
     timeoutMs: 10_000,
   });
-  if (probe.code === 0 && probe.stdout.trim() !== "") {
+  if (probe.code === 0 && probe.stdout.trim() !== "" && engineEndpointPresent()) {
     cached = { tier: "docker", detail: `docker server ${probe.stdout.trim()}` };
   } else {
     cached = {
@@ -46,10 +48,27 @@ export async function detectTier(): Promise<TierInfo> {
           ? "the docker CLI hung (no daemon answered within 10s)"
           : probe.code === 127
             ? "no docker CLI on PATH"
-            : `docker version exited ${probe.code}`,
+            : probe.code !== 0
+              ? `docker version exited ${probe.code}`
+              : "docker answers the CLI, but the engine's local endpoint (the unix socket / named pipe bollard's local defaults use) is absent",
     };
   }
   return cached;
+}
+
+/**
+ * The endpoint the ENGINE's DockerRuntimeFactory actually uses:
+ * bollard's local defaults — `/var/run/docker.sock` off Windows,
+ * the `docker_engine` named pipe on it. A CLI that answers over
+ * TCP (GitHub's Windows runners set DOCKER_HOST) is NOT a tier the
+ * engine can use, and pretending otherwise just fails every
+ * lifecycle test with 503s.
+ */
+function engineEndpointPresent(): boolean {
+  if (process.platform === "win32") {
+    return existsSync("\\\\.\\pipe\\docker_engine");
+  }
+  return existsSync("/var/run/docker.sock");
 }
 
 /**

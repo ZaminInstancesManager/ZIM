@@ -46,8 +46,9 @@ test("custom frontend: signed package uploads, activates, serves; broken ones ar
     await uiGoto(page, engine, "newtab");
     await page.locator("#custom-marker").waitFor({ timeout: 30_000 });
 
-    // ── The failing-smoke package is refused; the active package
-    //    is unchanged and still serving.
+    // ── The failing-smoke package is refused with the gate's own
+    //    422 `frontend_smoke_test_failed`; the active package is
+    //    unchanged and still serving.
     const badSmoke = customFrontendZip({
       id: "org.e2e.frontend.badsmoke",
       broken: "failing-smoke",
@@ -56,7 +57,7 @@ test("custom frontend: signed package uploads, activates, serves; broken ones ar
     try {
       await client.postRaw("/api/v1/frontend/upload", badSmoke.bytes, "application/zip");
     } catch (error) {
-      smokeRefused = (error as { status: number }).status === 400;
+      smokeRefused = (error as { status: number }).status === 422;
     }
     assert.ok(smokeRefused, "a package whose smoke gate fails must be refused");
     const stillActive = await client.get("/api/v1/frontend/active");
