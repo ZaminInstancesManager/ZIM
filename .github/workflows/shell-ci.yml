@@ -1,0 +1,163 @@
+name: Shell CI
+
+on:
+  push:
+    branches: [main, "m*-dev"]
+    paths:
+      # Run when the shell, the engine's discovery surface (the
+      # engine.json contract is shared), or this workflow change.
+      - 'zim/shell/**'
+      - 'zim/engine/crates/main/**'
+      - 'zim/engine/Cargo.toml'
+      - 'zim/engine/Cargo.lock'
+      - '.github/workflows/shell-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'zim/shell/**'
+      - 'zim/engine/crates/main/**'
+      - 'zim/engine/Cargo.toml'
+      - 'zim/engine/Cargo.lock'
+      - '.github/workflows/shell-ci.yml'
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: shell-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_BACKTRACE: 1
+  RUSTFLAGS: "-D warnings"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  shell-build:
+    name: Build + Test + Clippy + Fmt (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The three desktop platforms the shell must compile on
+        # (the system-webview stack differs per OS — that is the
+        # point of the matrix).
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        # Every run step (and the fmt drift diff) operates on the
+        # shell workspace; engine work lives in the job below.
+        working-directory: zim/shell
+        # Bash everywhere: the fmt step's if/diff logic is POSIX
+        # shell, and Windows runners default to pwsh.
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Tauri 2 system prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Install Rust stable + clippy + rustfmt
+        # cache:false — the explicit Swatinem/rust-cache step below
+        # owns caching (the setup action's internal cache would run
+        # `cargo metadata` at the repo root, where no Cargo.toml
+        # lives).
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy rustfmt
+          cache: false
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: zim/shell
+          prefix-key: shell-ci-${{ runner.os }}
+
+      - name: cargo fmt --check
+        # Same drift-reporting pattern as Engine CI: print the full
+        # diff so a remote iteration can replicate the fix.
+        run: |
+          if ! cargo fmt --check; then
+            echo "::error::formatting drift — the full diff follows (apply with 'cargo fmt')"
+            cargo fmt
+            git --no-pager diff -- .
+            exit 1
+          fi
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo build
+        run: cargo build --workspace --all-targets
+
+      - name: cargo test
+        # Unit tests only: the engine-attach integration test skips
+        # itself without ZIM_SHELL_IT_ENGINE (the engine-integration
+        # job below runs it for real).
+        run: cargo test --workspace
+
+  engine-integration:
+    name: Engine-attach integration (real engine, real TLS)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Tauri 2 system prerequisites (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Install Rust stable
+        # cache:false — the two explicit rust-cache steps below own
+        # caching (per workspace).
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: false
+
+      - name: Cache Cargo (shell)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: zim/shell
+          prefix-key: shell-ci-Linux
+
+      - name: Cache Cargo (engine)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: zim/engine
+          prefix-key: engine-ci
+
+      - name: Build the engine binary
+        working-directory: zim/engine
+        run: cargo build --workspace
+
+      - name: Run the shell's engine-attach integration test
+        working-directory: zim/shell
+        env:
+          ZIM_SHELL_IT_ENGINE: ${{ github.workspace }}/zim/engine/target/debug/zim_engine
+        run: cargo test --test engine_attach -- --nocapture

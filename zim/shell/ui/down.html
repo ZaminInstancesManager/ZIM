@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ZIM — engine unreachable</title>
+  <link rel="stylesheet" href="shell.css">
+</head>
+<body data-phase="down">
+  <main class="center">
+    <div class="mark mark-trouble" aria-hidden="true">
+      <span class="mark-caret"></span>
+      <span class="mark-dot"></span>
+    </div>
+    <h1>The ZIM engine is unreachable</h1>
+    <p id="detail" class="status">Waiting for the engine…</p>
+    <div class="actions">
+      <button id="retry" type="button">Retry</button>
+    </div>
+    <p class="hint">Your servers are unaffected: the engine owns them, not this window.</p>
+  </main>
+  <script src="down.js" defer></script>
+</body>
+</html>

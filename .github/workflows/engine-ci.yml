@@ -2,7 +2,7 @@ name: Engine CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "m*-dev"]
     paths:
       # Run when engine code, workspace manifest, lockfile, the
       # frontend package, or this workflow change.

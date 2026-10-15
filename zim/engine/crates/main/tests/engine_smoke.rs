@@ -112,6 +112,16 @@ async fn engine_boots_bootstraps_and_serves_https() {
     assert!(std::path::Path::new(&data_dir)
         .join("loopback-key.pem")
         .exists());
+
+    // M21: the shell-discovery file records the bound port, PID,
+    // and version while the engine runs.
+    let discovery = zim_engine_main::discovery::read(std::path::Path::new(&data_dir))
+        .expect("discovery file exists while the engine runs");
+    assert_eq!(discovery.schema, 1);
+    assert_eq!(discovery.port, engine.local_addr.port());
+    assert!(discovery.pid != 0);
+    assert_eq!(discovery.engine_version, env!("CARGO_PKG_VERSION"));
+    assert!(discovery.started_at_unix > 0);
     // The frontend state (the active.json record) lives under
     // the loader's data subdir.
     assert!(std::path::Path::new(&data_dir)
@@ -119,7 +129,12 @@ async fn engine_boots_bootstraps_and_serves_https() {
         .join("active.json")
         .exists());
 
-    // Clean shutdown, then remove the scratch dir (best-effort).
+    // Clean shutdown removes the discovery file (M21), then remove
+    // the scratch dir (best-effort).
     engine.shutdown().await;
+    assert!(
+        zim_engine_main::discovery::read(std::path::Path::new(&data_dir)).is_none(),
+        "discovery file removed on graceful shutdown"
+    );
     let _ = std::fs::remove_dir_all(&data_dir);
 }

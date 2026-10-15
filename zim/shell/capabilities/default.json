@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "The bundled pre-engine pages (boot/down): engine-status events and the engine_retry command.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
