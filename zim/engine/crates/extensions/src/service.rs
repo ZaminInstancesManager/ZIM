@@ -282,7 +282,7 @@ impl ExtensionsService {
         // went missing, never removed by the operator.
         if seed_bundled {
             for (bundled_id, files) in crate::embedded::bundled_packages() {
-                if let Err(message) = service.seed_bundled(bundled_id, files) {
+                if let Err(message) = service.seed_bundled(&bundled_id, &files) {
                     service
                         .boot_notices
                         .lock()
@@ -512,7 +512,7 @@ impl ExtensionsService {
         self.reload_one(&manifest.id);
         self.find(&manifest.id)
             .map(|addon| addon.summary())
-            .ok_or_else(|| ExtensionError::Storage("the addon vanished after install".to_owned()))
+            .map_err(|_| ExtensionError::Storage("the addon vanished after install".to_owned()))
     }
 
     /// Write the package tree to disk (temp dir + rename).
@@ -599,9 +599,7 @@ impl ExtensionsService {
         registration.enabled = enabled;
         self.persistence.put_extension(&registration)?;
         self.reload_one(manifest_id);
-        self.find(manifest_id)
-            .map(|addon| addon.summary())
-            .ok_or_else(|| ExtensionError::NotFound(manifest_id.to_owned()))
+        self.find(manifest_id).map(|addon| addon.summary())
     }
 
     /// `POST /api/v1/extensions/{id}/grant` — grant additional
@@ -617,13 +615,11 @@ impl ExtensionsService {
         let additions = permissions_by_name(permissions)?;
         let mut registration = addon.registration.clone();
         for grant in additions.iter() {
-            registration.granted_permissions.grant(*grant);
+            registration.granted_permissions.grant(grant);
         }
         self.persistence.put_extension(&registration)?;
         self.reload_one(manifest_id);
-        self.find(manifest_id)
-            .map(|addon| addon.summary())
-            .ok_or_else(|| ExtensionError::NotFound(manifest_id.to_owned()))
+        self.find(manifest_id).map(|addon| addon.summary())
     }
 
     /// `DELETE /api/v1/extensions/{id}` — uninstall + revoke (§4.11).

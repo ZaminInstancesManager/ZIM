@@ -75,8 +75,9 @@ pub struct ThemeManifest {
     pub tokens: BTreeMap<String, serde_json::Value>,
 }
 
-/// One stored theme (the list/upload shape).
-#[derive(Debug, Clone, Serialize)]
+/// One stored theme (the list/upload shape; `Deserialize` because the
+/// registry reloads the JSON files it wrote).
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThemeSummary {
     /// The slug id (URL-safe, derived from the name).
     pub id: String,
