@@ -1,0 +1,94 @@
+name: Dev Lockfiles
+
+# The repo's established iterate-on-CI flow has no local Rust
+# toolchain — this workflow IS the toolchain's lockfile half:
+# it resolves the shell/engine workspaces on a real runner and
+# commits the resulting Cargo.lock back to the branch, so CI builds
+# against pinned versions instead of re-resolving crates.io on
+# every push (the 2026-10-16 wholesale zip yank turned that habit
+# into a hard outage; see the [patch.crates-io] note in
+# zim/shell/Cargo.toml).
+#
+# Manual trigger only — it pushes a commit authored as Abasing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Which lock operation
+        required: true
+        default: shell-generate
+        type: choice
+        options:
+          - shell-generate
+          - shell-update
+          - engine-update
+
+concurrency:
+  group: dev-lockfiles
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  lock:
+    name: Resolve + commit (${{ inputs.mode }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (push-capable token)
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.ZIM_DEV_PAT }}
+          # The whole branch history: the commit needs a stable
+          # parent even when other pushes land mid-run.
+          fetch-depth: 0
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: false
+
+      - name: Resolve the workspace lockfile
+        run: |
+          set -euo pipefail
+          case '${{ inputs.mode }}' in
+            shell-generate)
+              # A full re-resolve: honors Cargo.toml (and any
+              # [patch.crates-io]) but rewrites every entry.
+              (cd zim/shell && cargo generate-lockfile)
+              ;;
+            shell-update)
+              # Minimal churn: keep what satisfies, bump the rest.
+              (cd zim/shell && cargo update)
+              ;;
+            engine-update)
+              (cd zim/engine && cargo update)
+              ;;
+          esac
+
+      - name: Commit + push the lockfile (Abasing)
+        run: |
+          set -euo pipefail
+          git config user.name "Abasing"
+          git config user.email "abasing@users.noreply.github.com"
+          if git diff --quiet -- '**/Cargo.lock'; then
+            echo "the lockfile(s) already satisfy the manifests — nothing to commit"
+            exit 0
+          fi
+          git add -- '**/Cargo.lock'
+          git commit \
+            -m "dev-lockfiles (${{ inputs.mode }}): pin the resolved workspace lockfile" \
+            -m "Resolved on a GitHub runner (no local Rust toolchain in this repo's development loop) and committed so CI builds against pinned crates instead of a live crates.io re-resolve." \
+            --author="Abasing <abasing@users.noreply.github.com>"
+          for i in 1 2 3 4 5; do
+            if git push; then exit 0; fi
+            echo "push conflicted — rebasing and retrying ($i/5)"
+            git pull --rebase --autostash
+          done
+          echo "::error::could not push the lockfile after 5 attempts"
+          exit 1
+
+      - name: Show the lockfile delta
+        run: git --no-pager show --stat --oneline HEAD || true
