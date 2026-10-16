@@ -39,3 +39,15 @@ serde_json = "1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 sha2 = "0.10"
 thiserror = "2"
+
+# 2026-10-16: every zip crate release from 2.0.0 through 9.0.2 was
+# wholesale-yanked on crates.io (only 9.0.3/9.0.4 remain installable).
+# The published tauri-plugin-updater 2.14.0 still requires zip ^4 on
+# Windows targets, so a fresh resolve (the lockfile predates the
+# updater dependency) fails outright. Tauri's fix — zip v9, PR
+# tauri-apps/plugins-workspace#3698, commit ba98bfad — is committed
+# upstream but not yet released to crates.io; pin the patch to it
+# until the next updater release, then delete this block and take
+# the crates.io version.
+[patch.crates-io]
+tauri-plugin-updater = { git = "https://github.com/tauri-apps/plugins-workspace", rev = "ba98bfad" }
