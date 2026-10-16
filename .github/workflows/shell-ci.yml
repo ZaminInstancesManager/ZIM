@@ -109,6 +109,11 @@ jobs:
       # Compile the test binary, dump its import table, and resolve
       # EVERY (dll, symbol) pair live via LoadLibrary/GetProcAddress
       # — the pair that fails to resolve IS the missing entry point.
+      # (Batch 10: the manifest fix means the probe should now report
+      # zero missing — comctl32's TaskDialogIndirect resolves through
+      # the v6 side-by-side assembly the manifest requests. Parsing
+      # stops at dumpbin's trailing "Summary" section — its bare word
+      # was being misread as an import symbol under the last DLL.)
       - name: Probe the Windows test binary load
         if: runner.os == 'Windows'
         shell: pwsh
@@ -141,6 +146,11 @@ jobs:
           $checked = 0
           foreach ($line in $lines) {
             $trimmed = $line.Trim()
+            # dumpbin's output ends with a "Summary" section header
+            # followed by section names — not imports. Stop there:
+            # the bare word "Summary" otherwise parses as a symbol
+            # under whichever DLL was seen last.
+            if ($trimmed -eq 'Summary') { break }
             if ($trimmed -match '^(\S+\.dll)$') {
               $currentDll = $Matches[1]
               continue

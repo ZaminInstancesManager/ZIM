@@ -2,13 +2,18 @@
  * The schedules scenario (§1.4): create a cron schedule on an
  * instance, list it, verify the validation contract (a bad cron
  * expression is refused), update it, trigger it on demand, and
- * delete it. Tier-independent — schedules are durable state.
+ * delete it. Durable-state operations are tier-independent; the
+ * run-now trigger forks on the tier (AD-30): with a container
+ * runtime the dispatch creates a durable job, without one the
+ * engine refuses it up front with 400 `runtime unavailable` —
+ * both are the contract, each on its own tier.
  */
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { launchEngine } from "../lib/engine.js";
 import { adminClient, createInstance, firstNodeId } from "../lib/api.js";
+import { detectTier } from "../lib/tier.js";
 import { uniqueName } from "../lib/util.js";
 
 test("schedules: create → validate → list → update → run-now → delete", async () => {
@@ -60,12 +65,28 @@ test("schedules: create → validate → list → update → run-now → delete"
     assert.equal(String(updated.name), "nightly restart (paused)");
     assert.equal(updated.is_active, false);
 
-    // Trigger now: a durable job is created (its outcome depends on
-    // the runtime tier; the trigger itself must answer).
-    const triggered = await client.post(
-      `/api/v1/instances/${instance.id}/schedules/${scheduleId}/run`,
-    );
-    assert.ok(triggered !== null && triggered !== undefined, "run-now answered");
+    // Trigger now: on the docker tier a durable job is created; on
+    // the null tier the engine refuses the dispatch up front — the
+    // power action needs a container runtime that is not there —
+    // and that 400 refusal IS the null tier's honest contract.
+    const tier = await detectTier();
+    if (tier.tier === "docker") {
+      const triggered = await client.post(
+        `/api/v1/instances/${instance.id}/schedules/${scheduleId}/run`,
+      );
+      assert.ok(triggered !== null && triggered !== undefined, "run-now answered");
+    } else {
+      let runRefused = false;
+      try {
+        await client.post(`/api/v1/instances/${instance.id}/schedules/${scheduleId}/run`);
+      } catch (error) {
+        runRefused = (error as { status: number }).status === 400;
+      }
+      assert.ok(
+        runRefused,
+        `run-now on the null tier must be refused with 400 (${tier.detail})`,
+      );
+    }
 
     // Delete: the list is empty again.
     await client.del(`/api/v1/instances/${instance.id}/schedules/${scheduleId}`);
