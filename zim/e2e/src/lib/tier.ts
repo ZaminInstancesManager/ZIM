@@ -22,7 +22,21 @@ export interface TierInfo {
 
 let cached: TierInfo | undefined;
 
-/** Detect the tier once per process (env override wins). */
+/**
+ * Detect the tier once per process (env override wins).
+ *
+ * The probe pins the CLI to the EXACT endpoint the engine's
+ * DockerRuntimeFactory uses (bollard's local defaults — the unix
+ * socket off Windows, the `docker_engine` named pipe on it). The
+ * plain `docker version` the harness used before answered through
+ * whatever the environment pointed at (GitHub's Windows runners
+ * set DOCKER_HOST at a TCP proxy), so a dead named-pipe stub plus
+ * a live-looking CLI made the tier say "docker" while the engine
+ * itself booted degraded — every lifecycle call then failed with
+ * 503s that were the probe's fault, not the product's. Forcing
+ * `-H` onto the engine's own endpoint makes the CLI's answer and
+ * the engine's connect attempt agree by construction.
+ */
 export async function detectTier(): Promise<TierInfo> {
   if (cached !== undefined) {
     return cached;
@@ -32,25 +46,36 @@ export async function detectTier(): Promise<TierInfo> {
     cached = { tier: override, detail: "forced via ZIM_E2E_TIER" };
     return cached;
   }
-  const probe = await run("docker", ["version", "--format", "{{.Server.Version}}"], {
-    // Short on purpose: daemon-less hosts with a docker CLI stub
-    // (the Windows runners) HANG here — a timeout is a null-tier
-    // answer, not a suite failure.
-    timeoutMs: 10_000,
-  });
+  const endpoint =
+    process.platform === "win32"
+      ? "npipe:////./pipe/docker_engine"
+      : "unix:///var/run/docker.sock";
+  const probe = await run(
+    "docker",
+    ["-H", endpoint, "version", "--format", "{{.Server.Version}}"],
+    {
+      // Short on purpose: daemon-less hosts with a docker CLI stub
+      // (the Windows runners) HANG here — a timeout is a null-tier
+      // answer, not a suite failure.
+      timeoutMs: 10_000,
+    },
+  );
   if (probe.code === 0 && probe.stdout.trim() !== "" && engineEndpointPresent()) {
-    cached = { tier: "docker", detail: `docker server ${probe.stdout.trim()}` };
+    cached = {
+      tier: "docker",
+      detail: `docker server ${probe.stdout.trim()} on ${endpoint}`,
+    };
   } else {
     cached = {
       tier: "null",
       detail:
         probe.code === 124
-          ? "the docker CLI hung (no daemon answered within 10s)"
+          ? `the docker CLI hung on ${endpoint} (no daemon answered within 10s)`
           : probe.code === 127
             ? "no docker CLI on PATH"
             : probe.code !== 0
-              ? `docker version exited ${probe.code}`
-              : "docker answers the CLI, but the engine's local endpoint (the unix socket / named pipe bollard's local defaults use) is absent",
+              ? `docker version on ${endpoint} exited ${probe.code}`
+              : `docker answers the CLI on ${endpoint}, but the engine's endpoint file is absent`,
     };
   }
   return cached;

@@ -26,6 +26,10 @@ test("console: the server console page replays the buffer and streams live ticks
   }
   const engine = await launchEngine({});
   const browser = await launchBrowser();
+  // Hoisted: the finally must close the context even when the test
+  // fails before its own cleanup line (a leaked context holds the
+  // browser open — the slot-jam lesson, browser half).
+  let context: Awaited<ReturnType<typeof newContext>> | undefined;
   try {
     const client = await adminClient(engine);
     const nodeId = await firstNodeId(client);
@@ -42,7 +46,7 @@ test("console: the server console page replays the buffer and streams live ticks
     );
 
     // Log in through the UI, then open the console surface.
-    const context = await newContext(browser);
+    context = await newContext(browser);
     const page = await context.newPage();
     await loginViaUi(page, engine);
     await uiGoto(page, engine, `servers/${instance.id}/console`);
@@ -82,6 +86,11 @@ test("console: the server console page replays the buffer and streams live ticks
 
     await context.close();
   } finally {
+    // Order matters: the context first (its page may hold a live
+    // stream socket), then the browser, then the engine — every
+    // step failing soft so a wedged step can never wedge the
+    // file's process.
+    await context?.close().catch(() => {});
     await browser.close();
     await engine.stop();
   }
