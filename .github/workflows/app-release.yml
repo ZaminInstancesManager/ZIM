@@ -40,8 +40,10 @@ jobs:
         # deferral PLATFORM_SUPPORT.md recorded for Linux arm64 +
         # macOS x64): every leg builds NATIVE on its own runner —
         # arm64 Linux on GitHub's ubuntu-24.04-arm fleet, Intel
-        # macOS on the macos-13 fleet — no cross-compilation, no
-        # qemu, the same per-platform tooling.
+        # macOS on the macos-15-intel fleet (macos-13 closed down
+        # Dec 2025; the first alpha.2 tag run queued 45+ minutes
+        # on the retired label before anyone noticed) — no
+        # cross-compilation, no qemu, the same per-platform tooling.
         include:
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-latest
@@ -56,7 +58,7 @@ jobs:
             platform: windows-x86_64
             engine_ext: '.exe'
           - target: x86_64-apple-darwin
-            runner: macos-13
+            runner: macos-15-intel
             platform: darwin-x86_64
             engine_ext: ''
           - target: aarch64-apple-darwin

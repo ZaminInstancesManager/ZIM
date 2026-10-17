@@ -40,7 +40,8 @@ jobs:
         # Cross-platform release targets per docs/architecture/PLATFORM_SUPPORT.md §1.
         # M27 completes the §1 matrix: Linux arm64 (native on the
         # ubuntu-24.04-arm fleet) and macOS x64 (native on the
-        # macos-13 Intel fleet) join the original three.
+        # macos-15-intel fleet — macos-13 closed down Dec 2025)
+        # join the original three.
         include:
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-latest
@@ -55,7 +56,7 @@ jobs:
             archive_ext: zip
             binary_name: zim_engine.exe
           - target: x86_64-apple-darwin
-            runner: macos-13
+            runner: macos-15-intel
             archive_ext: tar.gz
             binary_name: zim_engine
           - target: aarch64-apple-darwin
