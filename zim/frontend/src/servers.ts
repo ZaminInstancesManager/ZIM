@@ -99,6 +99,9 @@ async function load(): Promise<void> {
 
 function buildRow(instance: Instance): { row: HTMLTableRowElement; parts: { dot: HTMLElement; stateCell: HTMLElement; updatedCell: HTMLElement } } {
   const row = document.createElement("tr");
+  // The row's stable instance anchor (E2E selectors + future
+  // per-row tooling; the id is already public in the row's links).
+  row.dataset.instanceId = instance.id;
 
   const statusCell = document.createElement("td");
   const dot = document.createElement("zim-status-dot");

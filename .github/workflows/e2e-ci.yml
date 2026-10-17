@@ -81,11 +81,37 @@ jobs:
 
       - name: Build the engine (debug)
         working-directory: zim/engine
-        run: cargo build -p zim_engine_main
+        # The mysql feature links the importer's live-DSN adapter —
+        # the migration-mysql E2E drives it for real on the Linux
+        # leg (and the feature compiling on every platform is
+        # itself part of the matrix's job).
+        run: cargo build -p zim_engine_main --features zim_engine_migrate_pterodactyl/mysql
 
       - name: Pre-pull the E2E container image
         if: runner.os == 'Linux'
         run: docker pull busybox:latest
+
+      # The live-MySQL panel for the migration E2E (M27): a real
+      # mysql:8.4 in Docker on the leg that already has Docker.
+      # (Service containers are Linux-runner-only in the actions
+      # model; this step keeps one job, one matrix, and the
+      # Windows/macOS legs honestly without.)
+      - name: Start the MySQL panel container
+        if: runner.os == 'Linux'
+        run: |
+          docker run -d --name zim-panel-mysql \
+            -p 127.0.0.1:3306:3306 \
+            -e MYSQL_ROOT_PASSWORD=zim-e2e-root \
+            -e MYSQL_DATABASE=panel \
+            mysql:8.4
+          for _ in $(seq 1 60); do
+            docker exec zim-panel-mysql mysqladmin ping \
+              -h 127.0.0.1 -pzim-e2e-root --silent >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker exec zim-panel-mysql mysqladmin ping -h 127.0.0.1 -pzim-e2e-root --silent
+          echo "ZIM_E2E_MYSQL_DSN=mysql://root:zim-e2e-root@127.0.0.1:3306/panel" \
+            >> "$GITHUB_ENV"
 
       # The sample addon package the extensions scenario installs —
       # built by the same authoring pipeline addon-ci exercises.

@@ -1,0 +1,179 @@
+name: Failure Sweep
+
+# M27: the nightly failure-scenario sweep the roadmap absorbed from
+# M25's honest-boundaries notes — the scenarios that deserve a
+# dedicated, slower cadence than every-push CI:
+#
+# - E7/E8/E9 visual state mappings (real crash + auto-restart
+#   recovery, the real crash-loop threshold, the unknown/gray
+#   contract over the real served component),
+# - the interrupted backup (SIGKILL mid-archive → boot
+#   reconciliation → cleanup → the pipeline still works),
+# - disk-full (a size-capped tmpfs data root → structured failed
+#   jobs, engine alive, never a hang),
+# - the live-MySQL panel migration (the DSN path vs the fixture
+#   path, same data, same report).
+#
+# The suite is the E2E suite — the sweep is the SCHEDULE plus the
+# slower scenarios' headroom (the interrupted-backup and disk-full
+# tests ride along in the normal suite too; here they get a run
+# without the push-CI time budget's pressure). A red sweep files an
+# issue with the run link so a nightly failure cannot silently
+# scroll away.
+
+on:
+  schedule:
+    # 03:17 UTC nightly — off the top of the hour (GitHub's cron
+    # congestion window), inside the "overnight" gap for EU/US
+    # maintainers' morning triage.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: failure-sweep
+  cancel-in-progress: false
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sweep:
+    name: Nightly failure sweep (Linux, docker tier)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: zim/engine
+          prefix-key: failure-sweep-engine
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            zim/e2e/package-lock.json
+            zim/sdk/addon/package-lock.json
+
+      - name: Build the engine (debug, mysql feature)
+        working-directory: zim/engine
+        run: cargo build -p zim_engine_main --features zim_engine_migrate_pterodactyl/mysql
+
+      - name: Pre-pull the E2E container image
+        run: docker pull busybox:latest
+
+      - name: Start the MySQL panel container
+        run: |
+          docker run -d --name zim-panel-mysql \
+            -p 127.0.0.1:3306:3306 \
+            -e MYSQL_ROOT_PASSWORD=zim-e2e-root \
+            -e MYSQL_DATABASE=panel \
+            mysql:8.4
+          for _ in $(seq 1 60); do
+            docker exec zim-panel-mysql mysqladmin ping \
+              -h 127.0.0.1 -pzim-e2e-root --silent >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker exec zim-panel-mysql mysqladmin ping -h 127.0.0.1 -pzim-e2e-root --silent
+          echo "ZIM_E2E_MYSQL_DSN=mysql://root:zim-e2e-root@127.0.0.1:3306/panel" \
+            >> "$GITHUB_ENV"
+
+      - name: Build the SDK + package the sample addon
+        shell: bash
+        run: |
+          cd zim/sdk/addon
+          npm ci --no-fund --no-audit
+          npm run build
+          cd ../../extensions
+          node scripts/package-addon.mjs build samples/hello-zim \
+            ../e2e/hello-zim.zimpkg
+
+      - name: Install the E2E suite
+        working-directory: zim/e2e
+        run: npm ci --no-fund --no-audit
+
+      - name: Install Chromium (Playwright)
+        working-directory: zim/e2e
+        shell: bash
+        run: npx playwright install chromium --with-deps
+
+      - name: Run the sweep (full E2E, failure scenarios included)
+        working-directory: zim/e2e
+        shell: bash
+        run: npm test
+
+      - name: Dump the Docker world (diagnostics)
+        if: failure()
+        shell: bash
+        run: |
+          echo "== docker ps -a (ZIM-labeled) =="
+          docker ps -a --filter label=Service=ZIM || true
+          for c in $(docker ps -aq --filter label=Service=ZIM | head -6); do
+            echo "== container $c =="
+            docker inspect "$c" --format '{{json .State}}' || true
+            docker logs --tail 30 "$c" 2>&1 || true
+          done
+
+      - name: Upload failure traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-sweep-traces
+          path: zim/e2e/.playwright/
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # A red sweep must not scroll away: one open issue, updated
+      # per red run (created on the first, commented with each new
+      # run link, closed by hand when the sweep is green again).
+      - name: File the nightly-failure issue
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'Nightly failure sweep: RED';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              `The nightly failure sweep failed: ${runUrl}`,
+              '',
+              `Started: ${new Date(context.payload.workflow_run ? context.payload.workflow_run.run_started_at : Date.now()).toISOString()}`,
+              'Scenarios in this sweep: E7-E9 visual mappings, interrupted backup, disk-full, live-MySQL migration, plus the full E2E suite.',
+              '',
+              'Traces: check the `failure-sweep-traces` artifact on the run.',
+              'Close this issue once the sweep is green again (the next red run will comment here rather than duplicate).',
+            ].join('\n');
+            const existing = await github.rest.issues.listForRepo({
+              ...context.repo,
+              state: 'open',
+              labels: 'failure-sweep',
+            });
+            const match = existing.data.find((issue) => issue.title === title);
+            if (match) {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: match.number,
+                body: `Still red: ${runUrl}`,
+              });
+            } else {
+              await github.rest.issues.create({
+                ...context.repo,
+                title,
+                body,
+                labels: ['failure-sweep'],
+              });
+            }
