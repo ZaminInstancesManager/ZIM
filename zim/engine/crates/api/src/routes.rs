@@ -11,8 +11,8 @@ use axum::routing::{delete, get, patch, post};
 use axum::Router;
 
 use crate::handlers::{
-    audit, auth, eggs, extensions, frontend, instances, misc, nodes, pages, recents, stream,
-    themes, users,
+    audit, auth, control, eggs, extensions, frontend, instances, misc, nodes, pages, recents,
+    stream, themes, users,
 };
 use crate::middleware;
 use crate::state::AppState;
@@ -50,6 +50,11 @@ pub fn router(state: Arc<AppState>) -> Router {
     let api = Router::new()
         // ── Health (additive, unauthenticated) ────────────────────
         .route("/health", get(misc::health))
+        // ── Local engine control (M27; UPDATES.md §3) ─────────────
+        // Token-gated, NOT user-credential-gated (the machine-local
+        // operator context the desktop shell occupies; see
+        // handlers::control for why the two models stay separate).
+        .route("/engine/control", post(control::control))
         // ── Event stream (§11; M7) ────────────────────────────────
         .route("/stream", get(stream::stream))
         // ── Auth (§10.1) ──────────────────────────────────────────
@@ -286,6 +291,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .layer(from_fn_with_state(
             Arc::clone(&state),
             middleware::authenticate,
+        ))
+        .layer(from_fn_with_state(
+            Arc::clone(&state),
+            middleware::addon_attribution,
         ))
         .layer(from_fn_with_state(Arc::clone(&state), middleware::version))
         .layer(axum::middleware::from_fn(middleware::host_guard))

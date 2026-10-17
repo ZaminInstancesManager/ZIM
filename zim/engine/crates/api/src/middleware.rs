@@ -5,10 +5,15 @@
 //!    into error bodies.
 //! 3. `version` — `X-ZIM-API-Version` advertising and `Accept`
 //!    version negotiation (406 on an unsupported requested version).
-//! 4. `authenticate` — cookie/bearer credential resolution into the
+//! 4. `addon_attribution` — per-addon call attribution (AD-29's
+//!    M27 hardening): reads the vendored SDK's `X-ZIM-Addon` header,
+//!    validates it against the installed+enabled registry, and
+//!    publishes it (plus the user agent) to the audit writer through
+//!    a task-local.
+//! 5. `authenticate` — cookie/bearer credential resolution into the
 //!    `Caller` extension.
-//! 5. `credential_rate_limit` — per-credential sliding window (§9).
-//! 6. `idempotency_replay` — `Idempotency-Key` response replay (§12).
+//! 6. `credential_rate_limit` — per-credential sliding window (§9).
+//! 7. `idempotency_replay` — `Idempotency-Key` response replay (§12).
 //!
 //! The body-size limit is applied by the router itself (axum's
 //! `DefaultBodyLimit`), not a middleware.
@@ -27,6 +32,39 @@ use crate::state::{AppState, Caller, CredentialKind};
 
 /// Header carrying the per-request correlation id.
 pub const REQUEST_ID_HEADER: &str = "x-zim-request-id";
+
+/// The addon-attribution header the vendored SDK's fetch wrapper
+/// stamps on every API call an addon page makes (AD-29: advisory
+/// attribution on the shared loopback origin — authorization is
+/// unchanged, the user's own credentials still gate every call).
+pub const ADDON_HEADER: &str = "x-zim-addon";
+
+/// The longest addon id accepted for attribution (reverse-DNS ids
+/// are far shorter; the cap only guards pathological headers).
+const MAX_ADDON_ID_LEN: usize = 255;
+
+/// The per-request attribution the audit writer reads (set by
+/// `addon_attribution`, consumed by `handlers::audit`).
+#[derive(Debug, Clone, Default)]
+pub struct CallAttribution {
+    /// The addon the calling page belongs to, when the header named
+    /// an installed AND enabled one.
+    pub addon_id: Option<String>,
+    /// The request's `User-Agent`, when presented.
+    pub user_agent: Option<String>,
+}
+
+tokio::task_local! {
+    static CALL_ATTRIBUTION: CallAttribution;
+}
+
+/// Read the current request's attribution (outside a request scope:
+/// the empty attribution — the audit writer's honest default).
+pub fn current_attribution() -> CallAttribution {
+    CALL_ATTRIBUTION
+        .try_with(|slot| slot.clone())
+        .unwrap_or_default()
+}
 
 /// Maximum size of an error body that the request-id middleware will
 /// buffer for injection (error bodies are small JSON; the cap only
@@ -87,6 +125,71 @@ pub async fn host_guard(req: Request, next: Next) -> Response {
         .into_response(),
         None => ApiError::bad_request("requests must carry a Host header").into_response(),
     }
+}
+
+// ── 1b. Addon attribution (AD-29's M27 hardening) ─────────────────
+
+/// Middleware: publish the request's call attribution to the audit
+/// writer.
+///
+/// The vendored SDK stamps `X-ZIM-Addon: <addon-id>` on every API
+/// call an addon page makes. The header is **advisory by design**:
+/// every page on the engine's origin can set any header it likes,
+/// so this can never be an enforcement boundary — which is exactly
+/// why AD-29 records it as *attribution*, not authorization. What
+/// the engine contributes is the honest half: the id is only
+/// believed when it names an addon that is **installed and enabled**
+/// (a spoofed or stale id is dropped, never recorded as fact), and
+/// when believed it rides the audit record as `metadata.addon_id`
+/// next to the *user* whose credentials actually authorized the
+/// call.
+///
+/// The user agent rides the same task-local so audit records stop
+/// carrying `user_agent: null` for API-originated actions (a small
+/// honesty gap noticed while wiring this).
+///
+/// Attribution is never a request modifier: the request reaches the
+/// handler byte-identical whether the header was believed, dropped,
+/// or absent — including for host/version/authz rejections, which
+/// this middleware deliberately sits outside of.
+pub async fn addon_attribution(
+    State(state): State<Arc<AppState>>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let attribution = CallAttribution {
+        addon_id: presented_addon_id(&state, req.headers()),
+        user_agent: req
+            .headers()
+            .get(header::USER_AGENT)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned),
+    };
+    CALL_ATTRIBUTION.scope(attribution, next.run(req)).await
+}
+
+/// Resolve the believed addon id from the headers: presented, short
+/// enough, and matching an installed + enabled addon. Anything else
+/// is `None` — unknown ids, disabled addons, and uninstalled addons
+/// are all "not attributable", not errors (a page whose addon was
+/// disabled mid-session keeps working under its user's credentials
+/// with plain user attribution, which is precisely AD-29's
+/// disable-with-notice posture).
+fn presented_addon_id(state: &AppState, headers: &axum::http::HeaderMap) -> Option<String> {
+    let raw = headers
+        .get(ADDON_HEADER)
+        .and_then(|v| v.to_str().ok())?
+        .trim()
+        .to_owned();
+    if raw.is_empty() || raw.len() > MAX_ADDON_ID_LEN {
+        return None;
+    }
+    let installed_and_enabled = state
+        .extensions
+        .list()
+        .iter()
+        .any(|addon| addon.enabled && addon.id == raw);
+    installed_and_enabled.then_some(raw)
 }
 
 // ── 2. Request id ─────────────────────────────────────────────────

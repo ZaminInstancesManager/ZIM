@@ -1,5 +1,7 @@
-//! The tray icon: show/hide, new-tab navigation, and an explicit
-//! "engine keeps running" quit.
+//! The tray icon: show/hide, new-tab navigation, the update
+//! channel's check, an explicit "Stop engine" (M27's control plane,
+//! servers keep running), and the quit that also keeps the engine
+//! running.
 //!
 //! The tray exists because the shell is disposable by design —
 //! the engine (and every server) is not. Closing the window just
@@ -32,6 +34,18 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
         true,
         None::<&str>,
     )?;
+    // M27: the explicit engine stop over the control plane. The
+    // label carries the load-bearing half of the design: the
+    // engine's drain leaves containers running (the next start
+    // re-adopts them) — stopping the ENGINE is not stopping the
+    // SERVERS.
+    let stop_engine = MenuItem::with_id(
+        app,
+        "stop-engine",
+        "Stop engine — servers keep running",
+        true,
+        None::<&str>,
+    )?;
     let quit = MenuItem::with_id(
         app,
         "quit",
@@ -47,6 +61,7 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
             &newwin,
             &PredefinedMenuItem::separator(app)?,
             &check_update,
+            &stop_engine,
             &PredefinedMenuItem::separator(app)?,
             &quit,
         ],
@@ -70,6 +85,27 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
                 }
             }
             "check-update" => crate::updater::check_and_apply(app.clone()),
+            "stop-engine" => {
+                // The explicit stop: async (the drain is watched),
+                // with the surfaces flipped on completion and the
+                // honest refusal surfaced on failure.
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    match crate::control::stop_engine(&app).await {
+                        Ok(()) => {
+                            eprintln!("zim_shell: engine stopped via the tray");
+                            crate::control::engine_stopped_surfaces(&app);
+                        }
+                        Err(message) => {
+                            eprintln!("zim_shell: engine stop failed: {message}");
+                            crate::tray::set_engine_tooltip(
+                                &app,
+                                "ZIM — engine stop failed (see the shell log)",
+                            );
+                        }
+                    }
+                });
+            }
             "quit" => app.exit(0),
             _ => {}
         })

@@ -120,6 +120,11 @@ const MAX_ATTEMPTS = 6;
 /** The resolved registration of the addon this script serves. */
 let resolvedSelf: SelfSummary | null = null;
 let initPromise: Promise<SelfSummary | null> | null = null;
+/** This page's addon id, captured at Zim.init (AD-29's attribution:
+ * rides every API call as X-ZIM-Addon so the engine's audit log can
+ * attribute the action to the addon whose page made it — advisory
+ * by design; the user's own credentials still authorize the call). */
+let attributedAddonId: string | null = null;
 
 async function parseError(response: Response): Promise<ApiError> {
   let code = "network_error";
@@ -183,6 +188,9 @@ async function api<T = unknown>(path: string, options: ApiOptions = {}): Promise
     credentials: "same-origin",
     headers: {},
   };
+  if (attributedAddonId !== null) {
+    (init.headers as Record<string, string>)["X-ZIM-Addon"] = attributedAddonId;
+  }
   if (options.body !== undefined) {
     init.body = JSON.stringify(options.body);
     (init.headers as Record<string, string>)["Content-Type"] = "application/json";
@@ -199,6 +207,7 @@ async function api<T = unknown>(path: string, options: ApiOptions = {}): Promise
 
 /** Resolve this addon's registration; safe to call repeatedly. */
 async function init(addonId: string): Promise<SelfSummary | null> {
+  attributedAddonId = addonId;
   if (resolvedSelf !== null && resolvedSelf.id === addonId) {
     return resolvedSelf;
   }

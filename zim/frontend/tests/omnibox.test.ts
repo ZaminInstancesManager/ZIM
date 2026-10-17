@@ -20,15 +20,16 @@ test("empty query yields the default set: surfaces, then consoles", () => {
   const rows = buildSuggestions("", SIGNED_IN);
   assert.equal(rows[0].path, "newtab");
   assert.equal(rows[1].path, "servers");
-  assert.equal(rows[2].title, "Survival");
-  assert.equal(rows[2].path, "servers/9f2c/console");
+  assert.equal(rows[2].path, "about");
+  assert.equal(rows[3].title, "Survival");
+  assert.equal(rows[3].path, "servers/9f2c/console");
 });
 
 test("empty query, anonymous: a sign-in hint, no dead instance rows", () => {
   const rows = buildSuggestions("", ANON);
-  assert.equal(rows.length, 3);
-  assert.equal(rows[2].kind, "info");
-  assert.equal(rows[2].path, "newtab");
+  assert.equal(rows.length, 4);
+  assert.equal(rows[3].kind, "info");
+  assert.equal(rows[3].path, "newtab");
 });
 
 test("a typed address ranks first", () => {

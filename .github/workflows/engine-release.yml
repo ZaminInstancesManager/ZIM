@@ -38,17 +38,26 @@ jobs:
       fail-fast: false
       matrix:
         # Cross-platform release targets per docs/architecture/PLATFORM_SUPPORT.md §1.
-        # Linux x64, Windows x64, macOS arm64 (Apple Silicon) are first-class;
-        # Linux arm64 and macOS x64 are deferred by one milestone per §1.
+        # M27 completes the §1 matrix: Linux arm64 (native on the
+        # ubuntu-24.04-arm fleet) and macOS x64 (native on the
+        # macos-13 Intel fleet) join the original three.
         include:
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-latest
+            archive_ext: tar.gz
+            binary_name: zim_engine
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
             archive_ext: tar.gz
             binary_name: zim_engine
           - target: x86_64-pc-windows-msvc
             runner: windows-latest
             archive_ext: zip
             binary_name: zim_engine.exe
+          - target: x86_64-apple-darwin
+            runner: macos-13
+            archive_ext: tar.gz
+            binary_name: zim_engine
           - target: aarch64-apple-darwin
             runner: macos-latest
             archive_ext: tar.gz

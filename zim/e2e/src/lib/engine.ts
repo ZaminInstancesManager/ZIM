@@ -288,16 +288,23 @@ function indent(lines: string[]): string {
  * pterodactyl --panel-fixture … --zim-db …`) and assert success.
  */
 export async function runMigration(options: {
-  panelFixture: string;
+  panelFixture?: string;
+  panelMysqlDsn?: string;
   zimDb: string;
   dryRun?: boolean;
 }): Promise<string> {
-  const args = [
-    "migrate",
-    "pterodactyl",
-    `--panel-fixture=${options.panelFixture}`,
-    `--zim-db=${options.zimDb}`,
-  ];
+  if (options.panelFixture === undefined && options.panelMysqlDsn === undefined) {
+    throw new Error("runMigration needs a panel source (fixture path or MySQL DSN)");
+  }
+  const args = ["migrate", "pterodactyl", `--zim-db=${options.zimDb}`];
+  if (options.panelFixture !== undefined) {
+    args.push(`--panel-fixture=${options.panelFixture}`);
+  }
+  if (options.panelMysqlDsn !== undefined) {
+    // The live-MySQL source (M27's E2E): the DSN reaches the
+    // importer's read-only adapter.
+    args.push(`--panel-mysql-dsn=${options.panelMysqlDsn}`);
+  }
   if (options.dryRun === true) {
     args.push("--dry-run");
   }

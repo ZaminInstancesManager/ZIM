@@ -131,19 +131,41 @@ abstraction, and the roadmap that subsequent implementation work will follow.
   pipeline `app-release.yml`: 3-platform installers with the
   engine as the `externalBin` sidecar, `.sig` updater artifacts,
   `latest.json` assembly, and the Linux packaged-app deb smoke
-  under Xvfb).
-  Remaining: M26 — the first alpha release (tag `v0.1.0-alpha.1`,
-  release notes, the Pterodactyl migration guide, and the
-  honest-boundaries follow-ups). M25's own acceptance campaign
-  (16 CI batches) also earned a real engine fix: the production
-  TLS accept loop was dropping every WebSocket subscriber on
-  arrival (`serve_connection` had no upgrade support — the live
-  event stream had silently never worked over the real server);
-  fixed with `serve_connection_with_upgrades` and kept found by
-  the `stream_tls_ws.rs` regression tests over the production
-  loop. The alpha release notes live at
-  `docs/releases/ALPHA_v0.1.0.md`; the operator's migration
-  walkthrough at `docs/compatibility/PTERODACTYL_MIGRATION_GUIDE.md`.
+  under Xvfb), and the release milestones (M26 — the first
+  alpha: tag `v0.1.0-alpha.1`, the honest what-works notes, the
+  operator's Pterodactyl migration guide, the alpha labeling, and
+  the engine-only `engine-v*` tag namespace so the App Release
+  pipeline owns every plain `v*` tag; M27 — the release
+  follow-ups that hardened the channel into `v0.1.0-alpha.2`:
+  the first-boot spawn defect the packaged-app smoke caught
+  (alpha.1's install bytes were dead-on-arrival — fixed with the
+  data-dir creation + a regression test over the real attach),
+  the `zim` to `zamin-zim` package rename that closed the archive
+  collision with the distro `zim` wiki package, the engine
+  control plane (a per-boot `engine.token` gating
+  `POST /api/v1/engine/control`) with the coordinated Windows
+  update shutdown and the tray's "Stop engine — servers keep
+  running" (AD-32), the nightly failure-sweep workflow
+  (`failure-sweep.yml`: E7-E9 visual mappings, the interrupted
+  backup, disk-full, the live-MySQL migration E2E — a red sweep
+  files an issue), AD-29's per-addon attribution hardening (the
+  SDK stamps `X-ZIM-Addon`; the engine believes installed+enabled
+  ids only; spoofed ids drop), the `zim://about` surface with the
+  running-vs-installed engine version comparison, and the
+  completed five-platform release matrix — Linux x64/arm64,
+  Windows x64, macOS x64/arm64 — with per-arch deb smokes and a
+  `latest.json` carrying all five platforms).
+  M25's own acceptance campaign (16 CI batches) also earned a
+  real engine fix: the production TLS accept loop was dropping
+  every WebSocket subscriber on arrival (`serve_connection` had
+  no upgrade support — the live event stream had silently never
+  worked over the real server); fixed with
+  `serve_connection_with_upgrades` and kept found by the
+  `stream_tls_ws.rs` regression tests over the production loop.
+  The release notes live at `docs/releases/ALPHA_v0.1.0.md` (the
+  alpha.1 kit) and `docs/releases/ALPHA_v0.1.0-alpha.2.md`
+  (alpha.2); the operator's migration walkthrough at
+  `docs/compatibility/PTERODACTYL_MIGRATION_GUIDE.md`.
 - A re-skinned Pterodactyl. The Panel's PHP/Laravel backend and Wings's Go
   daemon are preserved in `upstream/` as audit references and behavioral
   contracts; they are not part of ZIM's runtime architecture.
@@ -160,27 +182,42 @@ ZIM/
 ├── zim/                          # ZIM's own code
 │   ├── contracts/                # Versioned contract files
 │   │   └── theme-tokens.v1.json  # Theme token vocabulary (AD-27)
-│   ├── engine/                   # Rust engine workspace (28 crates, M1-M19)
+│   ├── engine/                   # Rust engine workspace (30 crates,
+│   │   │                         #   M3-M19; M27: the engine control
+│   │   │                         #   plane + health's version)
 │   ├── shell/                    # Tauri 2 desktop shell (M21): window, tray,
 │   │   │                         #   engine attach/spawn, zim:// mapping, trust;
 │   │   │                         #   (M23: multi-window — tear-off / merge /
-│   │   │                         #   new-window commands, window registry)
+│   │   │                         #   new-window commands, window registry;
+│   │   │                         #   M27: coordinated engine stop, updater)
 │   │   ├── ui/                   #   bundled pre-engine pages (boot / recovery)
 │   │   ├── icons/                #   app icons (png / ico / icns)
 │   │   └── src/                  #   cli / zim_url / engine / trust / tray /
-│   │                             #   state / windows / commands
-│   └── frontend/                 # Default frontend package (engine-served)
-│       │                         #   (M22: the zim://app chrome — tab strip +
-│       │                         #   omnibox + panes; M23: split view, session
-│       │                         #   v2, themes, the completed NTP with create /
-│       │                         #   import / recents; newtab, servers, console,
-│       │                         #   and the declared per-instance surfaces;
-│       │                         #   src/ TypeScript, tests/ node:test suite)
+│   │                             #   state / windows / commands / control /
+│   │                             #   updater
+│   ├── frontend/                 # Default frontend package (engine-served)
+│   │   │                         #   (M22: the zim://app chrome — tab strip +
+│   │   │                         #   omnibox + panes; M23: split view, session
+│   │   │                         #   v2, themes, the completed NTP with create /
+│   │   │                         #   import / recents; M27: zim://about; newtab,
+│   │   │                         #   servers, console, and the declared
+│   │   │                         #   per-instance surfaces; src/ TypeScript,
+│   │   │                         #   tests/ node:test suite)
+│   ├── e2e/                      # Node/Playwright E2E suite (M25): the real
+│   │                             #   engine binary + real browser; the
+│   │                             #   failure-scenario tests (M27: disk-full,
+│   │                             #   interrupted backup, E7-E9 visual
+│   │                             #   mappings, live-MySQL migration)
+│   ├── sdk/                      # Addon SDK (M24): src/ + the vendored
+│   │   └── addon/                #   zim.js client (M27: attribution stamp)
+│   └── extensions/               # Bundled + sample addons (M24): the
+│                                 #   audit-log viewer, hello-zim
 ├── docs/
 │   ├── audits/                   # Upstream audits, baseline, dispositions
 │   ├── architecture/             # ZIM architecture, Rust engine, desktop frontend
 │   ├── api/                      # API + frontend/extension specs
 │   ├── compatibility/            # Pterodactyl migration/compat
+│   ├── releases/                 # Alpha release notes (v0.1.0-alpha.1/2)
 │   ├── security/                 # Threat model
 │   └── decisions/               # ADRs
 ├── LICENSE                       # Apache 2.0
@@ -247,9 +284,15 @@ each imported subtree.
 
 ## Status
 
-This repository is the *engineering foundation* for ZIM, not a shipping
-product. The architecture, contracts, audit evidence and roadmap recorded here
-are intended to allow a separate implementation phase to proceed without
-re-inventing the architecture as it goes. See
-`docs/architecture/IMPLEMENTATION_ROADMAP.md` for the first milestone and its
-acceptance criteria.
+ZIM has shipped its first alphas: `v0.1.0-alpha.1` and
+`v0.1.0-alpha.2` (five desktop platforms each, installers + signed
+updater payloads, published through the GitHub Releases update
+channel). The repository remains the *engineering foundation* —
+the architecture, contracts, audit evidence and roadmap — but it
+is now also the shipping source: every release tag drives the
+`App Release` pipeline and lands real installers. The product is
+an **alpha**: not production-ready, honest about its boundaries
+(see the release notes' what-works / what-doesn't sections), with
+the nightly failure-sweep watching the honest-edge scenarios.
+See `docs/architecture/IMPLEMENTATION_ROADMAP.md` for the
+milestone history (M1-M27) and the post-alpha backlog.

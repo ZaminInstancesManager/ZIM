@@ -52,6 +52,7 @@
 #![warn(missing_docs)]
 
 pub mod config;
+pub mod control;
 pub mod error;
 pub mod etag;
 pub mod handlers;

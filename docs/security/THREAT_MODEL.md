@@ -400,6 +400,65 @@ version.
 **Residual risk:** A compromised signing key. Mitigation: trusted
 keys are rotated; revocation lists are documented.
 
+### 2.17 The local engine-control plane (M27)
+
+**Scenario:** A process on the machine — or a remote caller — uses
+the new `POST /api/v1/engine/control` endpoint to stop the engine
+(a denial of service against the management plane; running
+containers keep running by design, so the blast radius is
+management, not the servers).
+
+**Mitigations:**
+- The endpoint requires the per-boot 256-bit token in
+  `engine.token` (mode 0600 on POSIX; the user-profile ACL on
+  Windows), generated fresh at every boot and removed at graceful
+  shutdown. Possession means "can already read the engine's data
+  directory" — an attacker with that can read `engine.db` directly
+  and gains nothing by stopping the engine.
+- The host guard (DNS-rebinding mitigation) applies as to every
+  endpoint: the engine serves loopback only.
+- User credentials are deliberately NOT accepted: every page on
+  the engine's origin carries the session cookie, so a
+  credential-gated stop would let any origin page tab (including a
+  compromised addon page) take the engine down. The token path is
+  provably not reachable from page JavaScript (no header-injecting
+  read of the data dir exists in the web platform's model here).
+- The act is audited (`engine.control.shutdown`, actor `system`)
+  and fires the identical drain SIGTERM does — jobs quiesce,
+  supervision stops, connections drain. It grants exactly one
+  power; it is not a remote-control surface.
+
+**Residual risk:** A local process running as the same OS user with
+data-dir read access can stop the engine at will — which is the
+same trust position as "can kill the process" on every desktop
+application; the token's job is keeping remote and
+no-data-dir-access callers out, and attribution/auditability
+honest, not re-defining the local-user trust boundary.
+
+### 2.18 Spoofed addon attribution (M27, AD-29's hardening)
+
+**Scenario:** A page on the engine's origin (a compromised addon,
+or the default frontend under script injection) stamps
+`X-ZIM-Addon: <someone-else's-id>` onto its API calls to frame
+another addon in the audit trail.
+
+**Mitigations:**
+- Attribution is advisory, never authorizing: per-endpoint authz
+  keys on the *user's* credentials regardless of the header, so a
+  spoofed id changes nothing about what the call may do.
+- The engine believes an id only when it names an **installed AND
+  enabled** addon; unknown, stale, or disabled ids are dropped and
+  the record carries plain user attribution — the audit trail never
+  records a spoofed id as fact.
+- The believed id rides `metadata.addon_id` *next to* the
+  authorizing user's actor fields, so even a honestly-attributed
+  record never hides who authorized the action.
+
+**Residual risk:** None beyond the same-origin trust position
+AD-29 itself records: a page sharing the origin can act under the
+user's session — which is why the *authorization* model (not the
+attribution model) is what the security boundaries lean on.
+
 ## 3. Explicit capability boundaries
 
 The prompt requires explicit capability boundaries for each trust

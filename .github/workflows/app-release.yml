@@ -36,18 +36,29 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The §1 first-class desktop targets: Linux x64, Windows x64,
-        # macOS arm64. Linux arm64 + macOS x64 follow in M26 per
-        # PLATFORM_SUPPORT.md's one-milestone deferral.
+        # The §1 desktop matrix, complete as of M27 (the one-release
+        # deferral PLATFORM_SUPPORT.md recorded for Linux arm64 +
+        # macOS x64): every leg builds NATIVE on its own runner —
+        # arm64 Linux on GitHub's ubuntu-24.04-arm fleet, Intel
+        # macOS on the macos-13 fleet — no cross-compilation, no
+        # qemu, the same per-platform tooling.
         include:
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-latest
             platform: linux-x86_64
             engine_ext: ''
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            platform: linux-aarch64
+            engine_ext: ''
           - target: x86_64-pc-windows-msvc
             runner: windows-latest
             platform: windows-x86_64
             engine_ext: '.exe'
+          - target: x86_64-apple-darwin
+            runner: macos-13
+            platform: darwin-x86_64
+            engine_ext: ''
           - target: aarch64-apple-darwin
             runner: macos-latest
             platform: darwin-aarch64
@@ -153,9 +164,22 @@ jobs:
   #    degraded API-only mode, which is exactly what users without
   #    a container runtime see.)
   deb-smoke:
-    name: Packaged-app smoke (deb)
+    name: Packaged-app smoke (${{ matrix.flavor }})
     needs: build-app
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # M27: both Linux flavors smoke their own deb on their own
+        # architecture — the attach contract proven per-arch, not
+        # assumed from one.
+        include:
+          - flavor: deb-x86_64
+            runner: ubuntu-latest
+            artifact: zim-app-linux-x86_64
+          - flavor: deb-aarch64
+            runner: ubuntu-24.04-arm
+            artifact: zim-app-linux-aarch64
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Install Xvfb
         run: sudo apt-get update && sudo apt-get install -y xvfb curl
@@ -163,7 +187,7 @@ jobs:
       - name: Download the Linux bundle
         uses: actions/download-artifact@v4
         with:
-          name: zim-app-linux-x86_64
+          name: ${{ matrix.artifact }}
           path: bundles
 
       - name: Install the deb
@@ -173,16 +197,21 @@ jobs:
           # The deb's declared runtime libraries (WebKitGTK 4.1 +
           # the ayatana indicator), pre-installed so dpkg configures
           # the package cleanly in one step. NEVER `apt-get install
-          # -f` here: the deb's package name is "zim", which
-          # collides with Ubuntu's own unrelated `zim` desktop-wiki
-          # package — the dependency "fixer" resolves the same-name
-          # package from the archive at a higher version and
-          # REPLACES the app with it (that is exactly how this
-          # smoke failed the first time it ran). The collision
-          # itself is a documented alpha rough edge:
-          # docs/releases/ALPHA_v0.1.0.md.
+          # -f` here: the dependency "fixer" resolves ANY missing
+          # dependency from the archive, and trusting it with the
+          # package set is how this smoke originally failed (the
+          # alpha-1 deb's package name was "zim", colliding with
+          # Ubuntu's own `zim` desktop-wiki package at a higher
+          # version — the fixer replaced the app with it). The M27
+          # rename (productName "Zamin ZIM" → package `zamin-zim`)
+          # removed the collision; the deps-first discipline stays
+          # because it is correct regardless.
           sudo apt-get install -y libwebkit2gtk-4.1-0 libayatana-appindicator3-1
           sudo dpkg -i bundles/*.deb
+          # The rename's own proof: the package that just installed
+          # is zamin-zim, and the archive's `zim` was never touched.
+          dpkg -s zamin-zim | grep -E "^(Package|Version):" || true
+          (dpkg -s zim 2>/dev/null | grep "^Package:" && echo "UNEXPECTED: Ubuntu's zim is installed") || true
           ls -la /usr/bin/zim_shell /usr/bin/zim_engine
 
       - name: Launch under Xvfb and assert the engine attach
@@ -190,21 +219,47 @@ jobs:
           set -euo pipefail
           export HOME=/tmp/zim-smoke-home
           rm -rf "$HOME" && mkdir -p "$HOME"
-          xvfb-run -a /usr/bin/zim_shell &
+          xvfb-run -a /usr/bin/zim_shell >"$HOME/shell.log" 2>&1 &
           SHELL_PID=$!
-          DATA_DIR="$HOME/.local/share/org.zaminmc.zim.shell"
+          # The engine's data dir is the shell's app-data dir +
+          # "engine" (zim_shell's default_engine_data_dir): the
+          # discovery file the engine writes at boot lives INSIDE it,
+          # next to engine.db and the engine's own engine.log. The
+          # first version of this smoke watched the app-data root
+          # and waited 60s on a file that never appears there — the
+          # attach had actually succeeded; the path contract hadn't.
+          SHELL_DATA_DIR="$HOME/.local/share/org.zaminmc.zim.shell"
+          ENGINE_DATA_DIR="$SHELL_DATA_DIR/engine"
           for _ in $(seq 1 60); do
-            [ -f "$DATA_DIR/engine.json" ] && break
+            [ -f "$ENGINE_DATA_DIR/engine.json" ] && break
             sleep 1
           done
-          test -f "$DATA_DIR/engine.json" || { echo "no engine.json at $DATA_DIR"; exit 1; }
-          PORT=$(python3 -c "import json;print(json.load(open('$DATA_DIR/engine.json'))['port'])")
+          if [ ! -f "$ENGINE_DATA_DIR/engine.json" ]; then
+            echo "no engine.json at $ENGINE_DATA_DIR — attach diagnostics:"
+            find "$SHELL_DATA_DIR" -maxdepth 3 -printf '%y %p\n' 2>/dev/null || true
+            echo "── shell.log (tail) ──"
+            tail -n 40 "$HOME/shell.log" 2>/dev/null || true
+            echo "── engine.log (tail) ──"
+            tail -n 40 "$ENGINE_DATA_DIR/engine.log" 2>/dev/null || true
+            exit 1
+          fi
+          PORT=$(python3 -c "import json;print(json.load(open('$ENGINE_DATA_DIR/engine.json'))['port'])")
           for _ in $(seq 1 30); do
             curl -kfsS "https://127.0.0.1:$PORT/api/v1/health" >/dev/null 2>&1 && break
             sleep 1
           done
           curl -kfsS "https://127.0.0.1:$PORT/api/v1/health" | grep -q version
           echo "packaged app smoke: shell + sidecar engine attached on port $PORT"
+          # The degraded-mode honesty check: no Docker on this
+          # runner, so the engine's own health surface must say so
+          # (the exact state a user without a container runtime
+          # sees, documented in the alpha notes).
+          curl -kfsS "https://127.0.0.1:$PORT/api/v1/health" | python3 -c '
+          import json,sys
+          health = json.load(sys.stdin)
+          runtime = health.get("runtime") or health.get("docker") or {}
+          print("health surface:", json.dumps(health)[:400])
+          '
 
       - name: Clean up the processes
         if: always()
@@ -252,17 +307,22 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: ZIM Alpha v${{ steps.version.outputs.version }}
-          # M26's alpha labeling: this channel is explicitly
+          # The alpha labeling: this channel is explicitly
           # not-production-ready (the notes say so in the first
           # line), and package managers/UIs should treat it as a
           # pre-release. The curated body is the honest what-works /
           # what-doesn't document; the generated per-commit notes
-          # append below it.
+          # append below it. (M27: the notes file moves per release
+          # — alpha.2's carries the first-boot fix, the rename, the
+          # platform matrix, the coordinated Windows update, the
+          # About surface, and the attribution hardening.)
           prerelease: true
-          body_path: docs/releases/ALPHA_v0.1.0.md
+          body_path: docs/releases/ALPHA_v0.1.0-alpha.2.md
           generate_release_notes: true
           files: |
             artifacts/zim-app-windows-x86_64/*
             artifacts/zim-app-linux-x86_64/*
+            artifacts/zim-app-linux-aarch64/*
+            artifacts/zim-app-darwin-x86_64/*
             artifacts/zim-app-darwin-aarch64/*
             latest.json

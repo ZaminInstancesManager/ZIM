@@ -123,6 +123,7 @@ impl TlsEngine {
             Arc::clone(&frontend),
             Arc::clone(&extensions),
             Arc::clone(&themes),
+            zim_engine_api::control::ControlPlane::for_tests(),
             ApiConfig::default(),
         ));
         let router = zim_engine_api::router(Arc::clone(&state));

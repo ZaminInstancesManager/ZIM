@@ -54,13 +54,17 @@ pub struct DiscoveryInfo {
 const DISCOVERY_SCHEMA: u8 = 1;
 
 /// The `/api/v1/health` payload (§misc: `status`, `service`,
-/// `api_version`).
+/// `version`, `api_version`).
 #[derive(Debug, Clone, Deserialize)]
 struct Health {
     #[allow(dead_code)] // kept for diagnostics in debug logs
     status: String,
     #[allow(dead_code)]
     service: String,
+    /// The RUNNING engine's build version (M27; the About surface
+    /// shows it next to the installed one).
+    #[serde(default)]
+    version: Option<String>,
     #[allow(dead_code)]
     api_version: String,
 }
@@ -152,11 +156,80 @@ pub fn probe(port: u16) -> Result<String, ProbeError> {
     Ok(health.api_version)
 }
 
-/// One loopback HTTPS GET, the shell's whole HTTP client.
+/// The running engine's build version, straight from the health
+/// surface (M27: the About page's "running" half — the engine
+/// writes this from its own `env!`, so it cannot drift).
+pub fn running_engine_version(port: u16) -> Result<String, ProbeError> {
+    let (status, _content_type, body) = https_get(port, "/api/v1/health")?;
+    if status != 200 {
+        return Err(ProbeError::BadResponse(format!("health answered {status}")));
+    }
+    let health: Health = serde_json::from_slice(&body)
+        .map_err(|e| ProbeError::BadResponse(format!("health body not JSON: {e}")))?;
+    health
+        .version
+        .ok_or_else(|| ProbeError::BadResponse("health carried no version".to_owned()))
+}
+
+/// The installed engine's version, by running the sidecar binary's
+/// own `--version` (M27: the About page's "installed" half — the
+/// byte that would run on the next engine restart, which can lag
+/// the running one right after an update; UPDATES.md §3).
+pub fn installed_engine_version(engine_path: &Path) -> Option<String> {
+    let output = std::process::Command::new(engine_path)
+        .arg("--version")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let first = String::from_utf8_lossy(&output.stdout);
+    // "zim_engine 0.1.0" — the second field is the version.
+    first.split_whitespace().nth(1).map(str::to_owned)
+}
+
+/// Ask a running engine to shut itself down (M27's control plane;
+/// see `zim/engine/crates/api/src/control.rs` for the design).
+///
+/// The token comes from `engine.token` in the data dir — possession
+/// of it is the machine-local operator context this shell already
+/// occupies. `Ok(())` means the engine ACCEPTED the request (202);
+/// the drain then proceeds on the engine's side and the caller
+/// watches the port (or the process) go quiet.
+pub fn request_engine_shutdown(data_dir: &Path, port: u16) -> Result<(), String> {
+    let token = std::fs::read_to_string(data_dir.join("engine.token"))
+        .map_err(|e| {
+            format!(
+                "the engine-control token is unreadable ({}): {e}",
+                data_dir.display()
+            )
+        })?
+        .trim()
+        .to_owned();
+    if token.is_empty() {
+        return Err("the engine-control token is empty".to_owned());
+    }
+    let body = "{\"action\":\"shutdown\"}";
+    let (status, _content_type, response) =
+        https_post_json(port, "/api/v1/engine/control", &token, body)
+            .map_err(|e| format!("the engine-control call failed: {e}"))?;
+    if status != 202 {
+        let detail = String::from_utf8_lossy(&response);
+        return Err(format!(
+            "the engine refused the shutdown (HTTP {status}): {detail}"
+        ));
+    }
+    Ok(())
+}
+
+/// One loopback HTTPS GET, the shell's HTTP client's read-only half.
 ///
 /// Hand-rolled HTTP/1.1 over rustls on purpose: the shell needs
-/// exactly one GET shape, and a web-scale client (reqwest and its
-/// tree) is weight the thin shell does not carry.
+/// exactly two request shapes (this GET and the engine-control
+/// POST), and a web-scale client (reqwest and its tree) is weight
+/// the thin shell does not carry.
 ///
 /// The TLS verification here is a **bounded probe verifier**: it
 /// accepts any certificate, but only ever on connections this
@@ -165,6 +238,47 @@ pub fn probe(port: u16) -> Result<String, ProbeError> {
 /// made separately by the OS trust store (see `trust.rs`), and the
 /// API's real boundary is the credential-checked `/api/v1` surface.
 pub fn https_get(port: u16, path: &str) -> Result<(u16, String, Vec<u8>), ProbeError> {
+    let request = format!(
+        "GET {path} HTTP/1.1\r\n\
+         Host: 127.0.0.1:{port}\r\n\
+         User-Agent: zim_shell/{}\r\n\
+         Accept: application/json, text/html\r\n\
+         Connection: close\r\n\
+         \r\n",
+        env!("CARGO_PKG_VERSION")
+    );
+    https_exchange(port, &request)
+}
+
+/// One loopback HTTPS POST with a JSON body and the engine-control
+/// token header (M27) — the client's mutating half, used by exactly
+/// one caller: the coordinated engine shutdown.
+fn https_post_json(
+    port: u16,
+    path: &str,
+    engine_token: &str,
+    body: &str,
+) -> Result<(u16, String, Vec<u8>), ProbeError> {
+    let request = format!(
+        "POST {path} HTTP/1.1\r\n\
+         Host: 127.0.0.1:{port}\r\n\
+         User-Agent: zim_shell/{}\r\n\
+         Accept: application/json\r\n\
+         X-ZIM-Engine-Token: {engine_token}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {body}",
+        env!("CARGO_PKG_VERSION"),
+        body.len()
+    );
+    https_exchange(port, &request)
+}
+
+/// The shared GET/POST core: dial, hand-shake, send, read to
+/// completion, parse.
+fn https_exchange(port: u16, request: &str) -> Result<(u16, String, Vec<u8>), ProbeError> {
     use rustls::pki_types::ServerName;
 
     let provider = Arc::new(rustls::crypto::ring::default_provider());
@@ -188,15 +302,6 @@ pub fn https_get(port: u16, path: &str) -> Result<(u16, String, Vec<u8>), ProbeE
     tcp.set_nodelay(true)?;
 
     let mut stream = rustls::StreamOwned::new(conn, tcp);
-    let request = format!(
-        "GET {path} HTTP/1.1\r\n\
-         Host: 127.0.0.1:{port}\r\n\
-         User-Agent: zim_shell/{}\r\n\
-         Accept: application/json, text/html\r\n\
-         Connection: close\r\n\
-         \r\n",
-        env!("CARGO_PKG_VERSION")
-    );
     stream
         .write_all(request.as_bytes())
         .map_err(|e| ProbeError::Tls(format!("write: {e}")))?;
@@ -338,6 +443,15 @@ impl rustls::client::danger::ServerCertVerifier for LoopbackProbeVerifier {
 /// on the recovery page). The returned pid is informational; the
 /// shell holds no kill handle, by design.
 pub fn spawn_detached(engine_path: &Path, data_dir: &Path) -> std::io::Result<u32> {
+    // First boot: the engine's data dir does not exist yet — the
+    // engine would create it itself at startup, but the log file
+    // below is opened by the SHELL before the engine runs, and
+    // `OpenOptions::create` creates files, not parent directories.
+    // The packaged-app smoke caught exactly this on a fresh install
+    // (the alpha's install bytes were dead-on-arrival: no engine/
+    // directory ever appeared, the spawn failed with ENOENT, and
+    // the old code surfaced it nowhere but down.html).
+    std::fs::create_dir_all(data_dir)?;
     let log_path = data_dir.join("engine.log");
     let log = std::fs::OpenOptions::new()
         .create(true)

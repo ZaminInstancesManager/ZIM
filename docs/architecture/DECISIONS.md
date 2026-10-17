@@ -849,9 +849,13 @@ loopback HTTPS origin (AD-23), so the engine's answers are:
   (`Zim.assertPermission`). Server-side, every API call from an
   addon page flows through the same per-endpoint authz as every
   other call (invariant 15) with the user's own credentials;
-  per-addon *attribution* on the shared loopback origin is an M25
-  hardening item, recorded with the roadmap's honest-boundary
-  notes rather than faked here.
+  per-addon *attribution* on the shared loopback origin is
+  **delivered (M27)**: the vendored SDK stamps `X-ZIM-Addon` on
+  every call, the engine believes an id only when it names an
+  installed+enabled addon, and the believed id rides audit records'
+  `metadata.addon_id` next to the authorizing user — spoofed ids
+  are dropped, never recorded as fact (ZIM_API_SPEC §10.19,
+  THREAT_MODEL §2.18).
 - **Surfaces and assets.** An addon's declared `zim://` surfaces
   serve through the same `/zim/` router as the frontend's (the
   frontend's resolution runs first; the addon fallback serves on
@@ -973,6 +977,48 @@ the release pipeline doubles as the packaged-app E2E for Linux
 no revocation — are written down where an operator will read
 them before relying on them.
 
+
+### AD-32: The local engine-control plane is a per-boot token in the data dir, not a user privilege. (2026-10-17)
+
+**Status:** Accepted (M27 — the durable fix for UPDATES.md §3's
+Windows-update coordination, owed since M25).
+
+**Context:** The desktop shell needed to stop the running engine
+as part of a Windows update (the NSIS installer cannot replace the
+running sidecar's executable), and the tray needed an explicit
+"Stop engine" for operators. The obvious designs were wrong in
+different directions: a raw process kill from the shell
+(restart-safety is the engine's own drain's job — jobs quiesce,
+supervision stops, the discovery file is removed) or a
+credential-gated API endpoint (every page on the engine's origin
+carries the session cookie, so "an admin may stop the engine"
+would let any origin tab — including a compromised addon page —
+take the whole management plane down).
+
+**Decision:**
+
+- At boot the engine generates a 256-bit token, writes it to
+  `engine.token` in the data dir (0600 on POSIX; profile ACL on
+  Windows — deliberately a SEPARATE file, keeping the discovery
+  file's public-no-secrets contract intact), and removes it at
+  graceful shutdown.
+- `POST /api/v1/engine/control` (one action, `shutdown`) requires
+  the token in `X-ZIM-Engine-Token`, compared in constant time;
+  possession means "a process that can read the engine's data
+  dir" — the machine-local operator context the shell already
+  occupies. The drain it fires is byte-for-byte SIGTERM's path.
+- The act is audited (`engine.control.shutdown`, actor `system`)
+  with the coordinator's user agent.
+- The tray's "Stop engine — servers keep running" and the
+  updater's pre-install coordination (Windows only; POSIX keeps
+  the engine running through updates per the granularity model)
+  are the two callers.
+
+**Consequences:** remote callers and local processes without
+data-dir access cannot stop the engine; a local same-user process
+can — the same trust position as "can kill the process" for any
+desktop app, made auditable instead of silent. THREAT_MODEL §2.17
+carries the full analysis.
 
 ## 2. Unresolved questions
 

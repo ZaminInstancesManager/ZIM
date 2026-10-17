@@ -18,7 +18,21 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
+
+/// Serializes the tests whose `attach()` spawns a DEFAULT-port
+/// engine: attach()'s step 2 answers "already running" to ANY
+/// engine on the default port, so two parallel spawn-tests would
+/// steal each other's outcomes (the fresh-boot regression test
+/// learned this the hard way in CI — its attach answered to the
+/// sibling test's engine and never spawned at all).
+fn spawn_serial() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 use zim_shell::engine::{self, AttachOutcome};
 use zim_shell::zim_url;
@@ -196,7 +210,53 @@ fn attach_finds_a_running_engine_and_maps_newtab() {
 }
 
 #[test]
+fn attach_spawns_into_a_dir_that_does_not_exist_yet() {
+    let _serial = spawn_serial();
+    // The first-boot contract (M27's regression): a fresh install's
+    // engine data dir does not exist — `~/.local/share/<app>/engine`
+    // is first needed by the SHELL, which opens engine.log inside it
+    // before the engine ever runs. The packaged-app smoke found the
+    // alpha's install bytes dead-on-arrival here: spawn_detached
+    // failed with ENOENT and nothing but down.html ever said so.
+    let Some(bin) = engine_bin() else {
+        eprintln!("skipping: ZIM_SHELL_IT_ENGINE is not set to an engine binary");
+        return;
+    };
+    let parent = scratch_data_dir("freshboot");
+    let data_dir = parent.join("engine"); // deliberately NOT created
+
+    let outcome = engine::attach(&data_dir, &bin);
+    let port = match &outcome {
+        AttachOutcome::Spawned { port, .. } => *port,
+        other => panic!("expected Spawned on a virgin data dir, got {other:?}"),
+    };
+    assert!(engine::probe(port).is_ok());
+    assert!(data_dir.join("engine.log").is_file());
+    assert!(data_dir.join("engine.json").is_file());
+
+    #[cfg(unix)]
+    {
+        let pid = engine::discover(&data_dir).map(|d| d.pid);
+        if let Some(pid) = pid {
+            let _ = Command::new("kill")
+                .args(["-TERM", &pid.to_string()])
+                .status();
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while Instant::now() < deadline {
+                if engine::discover(&data_dir).is_none() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+#[test]
 fn attach_spawns_when_nothing_answers() {
+    let _serial = spawn_serial();
     let Some(bin) = engine_bin() else {
         eprintln!("skipping: ZIM_SHELL_IT_ENGINE is not set to an engine binary");
         return;

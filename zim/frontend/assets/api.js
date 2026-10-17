@@ -76,7 +76,8 @@ export async function api(path, options = {}) {
     return (await response.json());
 }
 // ── Typed endpoint helpers ────────────────────────────────────────
-/** Engine health (unauthenticated). */
+/** Engine health (unauthenticated). M27: `version` is the RUNNING
+ * engine's build version (absent only on pre-M27 engines). */
 export async function health() {
     return api("/health");
 }

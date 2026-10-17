@@ -53,18 +53,30 @@ pub fn check_and_apply(app: AppHandle) {
     });
 }
 
-/// Download, verify, install, and relaunch. The consent already
-/// happened — the user clicked the item knowing an update may
-/// install — but the signature must still verify, or nothing
-/// installs. (On Windows the installer exits the shell itself;
-/// the relaunch below covers the POSIX platforms.)
+/// Download, verify, coordinate, install, and relaunch. The consent
+/// already happened — the user clicked the item knowing an update
+/// may install — but the signature must still verify, or nothing
+/// installs.
+///
+/// The M27 sequencing (Windows): the NSIS installer cannot replace a
+/// running executable, and the sidecar engine executes from the
+/// install directory — so the download completes FIRST (a failed
+/// download must never have stopped anybody's engine), then the
+/// engine is asked to drain itself through the control plane
+/// (`crate::control`), and only then does the installer run. On
+/// POSIX the file is replaced under the running engine without
+/// issue (UPDATES.md §3's granularity model) and the engine keeps
+/// running through the update.
 async fn install(app: AppHandle, update: Update) {
     let version = update.version.clone();
     set_label(&app, &format!("Downloading v{version}…"));
     eprintln!("zim_shell: updater: v{version} available, downloading");
     let mut downloaded: u64 = 0;
-    let result = update
-        .download_and_install(
+    // The pinned plugin's split API: download() returns the payload
+    // bytes; install(bytes) consumes them — the coordination point
+    // sits exactly between the two.
+    let payload = update
+        .download(
             |chunk, total| {
                 downloaded += chunk as u64;
                 if let Some(total) = total {
@@ -77,12 +89,42 @@ async fn install(app: AppHandle, update: Update) {
             },
         )
         .await;
-    match result {
+    let bytes = match payload {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            set_label(&app, "Update failed");
+            eprintln!("zim_shell: updater: download failed: {error}");
+            restore_label_later(app);
+            return;
+        }
+    };
+
+    // Windows only: stop the engine BEFORE the installer replaces
+    // its files. Servers keep running (the engine's drain leaves
+    // containers running by design; the next boot re-adopts them).
+    #[cfg(target_os = "windows")]
+    {
+        set_label(&app, "Stopping the engine…");
+        match crate::control::stop_engine(&app).await {
+            Ok(()) => {}
+            Err(message) => {
+                set_label(&app, "Update failed — engine still running");
+                eprintln!("zim_shell: updater: cannot stop the engine for the install: {message}");
+                restore_label_later(app);
+                return;
+            }
+        }
+    }
+
+    match update.install(bytes) {
         Ok(()) => {
             eprintln!("zim_shell: updater: v{version} installed; relaunching");
-            // The engine is a separate, detached process: the
-            // relaunch replaces the shell only. See UPDATES.md
-            // §granularity for what updates when.
+            // The engine (already drained on Windows; untouched
+            // elsewhere) is a separate, detached process: the
+            // relaunch replaces the shell only, and the attach
+            // sequence probes for a healthy engine before ever
+            // spawning one. See UPDATES.md §granularity for what
+            // updates when.
             app.restart();
         }
         Err(error) => {

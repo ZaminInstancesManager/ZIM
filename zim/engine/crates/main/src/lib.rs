@@ -17,6 +17,10 @@
 //! [`run`] — except the offline `migrate` subcommand (M10), which
 //! dispatches straight to `zim_engine_migrate_pterodactyl::cli`
 //! before any engine wiring exists.
+//!
+//! Shutdown (M27) arrives three ways — SIGTERM, Ctrl-C, or the
+//! local control plane (`POST /api/v1/engine/control`, the desktop
+//! shell's coordinated stop) — and all three drain identically.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -27,6 +31,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use zim_engine_api::control::{ControlPlane, ControlToken};
 use zim_engine_api::{ApiConfig, AppState};
 use zim_engine_application::ports::Persistence;
 use zim_engine_application::supervision::{
@@ -164,6 +169,10 @@ pub struct RunningEngine {
     server: zim_engine_api::tls::RunningServer,
     supervisor: Arc<Supervisor>,
     jobs: Arc<JobSystem>,
+    /// The control plane's shutdown side: handed to the API state at
+    /// startup; the run loop selects on it alongside the OS signals
+    /// so a coordinated stop and a service stop drain identically.
+    control: ControlPlane,
 }
 
 impl RunningEngine {
@@ -177,6 +186,7 @@ impl RunningEngine {
         self.supervisor.shutdown().await;
         self.server.shutdown().await;
         discovery::remove(&self.data_dir);
+        zim_engine_api::control::remove_token(&self.data_dir);
     }
 }
 
@@ -383,6 +393,15 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
     let themes = Arc::new(zim_engine_extensions::ThemeService::new(&options.data_dir));
 
     // ── API server ──────────────────────────────────────────────────
+    // The local control plane (M27): a fresh per-boot token in
+    // engine.token (0600) + the shutdown handle the
+    // POST /engine/control endpoint fires. A token write failure
+    // degrades exactly like the discovery file's — the endpoint
+    // refuses every presented token; boot is never blocked.
+    let control = ControlPlane::new(ControlToken::generate());
+    if let Err(e) = zim_engine_api::control::write_token(&options.data_dir, &control) {
+        eprintln!("zim_engine: cannot write the engine-control token: {e}");
+    }
     let state = Arc::new(AppState::new(
         Arc::clone(&persistence),
         Arc::clone(&supervisor),
@@ -397,6 +416,7 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         Arc::clone(&frontend),
         Arc::clone(&extensions),
         Arc::clone(&themes),
+        control.clone(),
         ApiConfig::default(),
     ));
     let router = zim_engine_api::router(Arc::clone(&state));
@@ -436,6 +456,7 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         server,
         supervisor,
         jobs,
+        control,
     })
 }
 
@@ -483,13 +504,24 @@ fn bootstrap_local_node(persistence: &Arc<dyn Persistence>) -> Result<(), String
     Ok(())
 }
 
-/// Run the engine until shutdown (SIGTERM / Ctrl-C), then drain.
+/// Run the engine until shutdown, then drain.
+///
+/// Shutdown arrives three ways — SIGTERM, Ctrl-C, or the local
+/// control plane's `POST /engine/control` (M27: the desktop
+/// shell's coordinated stop for the Windows update path) — and all
+/// three drain through the identical path.
 ///
 /// Returns the address that was served.
 pub async fn run(options: EngineOptions) -> Result<std::net::SocketAddr, String> {
     let engine = startup(options).await?;
     let addr = engine.local_addr;
-    wait_for_shutdown().await;
+    let control = engine.control.shutdown_handle();
+    tokio::select! {
+        _ = wait_for_shutdown() => {},
+        _ = control.notified() => {
+            eprintln!("zim_engine: engine-control shutdown requested; draining connections");
+        },
+    }
     engine.shutdown().await;
     Ok(addr)
 }

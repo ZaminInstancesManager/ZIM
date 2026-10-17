@@ -17,6 +17,7 @@ use zim_engine_scheduler::Scheduler;
 use zim_engine_transfers::TransferService;
 
 use crate::config::ApiConfig;
+use crate::control::ControlPlane;
 use crate::error::ApiError;
 use crate::idempotency::IdempotencyStore;
 use crate::rate_limit::SlidingWindowLimiter;
@@ -122,6 +123,10 @@ pub struct AppState {
     /// The packaged-theme registry (M24, delivering M23's deferred
     /// upload surface).
     pub themes: Arc<ThemeService>,
+    /// The local engine-control plane (M27): the per-boot token
+    /// `POST /engine/control` verifies and the shutdown handle its
+    /// `shutdown` action fires (see `crate::control`).
+    pub control: ControlPlane,
     /// Server configuration.
     pub config: ApiConfig,
 }
@@ -130,7 +135,7 @@ impl AppState {
     /// Assemble the state from its parts. The two limiters are
     /// constructed from `config`'s budgets.
     ///
-    /// (Twelve parts is the honest composition surface — a builder
+    /// (Thirteen parts is the honest composition surface — a builder
     /// would hide which halves are optional; nothing here is.)
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -147,6 +152,7 @@ impl AppState {
         frontend: Arc<FrontendService>,
         extensions: Arc<ExtensionsService>,
         themes: Arc<ThemeService>,
+        control: ControlPlane,
         config: ApiConfig,
     ) -> Self {
         Self {
@@ -169,6 +175,7 @@ impl AppState {
             frontend,
             extensions,
             themes,
+            control,
             config,
         }
     }

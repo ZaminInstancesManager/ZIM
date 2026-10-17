@@ -34,6 +34,7 @@ export interface Suggestion {
 const STATIC_SURFACES: { path: string; title: string; blurb: string }[] = [
   { path: "newtab", title: "New Tab", blurb: "engine overview and quick links" },
   { path: "servers", title: "Servers", blurb: "every instance you can see" },
+  { path: "about", title: "About", blurb: "versions and the update channel" },
 ];
 
 /** The instances the omnibox may suggest (id, name, status — the

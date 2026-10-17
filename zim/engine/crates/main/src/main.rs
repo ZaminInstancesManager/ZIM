@@ -4,7 +4,7 @@
 //! overrides via [`zim_engine_main::EngineOptions::from_env`]); the
 //! offline `migrate` subcommand (M10) runs the Pterodactyl Panel
 //! importer and exits before the engine boots. Runs until SIGTERM /
-//! Ctrl-C.
+//! Ctrl-C / a local engine-control shutdown (M27).
 
 #![forbid(unsafe_code)]
 
@@ -42,6 +42,15 @@ fn main() {
                      Environment: ZIM_DATA_DIR, ZIM_PORT, \
                      ZIM_BOOTSTRAP_ADMIN_EMAIL, ZIM_BOOTSTRAP_ADMIN_PASSWORD"
                 );
+                std::process::exit(0);
+            }
+            // M27: the installed-engine version probe — the desktop
+            // shell's About surface runs `zim_engine --version` next
+            // to the running engine's /health version, so the
+            // update channel's version-lag window (UPDATES.md §3)
+            // is visible, not surprising.
+            "--version" | "-V" => {
+                println!("zim_engine {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
             }
             other => {

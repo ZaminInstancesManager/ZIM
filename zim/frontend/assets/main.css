@@ -1079,3 +1079,44 @@ a.ntp-workload:hover { border-color: var(--color-accent); }
   color: var(--color-text-secondary);
   margin: 14px 0 6px;
 }
+
+/* ── The About page (M27) ──────────────────────────────────────── */
+
+.about-versions {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0 0;
+}
+
+.about-versions > div {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.about-versions dt {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.about-versions dd {
+  margin: 0;
+}
+
+.about-versions .line-dim {
+  margin-left: 8px;
+}
+
+.about-versions .note,
+.page-about .note {
+  border: 1px solid var(--color-warning);
+  color: var(--color-warning);
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  margin: 14px 0 0;
+  font-size: 13px;
+}
