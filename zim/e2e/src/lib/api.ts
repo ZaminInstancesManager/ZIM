@@ -39,6 +39,10 @@ export interface ApiClient {
   post(path: string, body?: unknown): Promise<any>;
   /** A JSON POST with an explicit content type (raw upload bodies). */
   postRaw(path: string, body: Buffer | string, contentType: string): Promise<any>;
+  /** A raw-body PUT (file uploads — asserts 2xx, parses the JSON reply). */
+  putRaw(path: string, body: Buffer | string, contentType: string): Promise<any>;
+  /** A GET returning the raw bytes + content-type (file downloads). */
+  getRaw(path: string): Promise<{ contentType: string; bytes: Buffer }>;
   /** A JSON PUT (asserts 2xx). */
   put(path: string, body?: unknown): Promise<any>;
   /** A JSON PATCH (asserts 2xx). */
@@ -157,6 +161,26 @@ export function makeClient(engine: EngineHandle): ApiClient {
       }
       const text = await response.text();
       return text === "" ? null : JSON.parse(text);
+    },
+
+    async putRaw(path: string, body: Buffer | string, contentType: string): Promise<any> {
+      const response = await request("PUT", path, body, contentType);
+      if (!response.ok) {
+        await readError(response);
+      }
+      const text = await response.text();
+      return text === "" ? null : JSON.parse(text);
+    },
+
+    async getRaw(path: string): Promise<{ contentType: string; bytes: Buffer }> {
+      const response = await request("GET", path);
+      if (!response.ok) {
+        await readError(response);
+      }
+      return {
+        contentType: response.headers.get("content-type") ?? "",
+        bytes: Buffer.from(await response.arrayBuffer()),
+      };
     },
 
     async put(path: string, body?: unknown): Promise<any> {

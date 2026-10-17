@@ -2906,6 +2906,7 @@ dependencies = [
  "zim_engine_domain",
  "zim_engine_eggs",
  "zim_engine_extensions",
+ "zim_engine_files",
  "zim_engine_frontend_loader",
  "zim_engine_installs",
  "zim_engine_jobs",

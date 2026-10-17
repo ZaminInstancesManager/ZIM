@@ -417,7 +417,14 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         Arc::clone(&extensions),
         Arc::clone(&themes),
         control.clone(),
-        ApiConfig::default(),
+        ApiConfig {
+            // M28: the file family operates under the engine's data
+            // root ({data_dir}/instances/{uuid_short}), the same
+            // directory the runtime bind-mounts and the backup
+            // pipeline archives.
+            data_dir: options.data_dir.clone(),
+            ..ApiConfig::default()
+        },
     ));
     let router = zim_engine_api::router(Arc::clone(&state));
 

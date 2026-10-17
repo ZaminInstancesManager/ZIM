@@ -18,6 +18,9 @@ zim_engine_domain = { workspace = true }
 zim_engine_application = { workspace = true }
 zim_engine_auth = { workspace = true }
 zim_engine_authz = { workspace = true }
+# M28: the chrooted per-instance filesystem the file-API family
+# operates on (the same crate the backup pipeline archives through).
+zim_engine_files = { workspace = true }
 # The M7 streaming hub (supervision publishes; the stream endpoint
 # subscribes).
 zim_engine_streaming = { workspace = true }

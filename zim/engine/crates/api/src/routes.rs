@@ -11,8 +11,8 @@ use axum::routing::{delete, get, patch, post};
 use axum::Router;
 
 use crate::handlers::{
-    audit, auth, control, eggs, extensions, frontend, instances, misc, nodes, pages, recents,
-    stream, themes, users,
+    audit, auth, control, eggs, extensions, files, frontend, instances, misc, nodes, pages,
+    recents, stream, themes, users,
 };
 use crate::middleware;
 use crate::state::AppState;
@@ -42,8 +42,12 @@ use crate::state::AppState;
 ///   (active / activate / upload / smoke-test / reset) over the
 ///   frontend loader, plus the `/zim/` page surface (the active
 ///   package's pages and assets, with the §3.8 CSP).
-/// - Declared but 501 `not_implemented`: files (M6 filesystem
-///   capability), workload integrations (M16), OAuth (post-M5).
+/// - Implemented in M28: the §10.3 file family (list / content
+///   get+put / create / delete / rename / archive / extract) over
+///   the chrooted files crate, with the route-level §13 upload
+///   channel (5 GB) inside the router-wide JSON limit.
+/// - Declared but 501 `not_implemented`: workload integrations
+///   (M16's registry surface), OAuth (post-M5).
 /// - `/api/v1/workloads` aliases the instance handlers per the
 ///   AD-19 back-compat rules (§10.17).
 pub fn router(state: Arc<AppState>) -> Router {
@@ -106,17 +110,24 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(instances::console_input),
         )
         .route("/instances/{id}/metrics", get(instances::metrics))
+        // ── Files (§10.3, M28) ───────────────────────────────
+        // The content pair carries the §13 upload channel (5 GB)
+        // layered inside the router-wide 10 MB JSON limit — the
+        // route-level DefaultBodyLimit is the innermost and wins.
         .route(
             "/instances/{id}/files",
-            get(instances::files_stub).delete(instances::files_stub),
+            get(files::list).delete(files::delete),
         )
         .route(
             "/instances/{id}/files/content",
-            get(instances::files_stub).put(instances::files_stub),
+            get(files::download)
+                .put(files::upload)
+                .layer(DefaultBodyLimit::max(files::MAX_UPLOAD_BYTES)),
         )
-        .route("/instances/{id}/files/create", post(instances::files_stub))
-        .route("/instances/{id}/files/archive", post(instances::files_stub))
-        .route("/instances/{id}/files/extract", post(instances::files_stub))
+        .route("/instances/{id}/files/create", post(files::create))
+        .route("/instances/{id}/files/rename", post(files::rename))
+        .route("/instances/{id}/files/archive", post(files::archive))
+        .route("/instances/{id}/files/extract", post(files::extract))
         // ── Instance sub-resources (§10.4/6/7/5/9) ────────────────
         .route(
             "/instances/{id}/allocations",
