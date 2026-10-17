@@ -1321,6 +1321,50 @@ sweep's scenarios in the every-push E2E suite too.
 the alpha.2 release).
 
 
+### M28+: The post-alpha backlog (unsequenced)
+
+With M26/M27 shipped (`v0.1.0-alpha.1` / `v0.1.0-alpha.2`), the
+sequenced milestone track is exhausted — everything from here on is
+backlog, to be sequenced into milestones when the alpha feedback
+shapes the priorities. The honest sources are the alpha notes'
+what-doesn't and rough-edge lists, the architecture's deferred
+crates, and this roadmap's §4 out-of-scope register:
+
+**Functional gaps (the alpha's published "what doesn't" list):**
+
+- **SFTP server** — the deferred `files` surface's transport; file
+  movement today is the API + the install/backup pipelines.
+- **Addon marketplace** — signed `.zimpkg` upload works; a central
+  catalog (discovery, update pinning, publisher identity) does not
+  exist.
+- **Telemetry ingestion** — the module is specified; the engine
+  phones nobody home.
+- **Managed-database UI** — the engine stores and operates the
+  database rows; the management surface is unbuilt.
+- **Legacy client/application API compatibility** — deliberate;
+  revisit only with real migrator demand.
+- **Multi-node fleet topology** — architecture-ready (the
+  `persistence-postgres` deferred crate, node-to-node contracts),
+  not implemented; the engine manages the local node.
+
+**Hardening gaps (recorded, not hidden):**
+
+- **The macOS packaged-app smoke** — the macOS legs are
+  build-verified only; driving the real `.app`/`.dmg` under
+  automation the way the Linux deb smoke does.
+- **Live-driving WebView2/WKWebView release validation** — the E2E
+  matrix drives the real served UI in a real browser (Chromium via
+  Playwright) on all three OSes; driving the *shell's own* OS
+  webview remains a release-validation gap.
+- **The stopped-status vocabulary** — a stopped instance reports
+  `offline` with a per-instance desired-state; whether the UI earns
+  a distinct stopped glyph is an open product question.
+- **Beta graduation criteria** — the honest list above shrinks,
+  the failure sweep stays green for a sustained window, and real
+  migrator feedback lands: then the `v0.1.0` (non-alpha) conversation
+  starts.
+
+
 ## 4. Out-of-scope for the first release
 
 The following are explicitly out-of-scope for the first ZIM
