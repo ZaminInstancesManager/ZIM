@@ -347,7 +347,8 @@ mod tests {
         // and M29 `backups`, `schedules`, `subusers`, and
         // `settings` to their own entrypoints — the real
         // management pages. Only `metrics` keeps the stub.
-        for surface in ["metrics"] {
+        {
+            let surface = "metrics";
             let path = format!("servers/0a1b2c3d-0000-0000-0000-000000000000/{surface}");
             let (file, params) = package
                 .resolve_surface(&path)
