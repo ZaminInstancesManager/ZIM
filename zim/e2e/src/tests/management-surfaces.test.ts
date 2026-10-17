@@ -266,13 +266,17 @@ test("management: the settings surface saves under the §8 gate (and 412s honest
     assert.equal(await nameField.inputValue(), renamed);
 
     // The danger zone: delete under the same gate (two confirms),
-    // then the page walks to the server list.
-    const confirm1 = page.waitForEvent("dialog").then((dialog) => dialog.accept());
-    const confirm2 = page.waitForEvent("dialog").then((dialog) => dialog.accept());
+    // then the page walks to the server list. One persistent
+    // dialog handler accepts both confirms in order (two parallel
+    // waitForEvent registrations would each grab the FIRST dialog
+    // and double-handle it).
+    const autoAccept = (dialog: import("playwright").Dialog): void => {
+      void dialog.accept();
+    };
+    page.on("dialog", autoAccept);
     await page.locator("#btn-delete").click();
-    await confirm1;
-    await confirm2;
     await page.waitForURL(/\/zim\/servers\/?$/, { timeout: 15_000 });
+    page.off("dialog", autoAccept);
 
     // The instance is really gone.
     const missing = await client.tryGet(`/api/v1/instances/${instance.id}`);
