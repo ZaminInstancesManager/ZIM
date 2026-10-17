@@ -68,14 +68,19 @@ engine is a detached, independently supervised process by design
   reports the running engine's version; the About surface (M26)
   will surface both versions side by side.
 
-**Known alpha limitation (Windows):** the NSIS installer cannot
-replace a running executable. If the detached engine is executing
-from the install directory, a Windows update will fail cleanly
-(the tray item reports "Update failed") until the engine has been
-stopped or the machine rebooted. The POSIX platforms replace the
-file under the running process without issue. The durable fix — a
-coordinated engine shutdown as part of the update's pre-install
-step — is M26 scope and is recorded in the roadmap.
+**The Windows coordination (M27, delivered):** the NSIS installer
+cannot replace a running executable, and the detached engine
+executes from the install directory — so the shell's update
+sequence is now download-first (a failed download never stops
+anybody's engine), then a **coordinated engine shutdown** through
+the local control plane (a per-boot token in the data dir's
+`engine.token` gating `POST /api/v1/engine/control`'s single
+`shutdown` action — the same drain SIGTERM takes; servers keep
+running by design), and only then the installer. The tray's "Stop
+engine — servers keep running" item exposes the same mechanism
+explicitly, and the recovery page's Retry re-spawns. The POSIX
+platforms replace the file under the running process without issue
+and keep the engine running through updates unchanged.
 
 ## 4. Rollback
 

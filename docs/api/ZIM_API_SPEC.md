@@ -428,7 +428,7 @@ and new user-facing documentation use the `workloads` form.
 | POST   | `/api/v1/workload-integrations/{id}/disable`          | Disable (existing workloads of this kind continue but cannot be re-created). | admin            |
 | DELETE | `/api/v1/workload-integrations/{id}`                  | Uninstall (blocked if any workload of this kind exists).   | admin            |
 
-### 10.17 Back-compat aliasing rules
+### 10.17c Back-compat aliasing rules
 
 The `/api/v1/instances` surface (§10.3) is preserved verbatim and
 internally aliased to `/api/v1/workloads`:
@@ -445,6 +445,47 @@ internally aliased to `/api/v1/workloads`:
 
 This satisfies AD-19 (workloads canonical, instances back-compat)
 without breaking existing client code that uses `/api/v1/instances`.
+
+### 10.18 Local engine control (M27; UPDATES.md §3)
+
+One endpoint, one action, deliberately outside the user-credential
+model:
+
+| Method | Path                        | Description                          | Required grants |
+|--------|------------------------------|--------------------------------------|------------------|
+| POST   | `/api/v1/engine/control`    | `{"action":"shutdown"}` — ask the engine to drain itself (the same path SIGTERM takes). | the `X-ZIM-Engine-Token` header matching the per-boot token in the data dir's `engine.token` |
+
+The token gate is machine-local by construction: possession of the
+token means "a process that can read the engine's data directory"
+(the desktop shell's own position). User credentials are
+deliberately NOT accepted here — mixing "an admin session may stop
+the whole engine" into user authz would let any origin-page tab
+(every page on the engine's loopback origin carries the session
+cookie) take the engine down. Responses: `202 {"status":"draining"}`
+on acceptance (the drain then proceeds exactly as a service stop's),
+`401` on a missing/wrong token, `422 validation_failed` on an
+unknown action. The act is audited as `engine.control.shutdown`
+with actor `system`.
+
+### 10.19 Addon attribution header (M27; AD-29's hardening)
+
+Addon pages' API calls carry `X-ZIM-Addon: <addon-id>` (the vendored
+SDK's fetch wrapper stamps it). The engine's middleware believes the
+id **only** when it names an installed AND enabled addon, and a
+believed id rides the audit record's `metadata.addon_id` next to the
+user whose credentials authorized the call. Unknown, spoofed, or
+disabled-addon ids are dropped — never recorded as fact. The header
+is advisory attribution, not authorization: per-endpoint authz is
+unchanged and the user's own credentials still gate every call.
+
+### 10.20 Health's `version` (M27)
+
+`GET /api/v1/health` additionally reports `"version"`: the RUNNING
+engine's build version, written from the binary's own
+`env!(CARGO_PKG_VERSION)` — the value the About surface
+(`zim://about`) shows next to the installed sidecar's `--version`
+answer, so the update channel's version-lag window is visible
+rather than surprising.
 
 ## 11. WebSocket event contract
 

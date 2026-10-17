@@ -1242,7 +1242,7 @@ engine as `externalBin` sidecar, minisign updater artifacts,
 **Estimated effort:** 3-4 weeks (delivered as one large batch +
 CI iteration).
 
-### M26: First usable ZIM release (alpha)
+### M26: First usable ZIM release (alpha) — COMPLETE (2026-10-17)
 
 **Deliverables:**
 - Release binaries for Windows x64, Linux x64, macOS arm64 (the
@@ -1260,10 +1260,65 @@ CI iteration).
   backups, disk-full); the live MySQL panel migration E2E; and
   AD-29's per-addon attribution hardening.
 
-**Acceptance criteria:** M1-M11, M16-M25 complete; the
-architectural-invariant and failure-scenario suites pass.
+**Acceptance status (honest):** v0.1.0-alpha.1 shipped (3
+platforms, 14 assets, prerelease-labeled, curated notes) — and the
+release process itself found two real defects: the deb's package
+name collided with Ubuntu's `zim` wiki package (the smoke's
+`apt-get install -f` let the archive REPLACE the app; fixed
+deps-first, the rename tracked as the follow-up), and the
+packaged-app smoke had never actually run (its launch step sat
+behind the install failure). The absorbed M25 follow-ups
+(coordinated shutdown, nightly sweep, MySQL E2E, attribution,
+WebView2/WKWebView release validation, the deb rename, the Linux
+arm64 + macOS x64 legs) moved to M27 as the release-follow-ups
+milestone rather than blocking the alpha's shipping.
 
 **Estimated effort:** 1-2 weeks (after M25).
+
+### M27: The release follow-ups — hardening the alpha channel — COMPLETE (2026-10-17)
+
+**Deliverables (all landed):**
+- **The first-boot spawn defect** (found by the now-working
+  packaged-app smoke): the shell spawned the engine into a data
+  directory that did not exist on a fresh install — alpha.1's
+  install bytes were dead-on-arrival on every platform. Fixed
+  (create_dir_all + the failure surfaced on stderr + a regression
+  test over the real attach).
+- **The deb rename**: `zim` → `zamin-zim` (productName "Zamin
+  ZIM"); the archive collision is closed and the smoke proves the
+  rename on every build.
+- **The coordinated engine shutdown (AD-32)**: the per-boot
+  `engine.token` + `POST /api/v1/engine/control` + the Windows
+  updater's download→stop→install sequence; the tray's explicit
+  "Stop engine — servers keep running"; UPDATES.md §3's known
+  limitation resolved.
+- **The nightly failure-sweep** (`failure-sweep.yml`): E7-E9
+  visual mappings (real docker-kill recovery, the real crash-loop
+  threshold in the real browser, the §4 table over the real served
+  component), the interrupted backup (SIGKILL mid-archive →
+  reconciliation → cleanup → the pipeline still works), disk-full
+  (a capped-tmpfs data root; structured failures, never a hang),
+  and the live-MySQL panel migration (fixture-seeded real mysql:8.4
+  through the DSN path, compared against the fixture path) — a red
+  sweep files an issue.
+- **AD-29's per-addon attribution**: the SDK stamps
+  `X-ZIM-Addon`; the engine believes installed+enabled ids only;
+  believed ids ride audit `metadata.addon_id`; spoofed ids drop.
+- **The About surface** (`zim://about`): app version, running
+  engine version (`/health` gained `version`), installed engine
+  version (`zim_engine --version`), the version-lag note exactly
+  when true, the channel's check button.
+- **The platform matrix completed**: Linux arm64 + macOS x64
+  release legs (native runners), per-arch deb smokes, and
+  `latest.json` carrying all five platforms.
+- v0.1.0-alpha.2 tagged from this milestone.
+
+**Acceptance criteria:** the packaged-app smoke green on real
+install bytes (both Linux flavors); Engine/Shell/E2E CI green; the
+sweep's scenarios in the every-push E2E suite too.
+
+**Estimated effort:** 1 week (delivered as five large batches +
+the alpha.2 release).
 
 
 ## 4. Out-of-scope for the first release
