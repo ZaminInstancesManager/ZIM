@@ -76,7 +76,7 @@ jobs:
       # a run summary a cancelled run never prints) and with
       # --test-force-exit so the file's process always terminates.
       - name: Focused - console-stream (inline TAP)
-        if: !cancelled()
+        if: ${{ !cancelled() }}
         working-directory: zim/e2e
         env:
           ZIM_E2E_VERBOSE: '1'
