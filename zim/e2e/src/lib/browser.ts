@@ -9,9 +9,23 @@
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import type { EngineHandle } from "./engine.js";
 
-/** Launch the suite's headless Chromium. */
+/**
+ * Launch the suite's headless Chromium.
+ *
+ * `--ignore-certificate-errors` is the harness's equivalent of the
+ * shell's M21 trust-store installation: the engine serves a
+ * self-signed loopback certificate by design, Playwright's
+ * context-level `ignoreHTTPSErrors` covers page navigations, but a
+ * page-initiated WSS handshake (`/api/v1/stream`) can still fail
+ * TLS validation without the flag — the live console stream then
+ * silently reconnect-loops and every live-delivery assertion
+ * times out (the M25 console-stream lesson).
+ */
 export async function launchBrowser(): Promise<Browser> {
-  return await chromium.launch({ headless: true });
+  return await chromium.launch({
+    headless: true,
+    args: ["--ignore-certificate-errors"],
+  });
 }
 
 /** A fresh context trusting the engine origin's certificate. */
@@ -33,6 +47,10 @@ export async function newPersistentContext(
   return await chromium.launchPersistentContext(userDataDir, {
     headless: true,
     ignoreHTTPSErrors: true,
+    // The WSS-handshake half of the self-signed story (see
+    // launchBrowser's note) — persistent contexts need it too:
+    // session-restore's pages open live streams.
+    args: ["--ignore-certificate-errors"],
     viewport: { width: 1440, height: 900 },
   });
 }

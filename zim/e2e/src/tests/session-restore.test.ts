@@ -54,8 +54,10 @@ test("session: a browser restart restores the tab set without touching the serve
         active: 0,
       });
       await uiGoto(page, engine, "app");
-      await page.locator("[data-tab-id]").first().waitFor({ timeout: 30_000 });
-      assert.equal(await page.locator("[data-tab-id]").count(), 1);
+      // `#tabstrip .tab`: pane hosts also carry data-tab-id (the
+      // app's own convention) — an unscoped selector counts 2N.
+      await page.locator("#tabstrip .tab").first().waitFor({ timeout: 30_000 });
+      assert.equal(await page.locator("#tabstrip .tab").count(), 1);
       await first.close(); // the whole "browser" goes away
     }
 
@@ -64,8 +66,8 @@ test("session: a browser restart restores the tab set without touching the serve
     {
       const page = await second.newPage();
       await uiGoto(page, engine, "app");
-      await page.locator("[data-tab-id]").first().waitFor({ timeout: 30_000 });
-      assert.equal(await page.locator("[data-tab-id]").count(), 1);
+      await page.locator("#tabstrip .tab").first().waitFor({ timeout: 30_000 });
+      assert.equal(await page.locator("#tabstrip .tab").count(), 1);
       // The restored tab really re-opened the server console pane
       // (same-origin iframe; frameLocator reaches into it).
       const pane = page.frameLocator('iframe.pane-frame').locator("#server-name");

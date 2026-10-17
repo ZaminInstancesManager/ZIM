@@ -71,15 +71,47 @@ test("console: the server console page replays the buffer and streams live ticks
         return root?.textContent?.split("zim-e2e-tick").length ?? 1;
       });
     const early = await countAt();
-    await waitFor(
-      "live console growth",
-      async () => {
-        const now = await countAt();
-        return now > early ? now : undefined;
-      },
-      30_000,
-      1_000,
-    );
+
+    // Page-level diagnostics, captured INTO the failure when the
+    // live stream stalls: the console view's own lines (a fatal
+    // upgrade appends "zim: live stream unavailable (reason)") and
+    // the generation counter (static means the WS delivered
+    // nothing at all). Without these the timeout is mute.
+    const pageDiagnostics = async (): Promise<string> => {
+      const lines = await page
+        .locator("#console")
+        .evaluate((element) => {
+          const root = element.shadowRoot;
+          return root?.textContent ?? "";
+        })
+        .catch(() => "");
+      const meta = await page
+        .locator("#console-meta")
+        .textContent()
+        .catch(() => null);
+      const zimLines = lines
+        .split("\n")
+        .filter((line: string) => line.startsWith("zim:"))
+        .slice(-5)
+        .join(" | ");
+      return `#console-meta=${JSON.stringify(meta)}; page zim-lines: ${
+        zimLines === "" ? "(none)" : zimLines
+      }`;
+    };
+
+    try {
+      await waitFor(
+        "live console growth",
+        async () => {
+          const now = await countAt();
+          return now > early ? now : undefined;
+        },
+        30_000,
+        1_000,
+      );
+    } catch (error) {
+      throw new Error(`${String(error)}\npage diagnostics: ${await pageDiagnostics()}`);
+    }
 
     // The input control is present (§10.3 console input surface).
     assert.ok(await page.locator("#input-line").count() > 0);

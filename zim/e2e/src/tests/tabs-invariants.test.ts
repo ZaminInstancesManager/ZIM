@@ -59,11 +59,15 @@ test("tabs: three tabs of one server are three views, not three processes (I6)",
     await uiGoto(page, engine, "app");
 
     // Three tabs are open, exactly ONE container exists.
+    // (`#tabstrip .tab` — the pane hosts ALSO carry data-tab-id, an
+    // app-internal convention; an unscoped attribute selector counts
+    // tabs AND hosts, i.e. 2N — the doubling these tests originally
+    // failed on.)
     await page
-      .locator("[data-tab-id]")
+      .locator("#tabstrip .tab")
       .nth(2)
       .waitFor({ timeout: 30_000 });
-    assert.equal(await page.locator("[data-tab-id]").count(), 3);
+    assert.equal(await page.locator("#tabstrip .tab").count(), 3);
 
     const containers = await containerCount(instance.id);
     assert.equal(containers, 1, "three tabs must not mean three processes");
@@ -114,16 +118,16 @@ test("tabs: closing a tab keeps the server running (I4)", async (t) => {
     });
     await uiGoto(page, engine, "app");
     await page
-      .locator("[data-tab-id]")
+      .locator("#tabstrip .tab")
       .nth(1)
       .waitFor({ timeout: 30_000 });
 
     // Close the active (first) tab via its strip close button.
-    await page.locator("[data-tab-id]").first().locator(".tab-close").click();
+    await page.locator("#tabstrip .tab").first().locator(".tab-close").click();
     await waitFor(
       "one tab left",
       async () => {
-        const count = await page.locator("[data-tab-id]").count();
+        const count = await page.locator("#tabstrip .tab").count();
         return count === 1 ? count : undefined;
       },
       15_000,
