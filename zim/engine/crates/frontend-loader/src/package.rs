@@ -342,16 +342,10 @@ mod tests {
         assert!(params.is_empty());
 
         // M22: the declared per-instance surfaces route (one shared
-        // stub entrypoint, six surfaces; the metrics view renders
-        // real samples, the rest are honest placeholders).
-        for surface in [
-            "files",
-            "settings",
-            "backups",
-            "schedules",
-            "subusers",
-            "metrics",
-        ] {
+        // stub entrypoint; the metrics view renders real samples,
+        // the rest are honest placeholders). M28 graduated `files`
+        // to its own entrypoint — the real file manager page.
+        for surface in ["settings", "backups", "schedules", "subusers", "metrics"] {
             let path = format!("servers/0a1b2c3d-0000-0000-0000-000000000000/{surface}");
             let (file, params) = package
                 .resolve_surface(&path)
@@ -365,6 +359,19 @@ mod tests {
                 )]
             );
         }
+
+        // M28: the files surface routes to the real file manager.
+        let (file, params) = package
+            .resolve_surface("servers/0a1b2c3d-0000-0000-0000-000000000000/files")
+            .expect("files routes");
+        assert_eq!(file, "pages/files.html");
+        assert_eq!(
+            params,
+            vec![(
+                "id".to_owned(),
+                "0a1b2c3d-0000-0000-0000-000000000000".to_owned()
+            )]
+        );
 
         // Undeclared surface → None (the 404 path).
         assert!(package.resolve_surface("settings").is_none());
