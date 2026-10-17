@@ -370,8 +370,7 @@ async fn tls_websocket(engine: &TlsEngine, instance_id: &str, cookie: &str) -> W
     let tcp = tokio::net::TcpStream::connect(("127.0.0.1", port))
         .await
         .expect("the engine port accepts TCP");
-    let server_name =
-        ServerName::try_from(std::net::IpAddr::from([127, 0, 0, 1])).expect("loopback parses");
+    let server_name = ServerName::from(std::net::IpAddr::from([127, 0, 0, 1]));
     let tls_stream = connector
         .connect(server_name, tcp)
         .await
