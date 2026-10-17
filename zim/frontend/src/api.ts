@@ -212,8 +212,14 @@ export interface NodeRow {
 
 // ── Typed endpoint helpers ────────────────────────────────────────
 
-/** Engine health (unauthenticated). */
-export async function health(): Promise<{ status: string; service: string; api_version: string }> {
+/** Engine health (unauthenticated). M27: `version` is the RUNNING
+ * engine's build version (absent only on pre-M27 engines). */
+export async function health(): Promise<{
+  status: string;
+  service: string;
+  version?: string;
+  api_version: string;
+}> {
   return api("/health");
 }
 

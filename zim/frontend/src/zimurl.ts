@@ -131,6 +131,8 @@ export function staticTitle(path: string): string {
       return "New Tab";
     case "servers":
       return "Servers";
+    case "about":
+      return "About";
     case "app":
       return "ZIM";
     default:

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ZIM — About</title>
+  <link rel="stylesheet" href="/zim/assets/main.css">
+  <script type="module" src="/zim/assets/about.js"></script>
+</head>
+<body>
+  <main class="page page-about">
+    <header class="page-header">
+      <a class="backlink" href="/zim/newtab" title="New tab">←</a>
+      <h1>About ZIM</h1>
+    </header>
+
+    <section class="card" aria-label="Versions">
+      <h2 class="card-title">Versions</h2>
+      <p class="empty">
+        ZIM is the Zamin Instances Manager: a Chrome-inspired desktop application
+        powered by a Rust-based workload-management engine. The shell and the
+        engine ship as one bundle; the engine runs as an independent,
+        separately-recoverable process on your machine.
+      </p>
+      <dl class="about-versions">
+        <div>
+          <dt>App</dt>
+          <dd id="app-version" class="mono">…</dd>
+        </div>
+        <div>
+          <dt>Running engine</dt>
+          <dd><span id="engine-running" class="mono">…</span>
+              <span class="line-dim">(API <span id="engine-api">…</span>)</span></dd>
+        </div>
+        <div>
+          <dt>Installed engine</dt>
+          <dd id="engine-installed" class="mono">…</dd>
+        </div>
+      </dl>
+      <p id="version-lag" class="note" hidden>
+        <span id="version-lag-detail"></span>
+      </p>
+    </section>
+
+    <section class="card" aria-label="Updates">
+      <h2 class="card-title">Updates</h2>
+      <p class="empty">
+        Updates are consent-shaped: nothing checks or installs unless you ask,
+        and every payload is minisign-signed before it installs. In a browser
+        view this page shows engine-side facts only — the update channel lives
+        in the desktop app.
+      </p>
+      <div class="console-toolbar">
+        <button class="btn" id="check-updates" type="button">Check for updates…</button>
+        <span id="update-note" class="line-dim" role="status"></span>
+      </div>
+    </section>
+
+    <section class="card" aria-label="The alpha">
+      <h2 class="card-title">The alpha</h2>
+      <p class="empty">
+        This is alpha software: real, installable, end-to-end tested — and
+        explicitly not production-ready. What works and what does not is
+        documented in the release notes for this version.
+      </p>
+    </section>
+  </main>
+</body>
+</html>

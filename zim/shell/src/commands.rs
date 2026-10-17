@@ -41,6 +41,41 @@ pub fn zim_window_label(window: WebviewWindow) -> String {
     window.label().to_owned()
 }
 
+/// The shell's own build version (M27's About surface: the app
+/// version is the bundle's — the shell and engine bytes ship
+/// together).
+#[tauri::command]
+pub fn zim_shell_version() -> String {
+    env!("CARGO_PKG_VERSION").to_owned()
+}
+
+/// The installed engine's version — the sidecar binary's own
+/// `--version` answer (M27's About surface: the bytes that run on
+/// the next engine restart; can lag the RUNNING engine right after
+/// an update, per UPDATES.md §3 — the About page shows both).
+#[tauri::command]
+pub fn zim_installed_engine_version(shared: State<'_, Arc<Shared>>) -> Option<String> {
+    let engine_path = crate::cli::resolve_engine_path(&shared.options.engine_path);
+    crate::engine::installed_engine_version(&engine_path)
+}
+
+/// The running engine's version, straight from the health surface
+/// (M27's About surface: the process actually supervising servers
+/// right now).
+#[tauri::command]
+pub fn zim_running_engine_version(shared: State<'_, Arc<Shared>>) -> Option<String> {
+    let port = shared.get().port?;
+    crate::engine::running_engine_version(port).ok()
+}
+
+/// The update channel's check, invoked from the About surface (the
+/// same consent-shaped cycle the tray item runs — the tray stays
+/// the flash surface for label-state).
+#[tauri::command]
+pub fn zim_check_updates(app: AppHandle) {
+    crate::updater::check_and_apply(app);
+}
+
 /// Tear-off (M23, AD-26): open the dragged-out tab in its own
 /// chrome window. `paths` carries the tab's `zim://` URLs — the
 /// primary pane first, the split's secondary pane second when the

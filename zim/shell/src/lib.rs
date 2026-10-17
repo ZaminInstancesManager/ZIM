@@ -19,6 +19,7 @@
 
 pub mod cli;
 pub mod commands;
+pub mod control;
 pub mod engine;
 pub mod state;
 pub mod tray;
@@ -64,7 +65,11 @@ pub fn run() {
             commands::zim_window_label,
             commands::zim_tear_off,
             commands::zim_merge_to_main,
-            commands::zim_new_window
+            commands::zim_new_window,
+            commands::zim_shell_version,
+            commands::zim_installed_engine_version,
+            commands::zim_running_engine_version,
+            commands::zim_check_updates
         ])
         .setup(|app| {
             // The window registry lives in the app-data dir; load it
@@ -203,7 +208,7 @@ fn restore_chrome_windows(app: &AppHandle, origin: &str) {
 /// The engine data dir default: the shell's per-OS app-data dir +
 /// `engine/`. Falls back to the engine's own relative default when
 /// the platform path is unavailable (embedded/test contexts).
-fn default_engine_data_dir(app: &AppHandle) -> std::path::PathBuf {
+pub(crate) fn default_engine_data_dir(app: &AppHandle) -> std::path::PathBuf {
     match app.path().app_data_dir() {
         Ok(dir) => dir.join("engine"),
         Err(e) => {

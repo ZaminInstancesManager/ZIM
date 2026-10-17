@@ -19,6 +19,7 @@ import { isSafePath } from "./zimurl.js";
 const STATIC_SURFACES = [
     { path: "newtab", title: "New Tab", blurb: "engine overview and quick links" },
     { path: "servers", title: "Servers", blurb: "every instance you can see" },
+    { path: "about", title: "About", blurb: "versions and the update channel" },
 ];
 /** Build the dropdown rows for a query.
  *
