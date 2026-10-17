@@ -45,6 +45,7 @@ type Ws = WebSocketStream<tokio_rustls::client::TlsStream<tokio::net::TcpStream>
 struct TlsEngine {
     base: String,
     ws_base: String,
+    port: u16,
     client: reqwest::Client,
     persistence: Arc<dyn Persistence>,
     server: RunningServer,
@@ -141,6 +142,7 @@ impl TlsEngine {
         Self {
             base: format!("https://127.0.0.1:{port}/api/v1"),
             ws_base: format!("wss://127.0.0.1:{port}/api/v1"),
+            port,
             client,
             persistence,
             server,
@@ -361,13 +363,7 @@ async fn tls_websocket(engine: &TlsEngine, instance_id: &str, cookie: &str) -> W
         .with_no_client_auth();
     let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
 
-    let port = engine
-        .ws_base
-        .rsplit(':')
-        .next()
-        .and_then(|p| p.parse::<u16>().ok())
-        .expect("the ws base carries a port");
-    let tcp = tokio::net::TcpStream::connect(("127.0.0.1", port))
+    let tcp = tokio::net::TcpStream::connect(("127.0.0.1", engine.port))
         .await
         .expect("the engine port accepts TCP");
     let server_name = ServerName::from(std::net::IpAddr::from([127, 0, 0, 1]));
