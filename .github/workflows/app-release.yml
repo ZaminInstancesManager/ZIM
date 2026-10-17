@@ -170,7 +170,19 @@ jobs:
         run: |
           set -euo pipefail
           ls -la bundles/
-          sudo dpkg -i bundles/*.deb || sudo apt-get install -f -y
+          # The deb's declared runtime libraries (WebKitGTK 4.1 +
+          # the ayatana indicator), pre-installed so dpkg configures
+          # the package cleanly in one step. NEVER `apt-get install
+          # -f` here: the deb's package name is "zim", which
+          # collides with Ubuntu's own unrelated `zim` desktop-wiki
+          # package — the dependency "fixer" resolves the same-name
+          # package from the archive at a higher version and
+          # REPLACES the app with it (that is exactly how this
+          # smoke failed the first time it ran). The collision
+          # itself is a documented alpha rough edge:
+          # docs/releases/ALPHA_v0.1.0.md.
+          sudo apt-get install -y libwebkit2gtk-4.1-0 libayatana-appindicator3-1
+          sudo dpkg -i bundles/*.deb
           ls -la /usr/bin/zim_shell /usr/bin/zim_engine
 
       - name: Launch under Xvfb and assert the engine attach
