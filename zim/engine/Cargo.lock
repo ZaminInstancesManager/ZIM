@@ -492,9 +492,9 @@ dependencies = [
 
 [[package]]
 name = "equivalent"
-version = "1.0.2"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
+checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
 
 [[package]]
 name = "errno"
@@ -1081,9 +1081,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.190"
+version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
+checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
 name = "libsqlite3-sys"
@@ -1174,9 +1174,9 @@ dependencies = [
 
 [[package]]
 name = "mysql"
-version = "28.0.3"
+version = "28.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d3d30e2806645e218163f49c2656286061cc91ffce24d93d758fd136e70eb5d"
+checksum = "ca3de8a73b7c70f76dbcdd4b6abc9b53bbb6c4f7bd6c79d8e8a7ea2157c02487"
 dependencies = [
  "arc-swap",
  "bufstream",
@@ -1691,9 +1691,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "log",
  "once_cell",
@@ -2072,9 +2072,9 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tokio"
-version = "1.53.2"
+version = "1.53.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e95f91fcc7a621e8b030f6aa23c71fe9838ae2fb4d8118b75602a328f5144044"
+checksum = "ce3335fa71841cda333a58d7615b03901380ecf09d59b3296d21f8bbac0dde4e"
 dependencies = [
  "bytes",
  "libc",
@@ -2874,7 +2874,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_api"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "axum",
  "axum-core",
@@ -2904,6 +2904,7 @@ dependencies = [
  "zim_engine_backups",
  "zim_engine_domain",
  "zim_engine_eggs",
+ "zim_engine_extensions",
  "zim_engine_frontend_loader",
  "zim_engine_installs",
  "zim_engine_jobs",
@@ -2916,7 +2917,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_application"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2933,7 +2934,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_audit"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "zim_engine_application",
  "zim_engine_domain",
@@ -2941,7 +2942,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_auth"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "argon2",
  "chrono",
@@ -2955,7 +2956,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_authz"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "thiserror",
  "uuid",
@@ -2964,7 +2965,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_backups"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2983,7 +2984,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_domain"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "serde",
@@ -2994,7 +2995,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_eggs"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "serde",
@@ -3006,15 +3007,26 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_extensions"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "ed25519-dalek",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
  "zim_engine_application",
  "zim_engine_domain",
+ "zim_engine_frontend_loader",
+ "zim_engine_persistence_sqlite",
+ "zip",
 ]
 
 [[package]]
 name = "zim_engine_files"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "flate2",
@@ -3026,7 +3038,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_frontend_loader"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -3044,7 +3056,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_installs"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3060,7 +3072,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_jobs"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3075,8 +3087,9 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_main"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
+ "chrono",
  "rand_core 0.6.4",
  "reqwest",
  "semver",
@@ -3090,6 +3103,7 @@ dependencies = [
  "zim_engine_authz",
  "zim_engine_backups",
  "zim_engine_domain",
+ "zim_engine_extensions",
  "zim_engine_frontend_loader",
  "zim_engine_installs",
  "zim_engine_jobs",
@@ -3111,7 +3125,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_metrics"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "zim_engine_application",
  "zim_engine_domain",
@@ -3119,7 +3133,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_migrate_pterodactyl"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "mysql",
@@ -3135,7 +3149,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_node_runtime"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "zim_engine_application",
  "zim_engine_domain",
@@ -3143,7 +3157,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_persistence_sqlite"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "rusqlite",
@@ -3156,7 +3170,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_platform"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "zim_engine_application",
  "zim_engine_domain",
@@ -3164,7 +3178,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_runtime_docker"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "bollard",
@@ -3183,7 +3197,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_scheduler"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "cron",
@@ -3196,7 +3210,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_streaming"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "serde",
@@ -3208,7 +3222,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_transfers"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3225,7 +3239,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_workloads_database"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "bollard",
  "bytes",
@@ -3245,7 +3259,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_workloads_dev_process"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "bollard",
  "notify",
@@ -3261,7 +3275,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_workloads_generic_container"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "bollard",
  "serde",
@@ -3277,7 +3291,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_workloads_macros"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3286,7 +3300,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_workloads_minecraft"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "bollard",
  "bytes",
@@ -3310,7 +3324,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_workloads_sdk"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "semver",
@@ -3325,7 +3339,7 @@ dependencies = [
 
 [[package]]
 name = "zim_engine_workloads_website"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "bollard",
  "futures-util",
@@ -3342,18 +3356,16 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "2.4.2"
+version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fabe6324e908f85a1c52063ce7aa26b68dcb7eb6dbc83a2d148403c9bc3eba50"
+checksum = "1dcb24d0152526ae49b9b96c1dcf71850ca1e0b882e4e28ed898a93c41334744"
 dependencies = [
  "arbitrary",
  "crc32fast",
  "crossbeam-utils",
- "displaydoc",
  "flate2",
  "indexmap",
  "memchr",
- "thiserror",
  "zopfli",
 ]
 
