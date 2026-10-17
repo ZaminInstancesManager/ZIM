@@ -344,9 +344,10 @@ mod tests {
         // M22: the declared per-instance surfaces route (one shared
         // stub entrypoint; the metrics view renders real samples,
         // the rest are honest placeholders). M28 graduated `files`,
-        // and M29 `backups`, `schedules`, and `subusers` to their
-        // own entrypoints — the real management pages.
-        for surface in ["settings", "metrics"] {
+        // and M29 `backups`, `schedules`, `subusers`, and
+        // `settings` to their own entrypoints — the real
+        // management pages. Only `metrics` keeps the stub.
+        for surface in ["metrics"] {
             let path = format!("servers/0a1b2c3d-0000-0000-0000-000000000000/{surface}");
             let (file, params) = package
                 .resolve_surface(&path)
@@ -387,11 +388,12 @@ mod tests {
             )]
         );
 
-        // M29: the schedules and subusers surfaces route to their
-        // own pages too.
+        // M29: the schedules, subusers, and settings surfaces route
+        // to their own pages too.
         for (surface, page) in [
             ("schedules", "pages/schedules.html"),
             ("subusers", "pages/subusers.html"),
+            ("settings", "pages/settings.html"),
         ] {
             let path = format!("servers/0a1b2c3d-0000-0000-0000-000000000000/{surface}");
             let (file, params) = package

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ZIM — Settings</title>
+  <link rel="stylesheet" href="/zim/assets/main.css">
+  <script type="module" src="/zim/assets/settings.js"></script>
+</head>
+<body>
+  <main class="page page-stub">
+    <zim-recovery-notice></zim-recovery-notice>
+
+    <header class="page-header">
+      <a class="backlink" href="/zim/servers" title="Servers">←</a>
+      <h1 id="server-name">Server</h1>
+      <span id="server-id" class="pill pill-muted mono">…</span>
+      <span class="pill pill-muted mono">settings</span>
+    </header>
+
+    <section class="card" aria-label="Observed state">
+      <div class="console-toolbar">
+        <zim-status-dot id="status-dot" status="unknown" data-label="unknown"></zim-status-dot>
+        <span id="state-label" class="state-label">state: unknown</span>
+        <span class="spacer"></span>
+        <span id="etag-pill" class="pill pill-muted mono" title="The row's concurrency ETag (§8)">etag: …</span>
+      </div>
+    </section>
+
+    <section class="card card-login" id="auth-gate" aria-label="Sign in" hidden>
+      <h2 class="card-title">Sign in to ZIM</h2>
+      <zim-login-form id="login"></zim-login-form>
+    </section>
+
+    <section class="card" aria-label="Identity">
+      <h2 class="card-title">Identity</h2>
+      <dl class="status-grid" id="identity-grid"></dl>
+    </section>
+
+    <section class="card" aria-label="Settings">
+      <h2 class="card-title">Settings</h2>
+
+      <div class="console-toolbar" id="settings-toolbar">
+        <button id="btn-reload" class="pill pill-action" type="button" title="Re-read the row and refill the form">↻ Reload</button>
+        <span id="settings-message" class="state-label" role="status"></span>
+      </div>
+
+      <form class="mgmt-form" id="settings-form" aria-label="Instance settings">
+        <div class="field-row">
+          <div class="field">
+            <label for="set-name">Name</label>
+            <input id="set-name" type="text" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="set-external-id">External id</label>
+            <input id="set-external-id" type="text" autocomplete="off" class="mono" />
+            <span class="hint">legacy identifier (blank = unchanged)</span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="set-description">Description</label>
+          <input id="set-description" type="text" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label for="set-startup">Startup command</label>
+          <input id="set-startup" type="text" autocomplete="off" class="mono" />
+          <span class="hint">the {{VAR}} template the runtime renders</span>
+        </div>
+        <div class="field">
+          <label for="set-image">Docker image</label>
+          <input id="set-image" type="text" autocomplete="off" class="mono" />
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="set-memory">Memory (MiB)</label>
+            <input id="set-memory" type="text" inputmode="numeric" autocomplete="off" class="mono" />
+          </div>
+          <div class="field">
+            <label for="set-swap">Swap (MiB)</label>
+            <input id="set-swap" type="text" inputmode="numeric" autocomplete="off" class="mono" />
+          </div>
+          <div class="field">
+            <label for="set-disk">Disk (MiB)</label>
+            <input id="set-disk" type="text" inputmode="numeric" autocomplete="off" class="mono" />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="set-cpu">CPU (millicores)</label>
+            <input id="set-cpu" type="text" inputmode="numeric" autocomplete="off" class="mono" />
+            <span class="hint">1000 = one core</span>
+          </div>
+          <div class="field">
+            <label for="set-io">BlkIO weight</label>
+            <input id="set-io" type="text" inputmode="numeric" autocomplete="off" class="mono" />
+            <span class="hint">1–1000</span>
+          </div>
+          <div class="field">
+            <label for="set-threads">CPU pinning</label>
+            <input id="set-threads" type="text" autocomplete="off" class="mono" />
+            <span class="hint">cpuset like 0-3,8 (blank = off)</span>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="set-backup-limit">Backup limit</label>
+            <input id="set-backup-limit" type="text" inputmode="numeric" autocomplete="off" class="mono" />
+            <span class="hint">0 = backups disabled</span>
+          </div>
+          <div class="field">
+            <label for="set-database-limit">Database limit</label>
+            <input id="set-database-limit" type="text" inputmode="numeric" autocomplete="off" class="mono" />
+            <span class="hint">blank = feature off</span>
+          </div>
+          <div class="field">
+            <label for="set-allocation-limit">Allocation limit</label>
+            <input id="set-allocation-limit" type="text" inputmode="numeric" autocomplete="off" class="mono" />
+            <span class="hint">blank = unlimited</span>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <label class="pill pill-muted"><input id="set-crash" type="checkbox" /> crash detection (crash-loop protection)</label>
+          <label class="pill pill-muted"><input id="set-skip-scripts" type="checkbox" /> skip egg install scripts on next install</label>
+          <label class="pill pill-muted"><input id="set-oom" type="checkbox" /> disable the OOM killer for this instance</label>
+        </div>
+
+        <div class="buttons">
+          <button id="settings-save" class="pill pill-action" type="submit">Save</button>
+          <span class="hint">saves under the §8 If-Match gate — a stale form answers 412 and reloads</span>
+        </div>
+      </form>
+    </section>
+
+    <section class="card" aria-label="Danger zone">
+      <h2 class="card-title">Danger zone</h2>
+      <div class="console-toolbar">
+        <button id="btn-delete" class="pill pill-action" type="button" title="Delete this instance (AdminInstance)">✕ Delete this instance</button>
+        <span class="state-label">unassigns the allocation; schedules, backups, and subusers cascade away with it</span>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

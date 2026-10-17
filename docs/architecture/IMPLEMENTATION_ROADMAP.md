@@ -1387,13 +1387,79 @@ AD-33 records the decision.
 
 **Estimated effort:** 3 large batches (delivered as estimated).
 
+### M29: The management surfaces — backups, schedules, subusers, settings
+
+**Status:** COMPLETE (2026-10-17) — three large batches + this record.
+
+**Goal:** Graduate the last four M22-declared stub surfaces. The
+engine families behind them were real and CI-tested since M5-M9
+(§10.5 backups, §10.6 schedules, §10.7 subusers, §10.3's PATCH
+settings), but the pages were honest placeholders — the §3 URL
+inventory promised what the UI had not delivered. M28 closed the
+alpha's #1 gap (files) the same way: one declared surface at a
+time, the engine already real behind it. After M29, every declared
+`page_surface` in the frontend manifest except `metrics` serves
+its own real page.
+
+**Delivered:**
+
+- **The backups surface** (batch 1): `zim://servers/{id}/backups`
+  — the listing with honest metadata (an unsealed row renders a
+  "sealing" pill; a failed job never fakes a sealed archive), Back
+  up now following the durable job live through its states, restore
+  with the staging-swap confirmation, download as a real browser
+  download, the deletion lock with its 409 refusal surfaced as the
+  honest message, and delete. The api.ts client family
+  (listBackups/createBackup/restoreBackup/deleteBackup/
+  downloadBackup/setBackupLock/getJob) plus the shared
+  `jobIsTerminal` vocabulary and `formatBytes`.
+- **The schedules + subusers surfaces** (batch 2):
+  `zim://servers/{id}/schedules` — the listing with honest
+  next/last-run times, the create form (name, a structurally
+  pre-checked 5-field cron, one power or send-command action, the
+  only-while-running gate), pause/resume, run-now with the honest
+  409/400 refusals surfaced as messages, delete.
+  `zim://servers/{id}/subusers` — the listing (username, email,
+  grant chips), the add form (user id + grouped checkboxes over
+  the engine's real 40-name PermissionGrant vocabulary), grant-set
+  replacement, remove. The engine's `parse_grants` validation
+  contract mirrored client-side as a preview.
+- **The settings surface + the E2E graduation** (batch 3):
+  `zim://servers/{id}/settings` — the full-form PATCH family under
+  §8's If-Match concurrency gate (the row's own `etag` field is
+  the token; a stale form answers 412 with the honest
+  reload-don't-overwrite message), the read-only identity card
+  (uuid, node, egg, owner, timestamps), MiB-denominated limit
+  editing with round-trip conversions, and the danger-zone delete
+  under the same gate. The E2E suite gained
+  `management-surfaces.test.ts`: four browser walks over the real
+  engine — the backup create→seal→lock→refused-delete→delete
+  round-trip (host-filesystem, tier-independent), the schedule
+  create/pause/delete with the client-side cron preview refusal,
+  the subuser add/edit-grants/remove against a real second user,
+  and the settings rename→save→concurrent-writer-412→reload→
+  danger-zone-delete walk (the lost-update race driven for real
+  through a behind-the-page PATCH).
+
+**Acceptance criteria:** all met — Engine/Shell/E2E CI green; the
+frontend builds with the four real pages (fresh committed assets,
+manifest 1.5.0); the frontend unit layer covers the pure models
+(formatBytes, the JobState vocabulary, the cron structural rule,
+the grant vocabulary's integrity, the MiB conversions, the
+form-to-PATCH builder); the loader's routing test graduates with
+the surfaces; the stub keeps only `metrics`.
+
+**Estimated effort:** 3 large batches (delivered as estimated).
+
 ### M28+: The post-alpha backlog (unsequenced)
 
 With M26/M27 shipped (`v0.1.0-alpha.1` / `v0.1.0-alpha.2`), the
 sequenced milestone track is exhausted — everything from here on is
 backlog, to be sequenced into milestones when the alpha feedback
-shapes the priorities. The honest sources are the alpha notes'
-what-doesn't and rough-edge lists, the architecture's deferred
+shapes the priorities. M29 sequenced itself off this register (the
+declared-but-stubbed management surfaces — see above); the honest
+sources remain the alpha notes' what-doesn't and rough-edge lists,
+the architecture's deferred
 crates, and this roadmap's §4 out-of-scope register:
 
 **Functional gaps (the alpha's published "what doesn't" list):**

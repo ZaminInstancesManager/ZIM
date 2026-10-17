@@ -170,7 +170,24 @@ abstraction, and the roadmap that subsequent implementation work will follow.
   listing, upload/download, new file/folder, rename, delete,
   archive/extract — with the E2E scenario rewritten from its
   honest 501 pin into the real three-OS suite plus a
-  browser-driven UI walk and the SSH banner probe).
+  browser-driven UI walk and the SSH banner probe), and the
+  management surfaces (M29 — the last four M22-declared stubs
+  graduated to real pages over the engine families that were real
+  behind them since M5-M9: `zim://servers/{id}/backups` with the
+  durable-job-following Back up now, restore, download, the
+  deletion lock with its 409 refusal surfaced honestly, and
+  delete; `zim://servers/{id}/schedules` with the structurally
+  pre-checked 5-field cron create form, pause/resume, run-now,
+  and delete; `zim://servers/{id}/subusers` with the add form over
+  the engine's real 40-name PermissionGrant vocabulary,
+  grant-set replacement, and remove; and
+  `zim://servers/{id}/settings` — the full-form PATCH family
+  under §8's If-Match concurrency gate, where a stale form
+  answers 412 with the reload-don't-overwrite message, plus the
+  danger-zone delete under the same gate; the E2E suite gained
+  the four browser walks of `management-surfaces.test.ts`,
+  including the settings lost-update race driven for real through
+  a behind-the-page concurrent PATCH).
   M25's own acceptance campaign (16 CI batches) also earned a
   real engine fix: the production TLS accept loop was dropping
   every WebSocket subscriber on arrival (`serve_connection` had
@@ -218,8 +235,11 @@ ZIM/
 │   │   │                         #   v2, themes, the completed NTP with create /
 │   │   │                         #   import / recents; M27: zim://about;
 │   │   │                         #   M28: the zim://servers/{id}/files file
-│   │   │                         #   manager; newtab, servers, console, and
-│   │   │                         #   the declared per-instance surfaces;
+│   │   │                         #   manager; M29: the management surfaces —
+│   │   │                         #   backups / schedules / subusers / settings;
+│   │   │                         #   newtab, servers, console, and the declared
+│   │   │                         #   per-instance surfaces (only metrics keeps
+│   │   │                         #   the shared stub);
 │   │   │                         #   src/ TypeScript, tests/ node:test suite)
 │   ├── e2e/                      # Node/Playwright E2E suite (M25): the real
 │   │                             #   engine binary + real browser; the

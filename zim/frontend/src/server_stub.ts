@@ -1,8 +1,8 @@
 /**
- * `zim://servers/{id}/{surface}` — the per-instance surfaces M22
- * declares ahead of their full features: settings, metrics (the
- * console keeps its own page; files graduated in M28; backups,
- * schedules, and subusers in M29).
+ * `zim://servers/{id}/{surface}` — the per-instance surface the
+ * milestones have not graduated yet: metrics (the console keeps
+ * its own page; files graduated in M28; backups, schedules,
+ * subusers, and settings in M29).
  *
  * Each surface renders the real instance header (row + observed
  * state, live over the §11 stream) plus its honest placeholder
@@ -36,11 +36,10 @@ function surfaceFromPath(): { instanceId: string; surface: string } | null {
 
 /** The honest one-liner per surface (what exists, what waits).
  * The files surface graduated to its own page (M28's
- * `pages/files.html`); backups, schedules, and subusers to their
- * own pages (M29); the stub never sees them, but the notes stay
- * gone rather than lying. */
+ * `pages/files.html`); backups, schedules, subusers, and settings
+ * to their own pages (M29); the stub never sees them, but the
+ * notes stay gone rather than lying. */
 const SURFACE_NOTES: Record<string, string> = {
-  settings: "Instance configuration ships with a later milestone; power controls live on the console today.",
   metrics: "Live samples below; charts and history ship with a later milestone.",
 };
 

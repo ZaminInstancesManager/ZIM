@@ -60,10 +60,14 @@ export async function api(path, options = {}) {
     const init = {
         credentials: "same-origin",
         method: options.method ?? (options.body !== undefined ? "POST" : "GET"),
-        headers: { Accept: "application/json" },
+        headers: { Accept: "application/json", ...(options.headers ?? {}) },
     };
     if (options.body !== undefined) {
-        init.headers = { Accept: "application/json", "Content-Type": "application/json" };
+        init.headers = {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            ...(options.headers ?? {}),
+        };
         init.body = JSON.stringify(options.body);
     }
     const response = await fetch(`/api/v1${path}`, init);
@@ -458,4 +462,121 @@ export async function updateSubuser(instanceId, userId, grants) {
 /** `DELETE .../subusers/{uid}` — remove (204). */
 export async function removeSubuser(instanceId, userId) {
     return api(`/instances/${encodeURIComponent(instanceId)}/subusers/${encodeURIComponent(userId)}`, { method: "DELETE" });
+}
+/** `PATCH /instances/{id}` — update the row under §8's concurrency
+ * gate: `If-Match` carries the last-read ETag (the row's own
+ * `etag` field); a stale ETag answers `412 precondition_failed`
+ * with the current one, and the caller re-reads and retries. */
+export async function patchInstance(instanceId, request, etag) {
+    return api(`/instances/${encodeURIComponent(instanceId)}`, {
+        method: "PATCH",
+        body: request,
+        headers: { "If-Match": etag },
+    });
+}
+/** `DELETE /instances/{id}` — delete the instance (unassigns the
+ * primary allocation first; child rows cascade) under the same
+ * §8 If-Match gate. */
+export async function deleteInstance(instanceId, etag) {
+    return api(`/instances/${encodeURIComponent(instanceId)}`, {
+        method: "DELETE",
+        headers: { "If-Match": etag },
+    });
+}
+/** Mebibytes → bytes (the form's unit for memory/swap/disk). */
+export function mibToBytes(mib) {
+    return Math.round(mib * 1024 * 1024);
+}
+/** Bytes → mebibytes, fractional (512 MiB exactly, 1.5 GiB
+ * honestly) — the form's prefill conversion. */
+export function bytesToMib(bytes) {
+    return bytes / (1024 * 1024);
+}
+/** Parse one whole non-negative integer (blank → undefined). */
+function wholeNumber(raw) {
+    const trimmed = raw.trim();
+    if (trimmed === "") {
+        return undefined;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+        return undefined;
+    }
+    return parsed;
+}
+/** Parse one non-negative MiB quantity (blank → undefined; the
+ * value may carry a fraction — 512.5 MiB is a real quantity). */
+function mibNumber(raw) {
+    const trimmed = raw.trim();
+    if (trimmed === "") {
+        return undefined;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+        return undefined;
+    }
+    return parsed;
+}
+/** Build the PATCH body from the form's values. The full-form
+ * save: every editable field rides every save (prefilled values
+ * make them all present); a blank `external_id` stays undefined —
+ * this form never clears what PATCH cannot clear. Returns `null`
+ * when the shape is invalid (a bad number), so the page can refuse
+ * before the round-trip. */
+export function settingsFormToPatch(values) {
+    const name = values.name.trim();
+    if (name === "") {
+        return null;
+    }
+    const memoryMib = mibNumber(values.memoryMib);
+    const swapMib = mibNumber(values.swapMib);
+    const diskMib = mibNumber(values.diskMib);
+    const cpu = wholeNumber(values.cpuMillicores);
+    const io = wholeNumber(values.ioWeight);
+    const backupLimit = wholeNumber(values.backupLimit);
+    const databaseLimit = wholeNumber(values.databaseLimit);
+    const allocationLimit = wholeNumber(values.allocationLimit);
+    if (memoryMib === undefined ||
+        swapMib === undefined ||
+        diskMib === undefined ||
+        cpu === undefined ||
+        io === undefined) {
+        return null;
+    }
+    if ((values.backupLimit.trim() !== "" && backupLimit === undefined) ||
+        (values.databaseLimit.trim() !== "" && databaseLimit === undefined) ||
+        (values.allocationLimit.trim() !== "" && allocationLimit === undefined)) {
+        return null;
+    }
+    const request = {
+        name,
+        description: values.description,
+        startup: values.startup,
+        image: values.image,
+        limits: {
+            memory: mibToBytes(memoryMib),
+            swap: mibToBytes(swapMib),
+            disk: mibToBytes(diskMib),
+            io_weight: io,
+            cpu_millicores: cpu,
+            threads: values.threads.trim() === "" ? null : values.threads.trim(),
+            oom_disabled: values.oomDisabled,
+        },
+        crash_detection_enabled: values.crashDetectionEnabled,
+        skip_egg_scripts: values.skipEggScripts,
+    };
+    if (backupLimit !== undefined) {
+        request.backup_limit = backupLimit;
+    }
+    if (databaseLimit !== undefined) {
+        request.database_limit = databaseLimit;
+    }
+    if (allocationLimit !== undefined) {
+        request.allocation_limit = allocationLimit;
+    }
+    const externalId = values.externalId.trim();
+    if (externalId !== "") {
+        request.external_id = externalId;
+    }
+    return request;
 }

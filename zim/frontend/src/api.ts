@@ -83,6 +83,8 @@ export interface ApiOptions {
   body?: unknown;
   /** HTTP method (default `GET`, or `POST` when a body is present). */
   method?: string;
+  /** Extra request headers (the §8 concurrency gate's `If-Match`). */
+  headers?: Record<string, string>;
 }
 
 /** Perform one API call and return the parsed JSON body. */
@@ -90,10 +92,14 @@ export async function api<T = unknown>(path: string, options: ApiOptions = {}): 
   const init: RequestInit = {
     credentials: "same-origin",
     method: options.method ?? (options.body !== undefined ? "POST" : "GET"),
-    headers: { Accept: "application/json" },
+    headers: { Accept: "application/json", ...(options.headers ?? {}) },
   };
   if (options.body !== undefined) {
-    init.headers = { Accept: "application/json", "Content-Type": "application/json" };
+    init.headers = {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...(options.headers ?? {}),
+    };
     init.body = JSON.stringify(options.body);
   }
   const response = await fetch(`/api/v1${path}`, init);
@@ -122,6 +128,9 @@ export interface Instance {
   owner_id: string;
   created_at: string;
   updated_at: string;
+  /** The row's concurrency ETag (present on `GET /instances/{id}`;
+   * §8's If-Match gate for PATCH/DELETE). */
+  etag?: string;
   [key: string]: unknown;
 }
 
@@ -980,4 +989,188 @@ export async function removeSubuser(instanceId: string, userId: string): Promise
     `/instances/${encodeURIComponent(instanceId)}/subusers/${encodeURIComponent(userId)}`,
     { method: "DELETE" },
   );
+}
+
+// ── Instance settings (§10.3's PATCH, M29's fourth surface) ───────
+
+/** The engine's `ResourceLimits` wire shape (transparent byte
+ * counts; the form speaks MiB per the Pterodactyl convention). */
+export interface ResourceLimitsWire {
+  memory: number;
+  swap: number;
+  disk: number;
+  io_weight: number;
+  cpu_millicores: number;
+  threads: string | null;
+  oom_disabled: boolean;
+}
+
+/** `PATCH /instances/{id}`'s request body — every field optional
+ * (absent = unchanged; the engine validates the merged row). */
+export interface PatchInstanceRequest {
+  name?: string;
+  description?: string;
+  limits?: ResourceLimitsWire;
+  startup?: string;
+  image?: string;
+  allocation_limit?: number;
+  database_limit?: number;
+  backup_limit?: number;
+  crash_detection_enabled?: boolean;
+  skip_egg_scripts?: boolean;
+  external_id?: string;
+}
+
+/** `PATCH /instances/{id}` — update the row under §8's concurrency
+ * gate: `If-Match` carries the last-read ETag (the row's own
+ * `etag` field); a stale ETag answers `412 precondition_failed`
+ * with the current one, and the caller re-reads and retries. */
+export async function patchInstance(
+  instanceId: string,
+  request: PatchInstanceRequest,
+  etag: string,
+): Promise<Instance> {
+  return api<Instance>(`/instances/${encodeURIComponent(instanceId)}`, {
+    method: "PATCH",
+    body: request,
+    headers: { "If-Match": etag },
+  });
+}
+
+/** `DELETE /instances/{id}` — delete the instance (unassigns the
+ * primary allocation first; child rows cascade) under the same
+ * §8 If-Match gate. */
+export async function deleteInstance(instanceId: string, etag: string): Promise<void> {
+  return api(`/instances/${encodeURIComponent(instanceId)}`, {
+    method: "DELETE",
+    headers: { "If-Match": etag },
+  });
+}
+
+/** Mebibytes → bytes (the form's unit for memory/swap/disk). */
+export function mibToBytes(mib: number): number {
+  return Math.round(mib * 1024 * 1024);
+}
+
+/** Bytes → mebibytes, fractional (512 MiB exactly, 1.5 GiB
+ * honestly) — the form's prefill conversion. */
+export function bytesToMib(bytes: number): number {
+  return bytes / (1024 * 1024);
+}
+
+/** The settings form's editable values (all strings/booleans, as
+ * DOM gives them — the builder turns them into the request). */
+export interface SettingsFormValues {
+  name: string;
+  description: string;
+  startup: string;
+  image: string;
+  externalId: string;
+  memoryMib: string;
+  swapMib: string;
+  diskMib: string;
+  cpuMillicores: string;
+  ioWeight: string;
+  threads: string;
+  backupLimit: string;
+  databaseLimit: string;
+  allocationLimit: string;
+  crashDetectionEnabled: boolean;
+  skipEggScripts: boolean;
+  oomDisabled: boolean;
+}
+
+/** Parse one whole non-negative integer (blank → undefined). */
+function wholeNumber(raw: string): number | undefined {
+  const trimmed = raw.trim();
+  if (trimmed === "") {
+    return undefined;
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return undefined;
+  }
+  return parsed;
+}
+
+/** Parse one non-negative MiB quantity (blank → undefined; the
+ * value may carry a fraction — 512.5 MiB is a real quantity). */
+function mibNumber(raw: string): number | undefined {
+  const trimmed = raw.trim();
+  if (trimmed === "") {
+    return undefined;
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return undefined;
+  }
+  return parsed;
+}
+
+/** Build the PATCH body from the form's values. The full-form
+ * save: every editable field rides every save (prefilled values
+ * make them all present); a blank `external_id` stays undefined —
+ * this form never clears what PATCH cannot clear. Returns `null`
+ * when the shape is invalid (a bad number), so the page can refuse
+ * before the round-trip. */
+export function settingsFormToPatch(values: SettingsFormValues): PatchInstanceRequest | null {
+  const name = values.name.trim();
+  if (name === "") {
+    return null;
+  }
+  const memoryMib = mibNumber(values.memoryMib);
+  const swapMib = mibNumber(values.swapMib);
+  const diskMib = mibNumber(values.diskMib);
+  const cpu = wholeNumber(values.cpuMillicores);
+  const io = wholeNumber(values.ioWeight);
+  const backupLimit = wholeNumber(values.backupLimit);
+  const databaseLimit = wholeNumber(values.databaseLimit);
+  const allocationLimit = wholeNumber(values.allocationLimit);
+  if (
+    memoryMib === undefined ||
+    swapMib === undefined ||
+    diskMib === undefined ||
+    cpu === undefined ||
+    io === undefined
+  ) {
+    return null;
+  }
+  if (
+    (values.backupLimit.trim() !== "" && backupLimit === undefined) ||
+    (values.databaseLimit.trim() !== "" && databaseLimit === undefined) ||
+    (values.allocationLimit.trim() !== "" && allocationLimit === undefined)
+  ) {
+    return null;
+  }
+  const request: PatchInstanceRequest = {
+    name,
+    description: values.description,
+    startup: values.startup,
+    image: values.image,
+    limits: {
+      memory: mibToBytes(memoryMib),
+      swap: mibToBytes(swapMib),
+      disk: mibToBytes(diskMib),
+      io_weight: io,
+      cpu_millicores: cpu,
+      threads: values.threads.trim() === "" ? null : values.threads.trim(),
+      oom_disabled: values.oomDisabled,
+    },
+    crash_detection_enabled: values.crashDetectionEnabled,
+    skip_egg_scripts: values.skipEggScripts,
+  };
+  if (backupLimit !== undefined) {
+    request.backup_limit = backupLimit;
+  }
+  if (databaseLimit !== undefined) {
+    request.database_limit = databaseLimit;
+  }
+  if (allocationLimit !== undefined) {
+    request.allocation_limit = allocationLimit;
+  }
+  const externalId = values.externalId.trim();
+  if (externalId !== "") {
+    request.external_id = externalId;
+  }
+  return request;
 }

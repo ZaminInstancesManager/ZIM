@@ -47,6 +47,14 @@ export interface ApiClient {
   put(path: string, body?: unknown): Promise<any>;
   /** A JSON PATCH (asserts 2xx). */
   patch(path: string, body?: unknown): Promise<any>;
+  /** A JSON PATCH with extra headers (the §8 If-Match concurrency
+   * gate — M29's settings E2E drives the stale-ETag path through
+   * it) returning the raw status + text. */
+  patchWithHeaders(
+    path: string,
+    body: unknown,
+    headers: Record<string, string>,
+  ): Promise<{ status: number; body: string }>;
   /** A DELETE (asserts 2xx). */
   del(path: string): Promise<any>;
 }
@@ -201,6 +209,26 @@ export function makeClient(engine: EngineHandle): ApiClient {
       }
       const text = await response.text();
       return text === "" ? null : JSON.parse(text);
+    },
+
+    async patchWithHeaders(
+      path: string,
+      body: unknown,
+      headers: Record<string, string>,
+    ): Promise<{ status: number; body: string }> {
+      // The raw channel (request()) owns Cookie + Content-Type; the
+      // extra headers ride on top (If-Match carries the ETag).
+      const response = await fetch(`${engine.origin}${path}`, {
+        method: "PATCH",
+        headers: {
+          ...(cookie !== null ? { Cookie: cookie } : {}),
+          "Content-Type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(30_000),
+      });
+      return { status: response.status, body: await response.text() };
     },
 
     async del(path: string): Promise<any> {
