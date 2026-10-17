@@ -38,6 +38,11 @@ pub struct DiscoveryInfo {
     pub engine_version: String,
     /// Boot time, seconds since the Unix epoch (`started_at_unix`).
     pub started_at_unix: u64,
+    /// The SFTP listener's port (`sftp_port`), when the file
+    /// transport is up (M28; absent = disabled — readers treat a
+    /// missing optional field as "not serving").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sftp_port: Option<u16>,
 }
 
 impl DiscoveryInfo {
@@ -52,7 +57,15 @@ impl DiscoveryInfo {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
+            sftp_port: None,
         }
+    }
+
+    /// Record the SFTP listener's port (the composition root fills
+    /// this in when the transport started).
+    pub fn with_sftp_port(mut self, port: u16) -> Self {
+        self.sftp_port = Some(port);
+        self
     }
 }
 

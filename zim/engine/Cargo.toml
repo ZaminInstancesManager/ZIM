@@ -14,6 +14,7 @@ members = [
     "crates/transfers",
     "crates/installs",
     "crates/files",
+    "crates/sftp",
     "crates/eggs",
     "crates/extensions",
     "crates/auth",
@@ -67,6 +68,7 @@ zim_engine_backups = { path = "crates/backups" }
 zim_engine_transfers = { path = "crates/transfers" }
 zim_engine_installs = { path = "crates/installs" }
 zim_engine_files = { path = "crates/files" }
+zim_engine_sftp = { path = "crates/sftp" }
 zim_engine_eggs = { path = "crates/eggs" }
 zim_engine_extensions = { path = "crates/extensions" }
 zim_engine_auth = { path = "crates/auth" }

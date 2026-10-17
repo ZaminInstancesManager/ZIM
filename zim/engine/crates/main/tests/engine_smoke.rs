@@ -26,6 +26,12 @@ async fn engine_boots_bootstraps_and_serves_https() {
         port: 0,
         bootstrap_admin_email: "smoke@zim.local".to_owned(),
         bootstrap_admin_password: Some("smoke test password".to_owned()),
+        // M28: the SFTP transport rides along (ephemeral port too).
+        sftp: zim_engine_sftp::SftpOptions {
+            enabled: true,
+            bind: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            port: 0,
+        },
     };
 
     let engine = tokio::time::timeout(Duration::from_secs(20), zim_engine_main::startup(options))
@@ -113,6 +119,14 @@ async fn engine_boots_bootstraps_and_serves_https() {
         .join("loopback-key.pem")
         .exists());
 
+    // M28: the SFTP listener answers with the SSH identification
+    // banner on its own port (the full protocol round-trip lives in
+    // the sftp crate's own suite; this is the composition proof).
+    let sftp_port = discovery_placeholder::sftp_port_of(&engine, &data_dir);
+    let banner = ssh_banner(sftp_port).await;
+    assert!(banner.starts_with("SSH-2.0-"), "the banner was {banner:?}");
+    assert!(banner.contains("ZaminZIM"));
+
     // M21: the shell-discovery file records the bound port, PID,
     // and version while the engine runs.
     let discovery = zim_engine_main::discovery::read(std::path::Path::new(&data_dir))
@@ -122,6 +136,7 @@ async fn engine_boots_bootstraps_and_serves_https() {
     assert!(discovery.pid != 0);
     assert_eq!(discovery.engine_version, env!("CARGO_PKG_VERSION"));
     assert!(discovery.started_at_unix > 0);
+    assert_eq!(discovery.sftp_port, Some(sftp_port));
     // The frontend state (the active.json record) lives under
     // the loader's data subdir.
     assert!(std::path::Path::new(&data_dir)
@@ -137,4 +152,44 @@ async fn engine_boots_bootstraps_and_serves_https() {
         "discovery file removed on graceful shutdown"
     );
     let _ = std::fs::remove_dir_all(&data_dir);
+}
+
+/// Read the discovery file's SFTP port while the engine runs (the
+/// RunningEngine does not expose the SFTP listener's address — the
+/// discovery file is its public carrier).
+mod discovery_placeholder {
+    use std::path::Path;
+
+    pub fn sftp_port_of(_engine: &zim_engine_main::RunningEngine, data_dir: &str) -> u16 {
+        zim_engine_main::discovery::read(Path::new(data_dir))
+            .and_then(|d| d.sftp_port)
+            .expect("the discovery file carries the sftp port")
+    }
+}
+
+/// Read the SSH identification banner one TCP connection receives.
+async fn ssh_banner(port: u16) -> String {
+    use tokio::io::AsyncReadExt;
+    let mut stream = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::net::TcpStream::connect(("127.0.0.1", port)),
+    )
+    .await
+    .expect("the sftp connect resolves")
+    .expect("the sftp listener accepts");
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 256];
+    loop {
+        let n = tokio::time::timeout(std::time::Duration::from_secs(10), stream.read(&mut chunk))
+            .await
+            .expect("the banner read resolves")
+            .expect("the banner read succeeds");
+        buffer.extend_from_slice(&chunk[..n]);
+        if buffer.contains(&b'\n') || n == 0 {
+            break;
+        }
+    }
+    String::from_utf8_lossy(&buffer)
+        .trim_end_matches(['\r', '\n'])
+        .to_owned()
 }

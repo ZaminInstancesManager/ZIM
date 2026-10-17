@@ -57,6 +57,9 @@ pub struct EngineOptions {
     /// `ZIM_BOOTSTRAP_ADMIN_PASSWORD`; generated and printed once
     /// when unset).
     pub bootstrap_admin_password: Option<String>,
+    /// The SFTP transport's listener options (M28; env
+    /// `ZIM_SFTP_ENABLED` / `ZIM_SFTP_PORT`).
+    pub sftp: zim_engine_sftp::SftpOptions,
 }
 
 impl Default for EngineOptions {
@@ -66,6 +69,7 @@ impl Default for EngineOptions {
             port: 8443,
             bootstrap_admin_email: "admin@zim.local".to_owned(),
             bootstrap_admin_password: None,
+            sftp: zim_engine_sftp::SftpOptions::default(),
         }
     }
 }
@@ -96,6 +100,7 @@ impl EngineOptions {
                 opts.bootstrap_admin_password = Some(password);
             }
         }
+        opts.sftp = zim_engine_sftp::SftpOptions::from_env(opts.sftp);
         opts
     }
 }
@@ -169,6 +174,8 @@ pub struct RunningEngine {
     server: zim_engine_api::tls::RunningServer,
     supervisor: Arc<Supervisor>,
     jobs: Arc<JobSystem>,
+    /// The SFTP transport (M28), when enabled at boot.
+    sftp: Option<zim_engine_sftp::RunningSftp>,
     /// The control plane's shutdown side: handed to the API state at
     /// startup; the run loop selects on it alongside the OS signals
     /// so a coordinated stop and a service stop drain identically.
@@ -182,6 +189,9 @@ impl RunningEngine {
     /// by design — the next boot's reconciliation re-adopts them),
     /// and remove the shell-discovery file.
     pub async fn shutdown(self) {
+        if let Some(sftp) = self.sftp {
+            sftp.shutdown().await;
+        }
         self.jobs.shutdown().await;
         self.supervisor.shutdown().await;
         self.server.shutdown().await;
@@ -445,14 +455,44 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         options.data_dir.display()
     );
 
+    // ── The SFTP transport (M28) ───────────────────────────
+    // The file surface's second doorway: the same chrooted tree,
+    // the same grant table, served over SSH for the
+    // FileZilla-shaped world. Loopback + password-gated by
+    // default; a bind failure is a boot failure (the operator
+    // asked for the surface — ZIM_SFTP_ENABLED=0 opts out).
+    let sftp = if options.sftp.enabled {
+        match zim_engine_sftp::start(
+            Arc::clone(&persistence),
+            options.data_dir.clone(),
+            &options.sftp,
+        )
+        .await
+        {
+            Ok(running) => {
+                eprintln!(
+                    "zim_engine: SFTP serving on {} (host key sftp_host_ed25519 in the data dir)",
+                    running.local_addr
+                );
+                Some(running)
+            }
+            Err(e) => return Err(format!("cannot start the SFTP transport: {e}")),
+        }
+    } else {
+        eprintln!("zim_engine: SFTP transport disabled (ZIM_SFTP_ENABLED=0)");
+        None
+    };
+
     // ── Shell discovery (M21) ────────────────────────────────────
     // The desktop shell reads this to find the engine's port and
     // PID without guessing. A write failure degrades (the shell
     // falls back to probing the default port), never blocks boot.
-    if let Err(e) = discovery::write(
-        &options.data_dir,
-        &discovery::DiscoveryInfo::current(server.local_addr.port()),
-    ) {
+    // M28: the SFTP port rides along when the transport is up.
+    let mut discovery_info = discovery::DiscoveryInfo::current(server.local_addr.port());
+    if let Some(sftp) = &sftp {
+        discovery_info = discovery_info.with_sftp_port(sftp.local_addr.port());
+    }
+    if let Err(e) = discovery::write(&options.data_dir, &discovery_info) {
         eprintln!("zim_engine: cannot write the discovery file: {e}");
     }
 
@@ -463,6 +503,7 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         server,
         supervisor,
         jobs,
+        sftp,
         control,
     })
 }
