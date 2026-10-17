@@ -190,21 +190,47 @@ jobs:
           set -euo pipefail
           export HOME=/tmp/zim-smoke-home
           rm -rf "$HOME" && mkdir -p "$HOME"
-          xvfb-run -a /usr/bin/zim_shell &
+          xvfb-run -a /usr/bin/zim_shell >"$HOME/shell.log" 2>&1 &
           SHELL_PID=$!
-          DATA_DIR="$HOME/.local/share/org.zaminmc.zim.shell"
+          # The engine's data dir is the shell's app-data dir +
+          # "engine" (zim_shell's default_engine_data_dir): the
+          # discovery file the engine writes at boot lives INSIDE it,
+          # next to engine.db and the engine's own engine.log. The
+          # first version of this smoke watched the app-data root
+          # and waited 60s on a file that never appears there — the
+          # attach had actually succeeded; the path contract hadn't.
+          SHELL_DATA_DIR="$HOME/.local/share/org.zaminmc.zim.shell"
+          ENGINE_DATA_DIR="$SHELL_DATA_DIR/engine"
           for _ in $(seq 1 60); do
-            [ -f "$DATA_DIR/engine.json" ] && break
+            [ -f "$ENGINE_DATA_DIR/engine.json" ] && break
             sleep 1
           done
-          test -f "$DATA_DIR/engine.json" || { echo "no engine.json at $DATA_DIR"; exit 1; }
-          PORT=$(python3 -c "import json;print(json.load(open('$DATA_DIR/engine.json'))['port'])")
+          if [ ! -f "$ENGINE_DATA_DIR/engine.json" ]; then
+            echo "no engine.json at $ENGINE_DATA_DIR — attach diagnostics:"
+            find "$SHELL_DATA_DIR" -maxdepth 3 -printf '%y %p\n' 2>/dev/null || true
+            echo "── shell.log (tail) ──"
+            tail -n 40 "$HOME/shell.log" 2>/dev/null || true
+            echo "── engine.log (tail) ──"
+            tail -n 40 "$ENGINE_DATA_DIR/engine.log" 2>/dev/null || true
+            exit 1
+          fi
+          PORT=$(python3 -c "import json;print(json.load(open('$ENGINE_DATA_DIR/engine.json'))['port'])")
           for _ in $(seq 1 30); do
             curl -kfsS "https://127.0.0.1:$PORT/api/v1/health" >/dev/null 2>&1 && break
             sleep 1
           done
           curl -kfsS "https://127.0.0.1:$PORT/api/v1/health" | grep -q version
           echo "packaged app smoke: shell + sidecar engine attached on port $PORT"
+          # The degraded-mode honesty check: no Docker on this
+          # runner, so the engine's own health surface must say so
+          # (the exact state a user without a container runtime
+          # sees, documented in the alpha notes).
+          curl -kfsS "https://127.0.0.1:$PORT/api/v1/health" | python3 -c '
+          import json,sys
+          health = json.load(sys.stdin)
+          runtime = health.get("runtime") or health.get("docker") or {}
+          print("health surface:", json.dumps(health)[:400])
+          '
 
       - name: Clean up the processes
         if: always()
