@@ -96,71 +96,99 @@ test("disk full: the backup fails honestly with the OS error, the engine stays a
       //
       // The HONEST contract here is subtler than "the job fails":
       // the engine's OWN database lives on the full filesystem, so
-      // the terminal Failed row itself may be unwritable (the
-      // claim/terminal writes error into the engine log while the
-      // row stays Pending). What the scenario actually promises —
-      // and what this test asserts — is the negative space: the
-      // engine never hangs, the API keeps answering THROUGH the
-      // full disk, and no fake sealed row ever appears. A structured
-      // failed state is the bonus path when the write margin
-      // allowed it, recorded here either way.
-      const created = await client.post(`/api/v1/instances/${instance.id}/backups`);
-      const jobId = String(created.job_id);
-      let failed = false;
-      let engineStayedHealthy = true;
-      let sealed = false;
-      const deadline = Date.now() + 90_000;
-      while (Date.now() < deadline) {
-        const job = await client.get(`/api/v1/jobs/${jobId}`);
-        const state = String(job.state ?? job.status ?? "").toLowerCase();
-        if (state === "failed" || state === "cancelled") {
-          failed = true;
-          break;
-        }
-        // The engine answers health THROUGH the full disk — the
-        // operator's window into the failure must stay open.
-        const health = await client.get("/api/v1/health");
-        if (health.status !== "ok") {
-          engineStayedHealthy = false;
-          break;
-        }
-        const list = await client.get(`/api/v1/instances/${instance.id}/backups`);
-        const row = (list.data as Array<Record<string, unknown>>).find(
-          (entry) => String(entry.id) === String(created.backup_id),
-        );
-        if (row !== undefined && typeof row.sha256_hash === "string") {
-          sealed = true; // never allowed — a sealed row without room for the archive is a lie
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 1_000));
+      // the POST itself may be refused with a structured 500 (the
+      // enqueue write fails — SQLite's "database or disk is full"
+      // surfacing as the API's structured internal_error, which is
+      // the IDEAL refusal), and when the enqueue DOES land, the
+      // terminal Failed row may itself be unwritable. What the
+      // scenario promises — and what this test asserts — is the
+      // negative space: the engine never hangs, the API keeps
+      // answering THROUGH the full disk (the structured refusal IS
+      // an answer), and no fake sealed row ever appears.
+      let created: { backup_id: string; job_id: string } | null = null;
+      let refusal: string | null = null;
+      try {
+        created = await client.post(`/api/v1/instances/${instance.id}/backups`);
+      } catch (error) {
+        // The structured refusal is a legitimate outcome — capture
+        // it and assert its honesty below.
+        refusal = String((error as { message?: string }).message ?? error);
       }
 
-      assert.equal(sealed, false, "no sha256 may appear without room for a real archive");
-      assert.equal(
-        engineStayedHealthy,
-        true,
-        "the engine must keep answering health through the full disk",
-      );
+      if (created !== null) {
+        const jobId = String(created.job_id);
+        const backupId = String(created.backup_id);
+        let failed = false;
+        let engineStayedHealthy = true;
+        let sealed = false;
+        const deadline = Date.now() + 90_000;
+        while (Date.now() < deadline) {
+          const job = await client.get(`/api/v1/jobs/${jobId}`);
+          const state = String(job.state ?? job.status ?? "").toLowerCase();
+          if (state === "failed" || state === "cancelled") {
+            failed = true;
+            break;
+          }
+          // The engine answers health THROUGH the full disk — the
+          // operator's window into the failure must stay open.
+          const health = await client.get("/api/v1/health");
+          if (health.status !== "ok") {
+            engineStayedHealthy = false;
+            break;
+          }
+          const list = await client.get(`/api/v1/instances/${instance.id}/backups`);
+          const row = (list.data as Array<Record<string, unknown>>).find(
+            (entry) => String(entry.id) === backupId,
+          );
+          if (row !== undefined && typeof row.sha256_hash === "string") {
+            sealed = true; // never allowed — a sealed row without room for the archive is a lie
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+        }
 
-      // The row itself: present, never sealed. Its state is either
-      // the structured failure (when the write margin allowed the
-      // terminal row) or the honestly-stuck non-terminal row (the
-      // engine's log carries the write errors; the API never lies).
-      const finalList = await client.get(`/api/v1/instances/${instance.id}/backups`);
-      const finalRow = (finalList.data as Array<Record<string, unknown>>).find(
-        (entry) => String(entry.id) === String(created.backup_id),
-      );
-      assert.ok(finalRow !== undefined, "the backup's row exists");
-      assert.equal(finalRow?.sha256_hash ?? null, null, "no sha256 without a real archive");
-      const finalJob = await client.get(`/api/v1/jobs/${jobId}`);
-      const finalState = String(finalJob.state ?? finalJob.status ?? "").toLowerCase();
-      if (failed) {
-        assert.equal(finalState, "failed", "the structured failure stayed terminal");
+        assert.equal(sealed, false, "no sha256 may appear without room for a real archive");
+        assert.equal(
+          engineStayedHealthy,
+          true,
+          "the engine must keep answering health through the full disk",
+        );
+
+        // The row itself: present, never sealed. Its state is either
+        // the structured failure (when the write margin allowed the
+        // terminal row) or the honestly-stuck non-terminal row (the
+        // engine's log carries the write errors; the API never lies).
+        const finalList = await client.get(`/api/v1/instances/${instance.id}/backups`);
+        const finalRow = (finalList.data as Array<Record<string, unknown>>).find(
+          (entry) => String(entry.id) === backupId,
+        );
+        assert.ok(finalRow !== undefined, "the backup's row exists");
+        assert.equal(finalRow?.sha256_hash ?? null, null, "no sha256 without a real archive");
+        const finalJob = await client.get(`/api/v1/jobs/${jobId}`);
+        const finalState = String(finalJob.state ?? finalJob.status ?? "").toLowerCase();
+        if (failed) {
+          assert.equal(finalState, "failed", "the structured failure stayed terminal");
+        } else {
+          assert.notEqual(
+            finalState,
+            "succeeded",
+            `the job may be honestly stuck (${finalState}) on a full disk, never fake-succeeded`,
+          );
+        }
       } else {
-        assert.notEqual(
-          finalState,
-          "succeeded",
-          `the job may be honestly stuck (${finalState}) on a full disk, never fake-succeeded`,
+        // The refusal path: a STRUCTURED internal_error naming the
+        // disk — never a hang, never an opaque drop.
+        assert.match(
+          refusal ?? "",
+          /full|space|io/i,
+          `the refusal must name the disk condition, got: ${(refusal ?? "").slice(0, 200)}`,
+        );
+        // And the row was never created — nothing to seal.
+        const list = await client.get(`/api/v1/instances/${instance.id}/backups`);
+        assert.equal(
+          (list.data as unknown[]).length,
+          0,
+          "no backup row may exist when the enqueue itself was refused",
         );
       }
 

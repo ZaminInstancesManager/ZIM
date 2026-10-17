@@ -73,8 +73,15 @@ const TABLES: Array<{ table: string; columns: Column[] }> = [
     ],
   },
   {
+    // The importer SELECTs `name ... ORDER BY id` — the panel's
+    // nests table carries the id even though the fixture's rows
+    // only name the nest (the first CI seed taught this one too:
+    // MySQL refuses to order by a column the DDL never declared).
     table: "nests",
-    columns: [{ name: "name", kind: "text" }],
+    columns: [
+      { name: "id", kind: "int" },
+      { name: "name", kind: "text" },
+    ],
   },
   {
     table: "eggs",

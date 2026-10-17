@@ -157,7 +157,8 @@ test("interrupted backup: SIGKILL mid-archive → boot reconciliation fails the 
       );
       const job = await client.get(`/api/v1/jobs/${jobId}`);
       const detail = String(
-        (job.error as Record<string, unknown> | undefined)?.detail ??
+        job.last_error ??
+          (job.error as Record<string, unknown> | undefined)?.detail ??
           job.error ??
           job.message ??
           "",
