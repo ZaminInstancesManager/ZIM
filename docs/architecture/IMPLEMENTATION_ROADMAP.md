@@ -1126,29 +1126,127 @@ contributions; AD-29).
 
 **Estimated effort:** 2-3 weeks.
 
-### M25: E2E suite + cross-platform packaging
+### M25: E2E suite + cross-platform packaging — COMPLETE (2026-10-16)
 
-**Deliverables:**
-- E2E suite covering the TEST_STRATEGY scenarios: install ZIM,
-  create an instance, start it, view its console, stop it — on
-  Windows, Linux, macOS.
-- Installers per platform + auto-update channel mechanics.
-- Cross-platform CI matrix for the packaged app.
+**Status: COMPLETE** (the E2E suite `zim/e2e/` — 13 scenario files
+over the real engine binary + Playwright Chromium, AD-30's
+two-tier runtime model; the update channel — `zim/shell/src/
+updater.rs` + `tauri.conf.json` plugins + `TAURI_SIGNING_*`
+Actions secrets + `docs/architecture/UPDATES.md`, AD-31; the
+release pipeline `app-release.yml` — 3-platform bundles with the
+engine as `externalBin` sidecar, minisign updater artifacts,
+`latest.json` assembly, and the Linux packaged-app deb smoke;
+`e2e-ci.yml` — the 3-OS E2E matrix).
 
-**Estimated effort:** 3-4 weeks.
+**What shipped:**
+
+- **The E2E runner** (`zim/e2e/`, vanilla TS + node:test, its only
+  third-party dependency Playwright): spawns the real `zim_engine`
+  binary with a throwaway data dir, learns the port from the
+  `engine.json` discovery contract, logs in through the real
+  new-tab login card, and drives the product UI (tab strip,
+  console view, extensions page) in a real browser. The harness
+  owns the fault shapes (SIGKILL, `chrome://crash`), the dev-key
+  manifest signing in Node (bit-compatible with the engine's
+  `dev_sign`), and an in-memory ZIP writer for test packages.
+- **13 scenario files**: install/boot/login (+ the wrong-password
+  path and the discovery-file contract); instance lifecycle
+  (create → start → console ticks → stop → restart, docker tier;
+  the honest 503 `runtime_unavailable` refusal in degraded mode);
+  the console page's buffer replay + live stream growth; the tab
+  invariants I3/I4/I6 (+ E13) through the real tab strip with the
+  audit log as arbiter; session restore across a real browser
+  relaunch (I5); the extensions lifecycle over the repo's own
+  packaged `hello-zim`; the files API's current 501 contract
+  (pinned so the day it turns real the suite fails loudly);
+  backups (seal → lock → delete + the failed-job shape); schedules
+  (create/validate/update/run/delete); themes (upload/list/
+  closed-vocabulary/delete); custom frontend packages (signed
+  upload → activate → serve, broken refusals, reset — I16's
+  user-visible halves); fault injection (engine SIGKILL →
+  re-adoption; renderer crash → engine unaffected); and migration
+  (dry-run → import → boot on the migrated DB → honest 401s for
+  imported bcrypt hashes).
+- **The update channel** (AD-31, contract in UPDATES.md): GitHub
+  Releases as the one channel; minisign signatures (public key
+  baked into the shell, private key in Actions secrets — set, not
+  committed); consent-shaped manual "Check for updates…" tray
+  action with progress on the item's own label; bundle-granular
+  payloads (shell + engine sidecar together, running engine never
+  killed); installer-based rollback; the Windows file-lock
+  limitation documented with the M26 fix owned.
+- **The release pipeline** (`app-release.yml`): per-platform
+  engine release builds staged as the `zim_engine-<triple>`
+  sidecar (`tauri.sidecar.conf.json` overlay — plain shell builds
+  never need a staged engine), `tauri build` producing NSIS/MSI/
+  deb/rpm/AppImage/dmg + `.sig` updater artifacts, `latest.json`
+  assembled from the signatures (`zim/shell/scripts/
+  make_latest_json.py`), and the **packaged-app smoke**: install
+  the real deb, launch the real WebKitGTK shell under Xvfb, assert
+  the sidecar engine's `engine.json` + health probe.
+- **The E2E CI matrix** (`e2e-ci.yml`): ubuntu (docker tier, full
+  lifecycle) + windows + macos (degraded tier, tier-dependent
+  tests skip with reasons printed) on every push; the SDK +
+  sample-addon packaging pre-step; Playwright Chromium per OS.
+- **Portability fix**: `package-addon.mjs` now falls back to a
+  pure-Node STORED-ZIP writer when `zip` is absent (Windows
+  runners), and its SDK path resolution is Windows-honest
+  (`fileURLToPath`).
+
+**Acceptance status (honest):**
+
+- All 13 scenario files type-check and build locally; the docker
+  tier runs them for real on GitHub's Linux runners, the degraded
+  tier on Windows/macOS (CI is the arbiter — no local Rust
+  toolchain, per the established iterate-on-CI flow).
+- The webview matrix is covered in layers (3-OS shell compile
+  matrix, Linux packaged-app smoke under Xvfb, browser-tier E2E on
+  all three platforms); **live-driving WebView2/WKWebView is M26
+  release validation**, recorded rather than claimed.
+- Invariants 3-6, 16 and E4-E6, E13 are Delivered (M25) in
+  TEST_STRATEGY §2 (for the game_server kind — the only modeled
+  kind; other kinds are 501 at the API); E7-E9 (visual state
+  mappings) and E14 remain Planned (they need crash-loop /
+  recovering / remote-node states driven from the UI, which rides
+  the M26 failure-scenario sweep).
+- AD-29's "per-addon attribution on the shared loopback origin"
+  hardening item remains open — it is an engine hardening line,
+  not an E2E line, and stays on the honest-boundaries list (now
+  M26 scope).
+- The migration E2E covers the fixture path (importer CLI + boot
+  on the migrated DB); the live MySQL panel and Compose-deployment
+  variants remain M26.
+- A real `latest.json` exists only after the first tag is pushed —
+  the channel mechanics are shipped and secret-backed, but the
+  first end-to-end channel exercise happens with M26's v0.1.0 tag
+  (engine-release.yml already provides the engine-only binaries;
+  app-release.yml supersedes it for full-product releases).
+
+**Estimated effort:** 3-4 weeks (delivered as one large batch +
+CI iteration).
 
 ### M26: First usable ZIM release (alpha)
 
 **Deliverables:**
-- Release binaries for Windows x64, Linux x64, macOS arm64.
+- Release binaries for Windows x64, Linux x64, macOS arm64 (the
+  `v0.1.0` tag drives `app-release.yml`: installers + updater
+  payloads + `latest.json` — the channel's first end-to-end
+  exercise).
 - Release notes (what works / what doesn't) and the Pterodactyl
   migration guide.
 - Alpha labeling: not production-ready.
+- The M25 follow-ups, absorbed here from the honest-boundaries
+  notes: live-driving WebView2/WKWebView for release validation;
+  the coordinated engine shutdown that un-blocks Windows updates
+  while the sidecar engine runs (UPDATES.md §3); a nightly
+  failure-scenario sweep (E7-E9 visual mappings, interrupted
+  backups, disk-full); the live MySQL panel migration E2E; and
+  AD-29's per-addon attribution hardening.
 
 **Acceptance criteria:** M1-M11, M16-M25 complete; the
 architectural-invariant and failure-scenario suites pass.
 
-**Estimated effort:** 1 week (after M25).
+**Estimated effort:** 1-2 weeks (after M25).
 
 
 ## 4. Out-of-scope for the first release

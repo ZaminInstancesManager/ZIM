@@ -1,0 +1,249 @@
+name: App Release
+
+# M25: the packaged app — the Tauri shell with the engine as its
+# sidecar (`zim/shell/binaries/zim_engine-<triple>`), bundled into
+# per-platform installers, signed for the update channel, and
+# published with the channel's `latest.json` manifest. The Linux
+# leg also smoke-tests the actual .deb: install it, launch the real
+# shell under Xvfb, and watch the sidecar engine attach — the
+# packaged-app E2E the roadmap's M25 asks for on the runner we can
+# actually drive (WebKitGTK, the Linux leg of the webview matrix).
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (without leading v)'
+        required: true
+        type: string
+
+# One release build at a time per tag.
+concurrency:
+  group: app-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build-app:
+    name: Bundle (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The §1 first-class desktop targets: Linux x64, Windows x64,
+        # macOS arm64. Linux arm64 + macOS x64 follow in M26 per
+        # PLATFORM_SUPPORT.md's one-milestone deferral.
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            platform: linux-x86_64
+            engine_ext: ''
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            platform: windows-x86_64
+            engine_ext: '.exe'
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            platform: darwin-aarch64
+            engine_ext: ''
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable with target
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo (engine)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: zim/engine
+          prefix-key: app-release-engine-${{ matrix.target }}
+          key: ${{ matrix.target }}
+
+      - name: Cache Cargo (shell)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: zim/shell
+          prefix-key: app-release-shell-${{ matrix.target }}
+          key: ${{ matrix.target }}
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install Tauri 2 system prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            xvfb
+
+      # ── The engine sidecar: a release build staged under the
+      #    triple-suffixed name Tauri's externalBin expects. The
+      #    bundler installs it next to the shell executable — exactly
+      #    where resolve_engine_path()'s sibling probe looks.
+      - name: Build the engine (release, ${{ matrix.target }})
+        working-directory: zim/engine
+        run: cargo build --release --target ${{ matrix.target }} -p zim_engine_main
+
+      - name: Stage the engine sidecar
+        shell: bash
+        run: |
+          mkdir -p zim/shell/binaries
+          cp "zim/engine/target/${{ matrix.target }}/release/zim_engine${{ matrix.engine_ext }}" \
+             "zim/shell/binaries/zim_engine-${{ matrix.target }}${{ matrix.engine_ext }}"
+
+      # ── The bundle: installers + updater artifacts (`.sig` files,
+      #    minisign-signed with the channel key; the public half is
+      #    baked into tauri.conf.json, the private half lives in the
+      #    TAURI_SIGNING_PRIVATE_KEY secret).
+      - name: Bundle the app (tauri build)
+        working-directory: zim/shell
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx --yes @tauri-apps/cli@2 build --target ${{ matrix.target }} --config tauri.sidecar.conf.json
+
+      - name: Collect the bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p staging
+          find "zim/shell/target/${{ matrix.target }}/release/bundle" -type f \
+            \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \
+               -o -name '*.exe' -o -name '*.msi' -o -name '*.msi.zip' \
+               -o -name '*.dmg' -o -name '*.app.tar.gz' \
+               -o -name '*.sig' \) -exec cp {} staging/ \;
+          ls -la staging/
+          test "$(ls staging | wc -l)" -gt 0
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zim-app-${{ matrix.platform }}
+          path: staging/*
+          if-no-files-found: error
+          retention-days: 90
+
+  # ── The packaged-app smoke: a real WebKitGTK shell launching the
+  #    real bundled sidecar engine, asserting the discovery file and
+  #    the health probe — the attach contract on real install bytes.
+  #    (No Docker on the runner: the engine boots in its documented
+  #    degraded API-only mode, which is exactly what users without
+  #    a container runtime see.)
+  deb-smoke:
+    name: Packaged-app smoke (deb)
+    needs: build-app
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb curl
+
+      - name: Download the Linux bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: zim-app-linux-x86_64
+          path: bundles
+
+      - name: Install the deb
+        run: |
+          set -euo pipefail
+          ls -la bundles/
+          sudo dpkg -i bundles/*.deb || sudo apt-get install -f -y
+          ls -la /usr/bin/zim_shell /usr/bin/zim_engine
+
+      - name: Launch under Xvfb and assert the engine attach
+        run: |
+          set -euo pipefail
+          export HOME=/tmp/zim-smoke-home
+          rm -rf "$HOME" && mkdir -p "$HOME"
+          xvfb-run -a /usr/bin/zim_shell &
+          SHELL_PID=$!
+          DATA_DIR="$HOME/.local/share/org.zaminmc.zim.shell"
+          for _ in $(seq 1 60); do
+            [ -f "$DATA_DIR/engine.json" ] && break
+            sleep 1
+          done
+          test -f "$DATA_DIR/engine.json" || { echo "no engine.json at $DATA_DIR"; exit 1; }
+          PORT=$(python3 -c "import json;print(json.load(open('$DATA_DIR/engine.json'))['port'])")
+          for _ in $(seq 1 30); do
+            curl -kfsS "https://127.0.0.1:$PORT/api/v1/health" >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -kfsS "https://127.0.0.1:$PORT/api/v1/health" | grep -q version
+          echo "packaged app smoke: shell + sidecar engine attached on port $PORT"
+
+      - name: Clean up the processes
+        if: always()
+        run: |
+          sudo pkill -f zim_shell || true
+          sleep 2
+          sudo pkill -f zim_engine || true
+
+  release:
+    name: Assemble latest.json + publish the release
+    needs: build-app
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all bundle artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: zim-app-*
+          merge-multiple: false
+          path: artifacts
+
+      - name: Resolve the version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: List artifacts
+        run: find artifacts -type f | sort
+
+      # ── The update-channel manifest: every platform's updater
+      #    payload + its minisign signature, at the stable URL the
+      #    shell's endpoint config points at
+      #    (releases/latest/download/latest.json).
+      - name: Assemble latest.json
+        run: |
+          set -euo pipefail
+          python3 zim/shell/scripts/make_latest_json.py \
+            "${{ steps.version.outputs.version }}" artifacts latest.json
+
+      - name: Create the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ZIM Alpha v${{ steps.version.outputs.version }}
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            artifacts/zim-app-windows-x86_64/*
+            artifacts/zim-app-linux-x86_64/*
+            artifacts/zim-app-darwin-aarch64/*
+            latest.json

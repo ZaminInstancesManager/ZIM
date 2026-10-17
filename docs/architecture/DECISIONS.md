@@ -879,6 +879,100 @@ theme-tokens.v1, M23's deferral) ships alongside as the same
 milestone's customization surface — upload/delete admin, list
 any-session, values-only tokens validated against the contract.
 
+### AD-30: The E2E suite drives the real engine + real browser with a two-tier runtime model. (2026-10-16)
+
+**Status:** Accepted (the M25 E2E deliverable).
+
+**Context:** TEST_STRATEGY §1.4 defined E2E as driving "the full
+ZIM product (engine + browser)" with Docker. Post-AD-20 the
+product is the Tauri shell + engine-served frontend, and the CI
+matrix reality is: Docker exists on GitHub's Linux runners only;
+the system webviews (WebKitGTK/WebView2/WKWebView) need the
+packaged app on each OS; `tauri-driver`-style webview automation
+is fragile enough to burn CI cycles without adding coverage the
+browser tier doesn't already give.
+
+**Decision:**
+- **The E2E runner is a Node package** (`zim/e2e/`, vanilla TS,
+  node:test, Playwright's Chromium — the suite's only third-party
+  dependency) that **spawns the real `zim_engine` binary** with a
+  throwaway data dir, learns its port from the same
+  `engine.json` discovery contract the shell uses, and drives the
+  engine-served frontend in a real browser (self-signed loopback
+  TLS accepted per-context). The UI being driven is the product
+  UI; the native window chrome is the shell's own tested surface
+  (`zim/shell/tests/engine_attach.rs` + the release pipeline's
+  packaged-app smoke).
+- **Two runtime tiers, honestly labeled.** Where a Docker daemon
+  answers, the lifecycle scenarios run real containers
+  (busybox ticker, real start/console/stop, crash
+  reconciliation). Where none answers (Windows/macOS runners,
+  Docker-less dev boxes), the engine boots in its designed
+  degraded API-only mode and the tier-dependent tests **skip with
+  their reason printed** — never silently green, per the §7
+  verification discipline. Everything else (install/login/UI,
+  sessions/tabs, extensions, files, backups, schedules, themes,
+  migration, fault injection) runs for real on every platform.
+- **The audit log is the arbiter for the tab invariants** (I3–I6):
+  "restoring a session issued no lifecycle command" is asserted
+  from the engine's own audit rows, not from UI cosmetics.
+- **The webview matrix is covered in layers, not faked**: the
+  3-OS compile matrix (Shell CI), the Linux packaged-app smoke
+  under Xvfb (real WebKitGTK launching the real deb, asserting
+  the sidecar engine attach), and the browser-tier E2E on all
+  three platforms. Live-driving WebView2/WKWebView remains
+  release-validation work (M26), recorded in the roadmap rather
+  than claimed here.
+
+**Consequences:** one suite runs on every push across the 3-OS
+matrix with tier-appropriate coverage; the harness owns real
+fault shapes (SIGKILL the engine, `chrome://crash` a renderer);
+skipped tests state which tier would have run them; and the
+files-API E2E pins today's honest 501 contract so the day the
+surface turns real, the suite fails loudly and is rewritten.
+
+### AD-31: The update channel is GitHub Releases, minisign-signed, consent-shaped, and bundle-granular. (2026-10-16)
+
+**Status:** Accepted (the M25 packaging deliverable;
+docs/architecture/UPDATES.md is the normative contract).
+
+**Context:** BROWSER_INTEGRATION.md deferred "shell auto-update
+channel mechanics" to M25 packaging. The decisions that shape it:
+the engine is a detached sidecar the shell must never own
+(M21/M22), ZIM's culture of explicit consent (host runtime,
+privileged eggs, admin-approval installs), and there being no
+production channel to update into yet — only alphas.
+
+**Decision:** see UPDATES.md for the full contract. In brief:
+- **One channel**: this repository's GitHub Releases; `latest.json`
+  at the stable `releases/latest/download/` URL; installers +
+  updater payloads + `.sig` files published by
+  `.github/workflows/app-release.yml`.
+- **Trust**: minisign via the Tauri bundler; the public key baked
+  into the shell (`tauri.conf.json`), the private key only in
+  Actions secrets. A release without the key cannot push code to
+  an installed shell.
+- **Consent shape**: no check-on-boot, no background download —
+  the tray's "Check for updates…" is the entire surface in the
+  alpha; its own label carries the progress. This is mechanics,
+  deliberately not UX polish.
+- **Granularity**: payloads carry shell + engine together, but an
+  update never kills the running engine — the new sidecar bytes
+  take over at the engine's next natural restart. The Windows
+  file-lock limitation (installer vs. running `zim_engine.exe`)
+  is documented, with the coordinated-shutdown fix owned by M26.
+- **Rollback**: installer-based (every release keeps its
+  installers attached); no automated downgrades in the alpha.
+
+**Consequences:** the shell stays a thin, disposable shell (the
+updater module is ~130 lines and shell-scoped); `externalBin`
+lives in a config overlay (`tauri.sidecar.conf.json`) so plain
+`cargo build` of the shell never requires a staged engine binary;
+the release pipeline doubles as the packaged-app E2E for Linux
+(the deb smoke); and the channel's limits — one key, one channel,
+no revocation — are written down where an operator will read
+them before relying on them.
+
 
 ## 2. Unresolved questions
 

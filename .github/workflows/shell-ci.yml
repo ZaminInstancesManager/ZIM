@@ -104,6 +104,83 @@ jobs:
       - name: cargo build
         run: cargo build --workspace --all-targets
 
+      # M25 diagnostic: on Windows the shell's test binary has hit
+      # STATUS_ENTRYPOINT_NOT_FOUND at load (a missing DLL export).
+      # Compile the test binary, dump its import table, and resolve
+      # EVERY (dll, symbol) pair live via LoadLibrary/GetProcAddress
+      # — the pair that fails to resolve IS the missing entry point.
+      # (Batch 10: the manifest fix means the probe should now report
+      # zero missing — comctl32's TaskDialogIndirect resolves through
+      # the v6 side-by-side assembly the manifest requests. Parsing
+      # stops at dumpbin's trailing "Summary" section — its bare word
+      # was being misread as an import symbol under the last DLL.)
+      - name: Probe the Windows test binary load
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo test --workspace --no-run 2>&1 | Tee-Object -FilePath test-build.log | Write-Host
+          $exe = Select-String -Path test-build.log -Pattern 'Executable unittests src\\lib\.rs \((.+?\.exe)\)' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value } |
+            Select-Object -Last 1
+          if (-not $exe) {
+            Write-Host 'no unittest executable found to probe'
+            exit 0
+          }
+          Write-Host "== probing $exe"
+          $output = cmd /c "`"$exe`" --list 2>&1"
+          Write-Host $output
+          $vswhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path $vswhere)) { Write-Host 'vswhere not found'; exit 0 }
+          $installPath = & $vswhere -latest -property installationPath
+          $dumpbin = Get-ChildItem "$installPath\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $dumpbin) { Write-Host 'dumpbin not found'; exit 0 }
+          Write-Host "== resolving every import of $exe"
+          $lines = & $dumpbin.FullName /imports $exe
+          Write-Host "== raw dumpbin excerpt (first 100 lines)"
+          $lines | Select-Object -First 100 | ForEach-Object { Write-Host $_ }
+          $member = '[DllImport("kernel32", SetLastError=true, CharSet=CharSet.Ansi)] public static extern IntPtr LoadLibrary(string name); [DllImport("kernel32", SetLastError=true, CharSet=CharSet.Ansi)] public static extern IntPtr GetProcAddress(IntPtr module, string name);'
+          $probe = Add-Type -MemberDefinition $member -Name NativeProbe -Namespace Zim -PassThru
+          $currentDll = $null
+          $missing = 0
+          $checked = 0
+          foreach ($line in $lines) {
+            $trimmed = $line.Trim()
+            # dumpbin's output ends with a "Summary" section header
+            # followed by section names — not imports. Stop there:
+            # the bare word "Summary" otherwise parses as a symbol
+            # under whichever DLL was seen last.
+            if ($trimmed -eq 'Summary') { break }
+            if ($trimmed -match '^(\S+\.dll)$') {
+              $currentDll = $Matches[1]
+              continue
+            }
+            # Symbol lines: bare names, or names with a leading hint
+            # ordinal ("3C ProcessProg").
+            $symbol = $null
+            if ($trimmed -match '^[A-Za-z_][A-Za-z0-9_@]*$') {
+              $symbol = $trimmed
+            } elseif ($trimmed -match '^\d+\s+([A-Za-z_][A-Za-z0-9_@]*)$') {
+              $symbol = $Matches[1]
+            }
+            if ($null -ne $currentDll -and $null -ne $symbol -and $symbol.Length -gt 2) {
+              $checked += 1
+              $module = $probe::LoadLibrary($currentDll)
+              if ($module -eq [IntPtr]::Zero) {
+                Write-Host "MISSING DLL: $currentDll (LoadLibrary failed: $([System.Runtime.InteropServices.Marshal]::GetLastWin32Error()))"
+                $missing += 1
+                continue
+              }
+              $proc = $probe::GetProcAddress($module, $symbol)
+              if ($proc -eq [IntPtr]::Zero) {
+                Write-Host "MISSING EXPORT: $currentDll ! $symbol"
+                $missing += 1
+              }
+            }
+          }
+          Write-Host "== checked $checked imports, $missing missing"
+          exit 0
+
       - name: cargo test
         # Unit tests only: the engine-attach integration test skips
         # itself without ZIM_SHELL_IT_ENGINE (the engine-integration

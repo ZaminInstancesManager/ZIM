@@ -101,6 +101,11 @@ reqwest = { version = "0.12", default-features = false, features = [
 # M7: the WebSocket client for the `/api/v1/stream` integration
 # tests (plain-HTTP upgrade against a test router; no TLS needed
 # because the handshake-level auth tests assert statuses the
-# middleware produces before the socket exists).
-tokio-tungstenite = ">=0.26, <0.28"
+# middleware produces before the socket exists). The `handshake`
+# feature unlocks the raw `client::client` handshake over an
+# already-established TLS stream — `stream_tls_ws.rs` drives the
+# production accept loop with tokio-rustls directly (no TLS feature
+# of tungstenite needed: the connection is ours before the
+# handshake is).
+tokio-tungstenite = { version = ">=0.26, <0.28", features = ["handshake"] }
 futures-util = { workspace = true }

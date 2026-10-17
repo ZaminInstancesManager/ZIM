@@ -118,9 +118,23 @@ abstraction, and the roadmap that subsequent implementation work will follow.
   vendored `zim.js` client, the bundled
   `org.zaminmc.extension.audit-log` viewer + the `hello-zim`
   sample, and the frontend's `zim://extensions` management page
-  with the chrome's §4.5-§4.7 contribution points).
-  Remaining: the release milestones (M25-M26: packaging + E2E, and
-  the first alpha release).
+  with the chrome's §4.5-§4.7 contribution points), and the E2E
+  suite + packaging milestone (M25 — `zim/e2e/`: a Node/Playwright
+  runner that spawns the real `zim_engine` binary and drives the
+  real product UI in a real browser across a 3-OS CI matrix, with
+  AD-30's two-tier runtime model (real Docker lifecycle on Linux,
+  honest degraded-mode skips elsewhere) and the audit-log-arbiter
+  tab invariants; the update channel (AD-31,
+  `docs/architecture/UPDATES.md`): GitHub Releases + minisign with
+  the key in Actions secrets, the consent-shaped tray "Check for
+  updates…" action, bundle-granular payloads; and the release
+  pipeline `app-release.yml`: 3-platform installers with the
+  engine as the `externalBin` sidecar, `.sig` updater artifacts,
+  `latest.json` assembly, and the Linux packaged-app deb smoke
+  under Xvfb).
+  Remaining: M26 — the first alpha release (tag `v0.1.0`,
+  release notes, the Pterodactyl migration guide, and the
+  honest-boundaries follow-ups).
 - A re-skinned Pterodactyl. The Panel's PHP/Laravel backend and Wings's Go
   daemon are preserved in `upstream/` as audit references and behavioral
   contracts; they are not part of ZIM's runtime architecture.

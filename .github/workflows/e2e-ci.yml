@@ -1,0 +1,144 @@
+name: E2E
+
+# M25 (AD-30): the end-to-end suite over the real engine binary +
+# the embedded frontend + a real browser. The tier model:
+# - Linux runners have Docker → the full lifecycle scenario
+#   (create → start → console → stop, tab invariants, backups,
+#   crash reconciliation) runs for real.
+# - Windows / macOS runners have no Docker → the engine boots in
+#   its degraded API-only mode and the tier-dependent tests skip
+#   with their reason printed; everything else (install/login/UI,
+#   sessions, extensions, themes, migration, fault injection) runs
+#   for real on every platform — that IS the cross-platform matrix
+#   the roadmap's M25 asks for.
+
+on:
+  push:
+    branches: [main, "m*-dev"]
+    paths:
+      - 'zim/engine/**'
+      - 'zim/frontend/**'
+      - 'zim/e2e/**'
+      - 'zim/sdk/**'
+      - 'zim/extensions/**'
+      - '.github/workflows/e2e-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'zim/engine/**'
+      - 'zim/frontend/**'
+      - 'zim/e2e/**'
+      - 'zim/sdk/**'
+      - 'zim/extensions/**'
+      - '.github/workflows/e2e-ci.yml'
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: e2e-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_TERM_COLOR: always
+
+jobs:
+  e2e:
+    name: E2E (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # The platform's own ceiling is 6h — a wedged test file once
+    # burned the whole budget silently (run 5: leaked engine pipes
+    # jammed every concurrency slot). 50 minutes is the honest
+    # ceiling for a suite whose healthy runs are ~10.
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: zim/engine
+          prefix-key: e2e-engine-${{ matrix.os }}
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            zim/e2e/package-lock.json
+            zim/sdk/addon/package-lock.json
+
+      - name: Build the engine (debug)
+        working-directory: zim/engine
+        run: cargo build -p zim_engine_main
+
+      - name: Pre-pull the E2E container image
+        if: runner.os == 'Linux'
+        run: docker pull busybox:latest
+
+      # The sample addon package the extensions scenario installs —
+      # built by the same authoring pipeline addon-ci exercises.
+      - name: Build the SDK + package the sample addon
+        shell: bash
+        run: |
+          cd zim/sdk/addon
+          npm ci --no-fund --no-audit
+          npm run build
+          cd ../../extensions
+          node scripts/package-addon.mjs build samples/hello-zim \
+            ../e2e/hello-zim.zimpkg
+
+      - name: Install the E2E suite
+        working-directory: zim/e2e
+        run: npm ci --no-fund --no-audit
+
+      - name: Install Chromium (Playwright)
+        working-directory: zim/e2e
+        shell: bash
+        run: npx playwright install chromium --with-deps
+
+      - name: Run the E2E suite
+        working-directory: zim/e2e
+        shell: bash
+        run: npm test
+        # The harness resolves the engine binary itself
+        # (`zim/engine/target/debug/zim_engine[.exe]`, platform-
+        # aware); no env plumbing needed. `--test-timeout` (in
+        # package.json) bounds every test so a wedged one FAILS with
+        # diagnostics instead of jamming the runner.
+
+      - name: Dump the Docker world (Linux diagnostics)
+        if: failure() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "== docker ps -a (ZIM-labeled) =="
+          docker ps -a --filter label=Service=ZIM || true
+          echo "== networks =="
+          docker network ls || true
+          echo "== pterodactyl0 =="
+          docker network inspect pterodactyl0 --format '{{json .IPAM}}' || true
+          for c in $(docker ps -aq --filter label=Service=ZIM | head -6); do
+            echo "== container $c =="
+            docker inspect "$c" --format '{{json .State}}' || true
+            docker logs --tail 30 "$c" 2>&1 || true
+          done
+
+      - name: Upload failure traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-traces-${{ matrix.os }}
+          path: zim/e2e/.playwright/
+          if-no-files-found: ignore
+          retention-days: 7

@@ -165,8 +165,24 @@ pub async fn serve_https(
                         // HTTP/1 (and H2 over ALPN when negotiated). The
                         // tower -> hyper service adapter carries the
                         // peer-address wrapper.
+                        //
+                        // `serve_connection_with_upgrades` — the
+                        // upgrades half is load-bearing: hyper-util's
+                        // plain `serve_connection` completes the HTTP
+                        // exchange but never hands the IO to the
+                        // `Upgrade` extension, so a 101 WebSocket
+                        // handshake succeeds and the connection is
+                        // dropped immediately after (the browser sees
+                        // 1006 and reconnect-loops forever — the live
+                        // event stream never delivered a frame over
+                        // the production TLS server until this was
+                        // switched; found by M25's E2E browser suite,
+                        // invisible to the plain-`axum::serve` API
+                        // tests which enable upgrades by default).
                         let service = TowerToHyperService::new(service);
-                        let _ = builder.serve_connection(hyper_stream, service).await;
+                        let _ = builder
+                            .serve_connection_with_upgrades(hyper_stream, service)
+                            .await;
                     });
                 }
             }

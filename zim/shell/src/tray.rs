@@ -22,6 +22,16 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
         None::<&str>,
     )?;
     let newwin = MenuItem::with_id(app, "newwin", "New window — zim://app", true, None::<&str>)?;
+    // The update channel's consent surface (AD-31): one manual
+    // check that installs what it finds — state flashes on this
+    // item's own label.
+    let check_update = MenuItem::with_id(
+        app,
+        "check-update",
+        "Check for updates…",
+        true,
+        None::<&str>,
+    )?;
     let quit = MenuItem::with_id(
         app,
         "quit",
@@ -35,6 +45,8 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
             &show,
             &newtab,
             &newwin,
+            &PredefinedMenuItem::separator(app)?,
+            &check_update,
             &PredefinedMenuItem::separator(app)?,
             &quit,
         ],
@@ -57,6 +69,7 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
                     eprintln!("zim_shell: tray new-window failed: {e}");
                 }
             }
+            "check-update" => crate::updater::check_and_apply(app.clone()),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -76,6 +89,14 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
     }
 
     builder.build(app)?;
+
+    // Hand the update-check item's handle to the shared state so
+    // the updater can retitle it as a check progresses (AD-31).
+    if let Some(shared) = app.try_state::<std::sync::Arc<crate::state::Shared>>() {
+        if let Ok(mut slot) = shared.update_menu_item.lock() {
+            *slot = Some(check_update);
+        }
+    }
 
     Ok(())
 }
