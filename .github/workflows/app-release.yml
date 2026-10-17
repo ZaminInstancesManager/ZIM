@@ -333,16 +333,22 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: ZIM Alpha v${{ steps.version.outputs.version }}
-          # The alpha labeling: this channel is explicitly
-          # not-production-ready (the notes say so in the first
-          # line), and package managers/UIs should treat it as a
-          # pre-release. The curated body is the honest what-works /
-          # what-doesn't document; the generated per-commit notes
-          # append below it. (M27: the notes file moves per release
-          # — alpha.2's carries the first-boot fix, the rename, the
-          # platform matrix, the coordinated Windows update, the
-          # About surface, and the attribution hardening.)
-          prerelease: true
+          # NOT marked prerelease, deliberately: the channel endpoint
+          # baked into every shipped shell is
+          # releases/latest/download/latest.json, and GitHub's
+          # latest pointer EXCLUDES prereleases — a prerelease-flagged
+          # alpha.2 left every shipped installer's "Check for
+          # updates…" 404-ing at the first fetch (caught on publish
+          # day). The alpha honesty lives where it cannot break the
+          # channel: the version string itself (v0.1.0-alpha.N), the
+          # curated notes' first line, and the manifest's notes field.
+          # The curated body is the honest what-works / what-doesn't
+          # document; the generated per-commit notes append below it.
+          # (M27: the notes file moves per release — alpha.2's carries
+          # the first-boot fix, the rename, the platform matrix, the
+          # coordinated Windows update, the About surface, and the
+          # attribution hardening.)
+          prerelease: false
           body_path: docs/releases/ALPHA_v0.1.0-alpha.2.md
           generate_release_notes: true
           files: |

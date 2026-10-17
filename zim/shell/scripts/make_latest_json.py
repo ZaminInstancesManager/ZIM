@@ -50,9 +50,17 @@ def main() -> int:
             ]
             signatures = [f for f in files if f.name.endswith(suffix + ".sig")]
             if payloads and signatures:
+                # GitHub's release-asset upload rewrites spaces in asset
+                # names to dots (the staged file "Zamin ZIM_x64.app.tar.gz"
+                # lands as the asset "Zamin.ZIM_x64.app.tar.gz"), and the
+                # dotted name is the ONLY URL form that serves — the raw
+                # space form fails outright and the %20 form 404s (alpha.2's
+                # first manifest carried the spaced form and every URL in
+                # it was dead on arrival). The URL speaks the asset's name.
+                asset_name = payloads[0].name.replace(" ", ".")
                 platforms[platform] = {
                     "signature": signatures[0].read_text().strip(),
-                    "url": f"https://github.com/{REPO}/releases/download/v{version}/{payloads[0].name}",
+                    "url": f"https://github.com/{REPO}/releases/download/v{version}/{asset_name}",
                 }
 
     if not platforms:
