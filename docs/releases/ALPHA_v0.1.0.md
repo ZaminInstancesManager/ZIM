@@ -89,6 +89,14 @@ Linux leg of the matrix.
 
 ## Known rough edges
 
+- **The Linux .deb's package name is `zim`** — the same name as
+  Ubuntu's (and Fedora's) unrelated `zim` desktop-wiki package.
+  Installing the .deb directly (`sudo apt install ./ZIM_…deb`) is
+  fine, but a later plain `apt upgrade` would replace ZIM with the
+  wiki app (the archive's version compares higher than 0.1.0).
+  **Prefer the AppImage on Debian-family systems** — it is also
+  the auto-update payload. The package rename is tracked as the
+  release follow-up.
 - A stopped instance reports `offline` in the API and UI — there
   is deliberately no separate "stopped" status (the four-state
   Wings vocabulary); a stopped *desired* state is visible per
