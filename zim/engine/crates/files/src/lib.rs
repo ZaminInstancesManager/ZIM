@@ -14,6 +14,9 @@
 //!   `Filesystem` surface; `write_file` is atomic
 //!   (write-to-temp-then-rename) so a crashed writer never leaves
 //!   a torn file where Wings could.
+//! - `rename` mirrors Wings's `Rename` (M28): one §2.6 validation
+//!   on each end, root containment for the move as a whole, and a
+//!   pre-syscall refusal for directory-into-itself moves.
 //! - `archive` is Wings's `CompressFiles`: an allow-list of paths
 //!   inside the root compressed into one archive (tar/tar.gz/zip);
 //!   `.tar.gz` is the format Wings's own compressor emits.
@@ -298,6 +301,57 @@ impl Filesystem {
         }
     }
 
+    /// Rename or move one path inside the root (Wings's `Rename`):
+    /// both ends are §2.6-validated first, and the rename refuses to
+    /// cross out of the root even when both ends individually resolve
+    /// inside it (a move is one operation, not two).
+    ///
+    /// Renaming onto an existing path follows `std::fs::rename`
+    /// semantics (POSIX replaces files atomically; on Windows an
+    /// existing destination file is replaced after a best-effort
+    /// remove, directories are never replaced).
+    pub fn rename(&self, old_path: &str, new_path: &str) -> Result<(), FileError> {
+        let from = self.resolve(old_path)?;
+        let to = self.resolve(new_path)?;
+        // symlink_metadata (not metadata) so a broken symlink at the
+        // source is still a renameable object, not a phantom.
+        if std::fs::symlink_metadata(from.canonical()).is_err() {
+            return Err(FileError::NotFound(old_path.to_owned()));
+        }
+        // Destination parents appear as needed — the same semantics
+        // write_file gives nested paths (a move is a write).
+        if let Some(parent) = to.canonical().parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| FileError::io("cannot create destination parent", e))?;
+        }
+        // A directory renamed into its own subtree would detach it
+        // from the root's tree (POSIX: EINVAL). Guard it before the
+        // syscall so the error is a validation, not an IO accident.
+        if std::fs::metadata(from.canonical())
+            .map(|m| m.is_dir())
+            .unwrap_or(false)
+            && to.canonical().starts_with(from.canonical())
+        {
+            return Err(FileError::Limit(format!(
+                "cannot move a directory inside itself: {old_path:?} -> {new_path:?}"
+            )));
+        }
+        // Windows cannot atomically replace an existing destination
+        // file through std::fs::rename; remove it first (the source
+        // resolve above already proved the operation stays inside the
+        // root). Directories are left to the syscall so a non-empty
+        // destination fails honestly.
+        #[cfg(windows)]
+        if let Ok(meta) = std::fs::symlink_metadata(to.canonical()) {
+            if meta.is_file() {
+                std::fs::remove_file(to.canonical())
+                    .map_err(|e| FileError::io("cannot replace destination", e))?;
+            }
+        }
+        std::fs::rename(from.canonical(), to.canonical())
+            .map_err(|e| FileError::io("cannot rename", e))
+    }
+
     /// Create one directory (with parents), §2.6-validated.
     pub fn mkdir(&self, path: &str) -> Result<(), FileError> {
         let safe = self.resolve(path)?;
@@ -536,5 +590,62 @@ mod tests {
         let other = fs_api.clone();
         let fs_api = other.with_limits(ExtractLimits::default());
         assert_eq!(fs_api.limits().max_entries, 100_000);
+    }
+
+    #[test]
+    fn rename_moves_a_file_and_creates_parents_at_the_destination() {
+        let root = tmp_root();
+        let fs_api = Filesystem::new(&root);
+        fs_api
+            .write_file("server.properties", b"port=25565")
+            .unwrap();
+        fs_api
+            .rename("server.properties", "backup/server.properties")
+            .unwrap();
+        assert_eq!(
+            fs_api.read_file("backup/server.properties").unwrap(),
+            b"port=25565"
+        );
+        assert!(fs_api.read_file("server.properties").is_err());
+    }
+
+    #[test]
+    fn rename_refuses_missing_sources_and_self_moves() {
+        let root = tmp_root();
+        let fs_api = Filesystem::new(&root);
+        assert!(matches!(
+            fs_api.rename("ghost.txt", "moved.txt"),
+            Err(FileError::NotFound(_))
+        ));
+        fs_api.mkdir("world").unwrap();
+        fs_api.write_file("world/level.dat", b"dat").unwrap();
+        // A directory cannot move inside itself.
+        assert!(matches!(
+            fs_api.rename("world", "world/nested"),
+            Err(FileError::Limit(_))
+        ));
+        // The tree is untouched by the refusals.
+        assert_eq!(fs_api.list_dir("world").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn rename_validates_both_ends_against_the_root() {
+        let root = tmp_root();
+        let fs_api = Filesystem::new(&root);
+        fs_api.write_file("a.txt", b"a").unwrap();
+        assert!(matches!(
+            fs_api.rename("a.txt", "../escape.txt"),
+            Err(FileError::Traversal(_))
+        ));
+        assert!(matches!(
+            fs_api.rename("../outside.txt", "b.txt"),
+            Err(FileError::Traversal(_))
+        ));
+        assert!(matches!(
+            fs_api.rename("a.txt", "/etc/passwd"),
+            Err(FileError::Absolute(_))
+        ));
+        // Nothing escaped: the file is still where it was.
+        assert_eq!(fs_api.read_file("a.txt").unwrap(), b"a");
     }
 }

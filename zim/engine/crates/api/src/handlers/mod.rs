@@ -13,6 +13,7 @@ pub mod auth;
 pub mod control;
 pub mod eggs;
 pub mod extensions;
+pub mod files;
 pub mod frontend;
 pub mod instances;
 pub mod misc;

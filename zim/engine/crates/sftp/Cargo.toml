@@ -1,0 +1,65 @@
+[package]
+name = "zim_engine_sftp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+
+[lib]
+name = "zim_engine_sftp"
+path = "src/lib.rs"
+
+[dependencies]
+# Internal: the chrooted per-instance filesystem every operation
+# resolves through, the Argon2id password verifier, the grant
+# vocabulary + resolver, and the domain rows.
+zim_engine_domain = { workspace = true }
+zim_engine_files = { workspace = true }
+zim_engine_auth = { workspace = true }
+zim_engine_authz = { workspace = true }
+# The persistence port (users, instances, permission rows, audit).
+zim_engine_application = { workspace = true }
+# The SSH transport. `ring` (not the default aws-lc-rs) for the same
+# reason the API's rustls uses ring: the build matrix needs only a
+# C toolchain, never cmake. `flate2` stays on (zlib@openssh.com
+# compression for clients that ask); RSA host keys are off — the
+# engine serves Ed25519 only.
+russh = { version = "0.64", default-features = false, features = [
+    "ring",
+    "flate2",
+] }
+# ssh-key with the `rand_core` trait bound enabled so
+# `PrivateKey::random` is available (russh itself does not turn that
+# feature on); pinned to russh's own exact version so the two
+# resolves unify into one crate.
+ssh-key = { version = "=0.7.0-rc.11", default-features = false, features = [
+    "ed25519",
+    "rand_core",
+] }
+# OS-entropy key generation (`rand::rng()` implements rand_core 0.10's
+# CryptoRng, the bound ssh-key's `PrivateKey::random` requires).
+rand = "0.10"
+# The SFTP subsystem protocol (server + the client the test suite
+# drives in-process). It has no russh dependency of its own — it
+# runs over any AsyncRead+AsyncWrite stream, which is exactly the
+# composition the engine wants.
+russh-sftp = "3.0"
+# Async runtime (listener, per-connection tasks, spawn_blocking
+# bridges for the sync filesystem + persistence ports).
+tokio = { workspace = true }
+# The error surface.
+thiserror = { workspace = true }
+# Instance-directory mtimes in the SFTP attributes.
+chrono = { workspace = true }
+# Audit metadata JSON.
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# The in-process test suite boots a real (in-memory) database.
+zim_engine_persistence_sqlite = { workspace = true }
+# Unique temp data dirs per test.
+uuid = { workspace = true }

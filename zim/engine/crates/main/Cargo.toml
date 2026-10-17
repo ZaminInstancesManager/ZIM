@@ -20,6 +20,8 @@ path = "src/main.rs"
 [dependencies]
 zim_engine_application = { workspace = true }
 zim_engine_api = { workspace = true }
+# M28: the SFTP transport listener (started after the HTTPS server).
+zim_engine_sftp = { workspace = true }
 zim_engine_persistence_sqlite = { workspace = true }
 zim_engine_runtime_docker = { workspace = true }
 zim_engine_streaming = { workspace = true }

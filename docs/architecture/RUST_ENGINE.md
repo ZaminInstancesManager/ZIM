@@ -33,6 +33,7 @@ zim/engine/
 │   ├── backups/                # zim_engine_backups: backup domain
 │   ├── transfers/              # zim_engine_transfers: transfer domain
 │   ├── files/                  # zim_engine_files: file API
+│   ├── sftp/                   # zim_engine_sftp: the SFTP transport (M28)
 │   ├── eggs/                   # zim_engine_eggs: egg importer + zim.toml definition
 │   ├── extensions/             # zim_engine_extensions: addon manifest + capability store
 │   ├── auth/                   # zim_engine_auth: local users + OAuth

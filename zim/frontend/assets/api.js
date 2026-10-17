@@ -249,3 +249,75 @@ export async function uploadTheme(zipBytes) {
 export async function deleteTheme(id) {
     return api(`/themes/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
+/** `GET /instances/{id}/files?path={dir}` — list one directory. */
+export async function listFiles(instanceId, path = ".") {
+    const suffix = path === "." || path === "" ? "" : `?path=${encodeURIComponent(path)}`;
+    return api(`/instances/${encodeURIComponent(instanceId)}/files${suffix}`);
+}
+/** `GET /instances/{id}/files/content?path={file}` — one file's raw
+ * bytes (`application/octet-stream` download). */
+export async function downloadFile(instanceId, path) {
+    const response = await fetch(`/api/v1/instances/${encodeURIComponent(instanceId)}/files/content?path=${encodeURIComponent(path)}`, { credentials: "same-origin", headers: { Accept: "application/octet-stream" } });
+    if (!response.ok) {
+        throw await parseError(response);
+    }
+    return response.arrayBuffer();
+}
+/** `PUT /instances/{id}/files/content?path={file}` — write one file's
+ * bytes (the atomic upload channel; parents created as needed). */
+export async function uploadFile(instanceId, path, bytes) {
+    const response = await fetch(`/api/v1/instances/${encodeURIComponent(instanceId)}/files/content?path=${encodeURIComponent(path)}`, {
+        credentials: "same-origin",
+        method: "PUT",
+        headers: { "Content-Type": "application/octet-stream", Accept: "application/json" },
+        body: bytes,
+    });
+    if (!response.ok) {
+        throw await parseError(response);
+    }
+    return (await response.json());
+}
+/** `POST /instances/{id}/files/create` — create one file or
+ * directory (`is_dir`; a file starts empty). */
+export async function createFileEntry(instanceId, path, isDir) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/files/create`, { body: { path, is_dir: isDir } });
+}
+/** `DELETE /instances/{id}/files?path={path}` — delete one file or
+ * directory (directories recursively). */
+export async function deleteFileEntry(instanceId, path) {
+    const suffix = path === "." || path === "" ? "" : `?path=${encodeURIComponent(path)}`;
+    return api(`/instances/${encodeURIComponent(instanceId)}/files${suffix}`, {
+        method: "DELETE",
+    });
+}
+/** `POST /instances/{id}/files/rename` — rename or move one path
+ * (destination parents created as needed). */
+export async function renameFileEntry(instanceId, request) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/files/rename`, { body: request });
+}
+/** `POST /instances/{id}/files/archive` — compress an allow-list of
+ * paths into one archive inside the instance root. */
+export async function archiveFiles(instanceId, request) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/files/archive`, { body: request });
+}
+/** `POST /instances/{id}/files/extract` — extract one archive under
+ * a destination inside the instance root. */
+export async function extractArchive(instanceId, request) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/files/extract`, { body: request });
+}
+/** The join of one directory path and one entry name (root-relative,
+ * forward slashes — the §10.3 path grammar). */
+export function joinFilePath(directory, name) {
+    const trimmed = directory === "." || directory === "" ? "" : directory.replace(/\/+$/, "");
+    return trimmed === "" ? name : `${trimmed}/${name}`;
+}
+/** One path's parent, as the listing API expects it (`"."` for the
+ * root's children). */
+export function parentFilePath(path) {
+    const trimmed = path.replace(/\/+$/, "");
+    const lastSlash = trimmed.lastIndexOf("/");
+    if (lastSlash === -1) {
+        return ".";
+    }
+    return trimmed.slice(0, lastSlash);
+}

@@ -1746,14 +1746,6 @@ pub async fn metrics(
     })))
 }
 
-/// The file-API family — M6 (`FilesystemCapable` runtime).
-pub async fn files_stub() -> Result<Response, ApiError> {
-    Err(ApiError::NotImplemented {
-        feature: "the instance file API",
-        milestone: "M6 (runtime filesystem capability)",
-    })
-}
-
 // ── Backups (M8: create / delete / restore / download / lock) ────
 
 /// Map a [`zim_engine_backups::BackupError`] onto the §6.1 error

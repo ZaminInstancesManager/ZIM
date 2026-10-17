@@ -511,3 +511,165 @@ export async function uploadTheme(zipBytes: ArrayBuffer): Promise<EngineTheme> {
 export async function deleteTheme(id: string): Promise<void> {
   return api<void>(`/themes/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
+
+// ── The file family (§10.3, M28) ──────────────────────────────────
+
+/** One listed directory entry (`GET .../files`). */
+export interface FileEntry {
+  name: string;
+  is_dir: boolean;
+  size: number;
+  modified: string | null;
+}
+
+/** The listing envelope (`GET .../files[?path=]`). */
+export interface FilesListing {
+  instance_id: string;
+  path: string;
+  entries: FileEntry[];
+}
+
+/** The rename request body (`POST .../files/rename`). */
+export interface RenameFileRequest {
+  old_path: string;
+  new_path: string;
+}
+
+/** The archive request body (`POST .../files/archive`). */
+export interface ArchiveFilesRequest {
+  paths: string[];
+  destination: string;
+  format: "tar" | "tar.gz" | "zip";
+}
+
+/** The extract request body (`POST .../files/extract`). */
+export interface ExtractArchiveRequest {
+  archive_path: string;
+  destination: string;
+}
+
+/** `GET /instances/{id}/files?path={dir}` — list one directory. */
+export async function listFiles(instanceId: string, path = "."): Promise<FilesListing> {
+  const suffix = path === "." || path === "" ? "" : `?path=${encodeURIComponent(path)}`;
+  return api<FilesListing>(`/instances/${encodeURIComponent(instanceId)}/files${suffix}`);
+}
+
+/** `GET /instances/{id}/files/content?path={file}` — one file's raw
+ * bytes (`application/octet-stream` download). */
+export async function downloadFile(instanceId: string, path: string): Promise<ArrayBuffer> {
+  const response = await fetch(
+    `/api/v1/instances/${encodeURIComponent(instanceId)}/files/content?path=${encodeURIComponent(path)}`,
+    { credentials: "same-origin", headers: { Accept: "application/octet-stream" } },
+  );
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  return response.arrayBuffer();
+}
+
+/** `PUT /instances/{id}/files/content?path={file}` — write one file's
+ * bytes (the atomic upload channel; parents created as needed). */
+export async function uploadFile(
+  instanceId: string,
+  path: string,
+  bytes: ArrayBuffer | Uint8Array | Blob,
+): Promise<{ path: string; size: number }> {
+  const response = await fetch(
+    `/api/v1/instances/${encodeURIComponent(instanceId)}/files/content?path=${encodeURIComponent(path)}`,
+    {
+      credentials: "same-origin",
+      method: "PUT",
+      headers: { "Content-Type": "application/octet-stream", Accept: "application/json" },
+      body: bytes as BodyInit,
+    },
+  );
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  return (await response.json()) as { path: string; size: number };
+}
+
+/** `POST /instances/{id}/files/create` — create one file or
+ * directory (`is_dir`; a file starts empty). */
+export async function createFileEntry(
+  instanceId: string,
+  path: string,
+  isDir: boolean,
+): Promise<{ path: string; is_dir: boolean }> {
+  return api<{ path: string; is_dir: boolean }>(
+    `/instances/${encodeURIComponent(instanceId)}/files/create`,
+    { body: { path, is_dir: isDir } },
+  );
+}
+
+/** `DELETE /instances/{id}/files?path={path}` — delete one file or
+ * directory (directories recursively). */
+export async function deleteFileEntry(instanceId: string, path: string): Promise<void> {
+  const suffix = path === "." || path === "" ? "" : `?path=${encodeURIComponent(path)}`;
+  return api<void>(`/instances/${encodeURIComponent(instanceId)}/files${suffix}`, {
+    method: "DELETE",
+  });
+}
+
+/** `POST /instances/{id}/files/rename` — rename or move one path
+ * (destination parents created as needed). */
+export async function renameFileEntry(
+  instanceId: string,
+  request: RenameFileRequest,
+): Promise<{ old_path: string; new_path: string }> {
+  return api<{ old_path: string; new_path: string }>(
+    `/instances/${encodeURIComponent(instanceId)}/files/rename`,
+    { body: request },
+  );
+}
+
+/** `POST /instances/{id}/files/archive` — compress an allow-list of
+ * paths into one archive inside the instance root. */
+export async function archiveFiles(
+  instanceId: string,
+  request: ArchiveFilesRequest,
+): Promise<{ destination: string; format: string; entries: number; bytes: number }> {
+  return api<{ destination: string; format: string; entries: number; bytes: number }>(
+    `/instances/${encodeURIComponent(instanceId)}/files/archive`,
+    { body: request },
+  );
+}
+
+/** `POST /instances/{id}/files/extract` — extract one archive under
+ * a destination inside the instance root. */
+export async function extractArchive(
+  instanceId: string,
+  request: ExtractArchiveRequest,
+): Promise<{
+  archive_path: string;
+  destination: string;
+  entries: number;
+  bytes: number;
+  nested_archives: number;
+}> {
+  return api<{
+    archive_path: string;
+    destination: string;
+    entries: number;
+    bytes: number;
+    nested_archives: number;
+  }>(`/instances/${encodeURIComponent(instanceId)}/files/extract`, { body: request });
+}
+
+/** The join of one directory path and one entry name (root-relative,
+ * forward slashes — the §10.3 path grammar). */
+export function joinFilePath(directory: string, name: string): string {
+  const trimmed = directory === "." || directory === "" ? "" : directory.replace(/\/+$/, "");
+  return trimmed === "" ? name : `${trimmed}/${name}`;
+}
+
+/** One path's parent, as the listing API expects it (`"."` for the
+ * root's children). */
+export function parentFilePath(path: string): string {
+  const trimmed = path.replace(/\/+$/, "");
+  const lastSlash = trimmed.lastIndexOf("/");
+  if (lastSlash === -1) {
+    return ".";
+  }
+  return trimmed.slice(0, lastSlash);
+}

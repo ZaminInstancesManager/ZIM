@@ -263,8 +263,59 @@ or for cursor pagination:
 | PUT    | `/api/v1/instances/{id}/files/content`     | Write file content (upload).          | FileWrite        |
 | POST   | `/api/v1/instances/{id}/files/create`      | Create file/dir.                      | FileCreate       |
 | DELETE | `/api/v1/instances/{id}/files`             | Delete file/dir.                      | FileDelete       |
+| POST   | `/api/v1/instances/{id}/files/rename`      | Rename/move (M28).                    | FileWrite        |
 | POST   | `/api/v1/instances/{id}/files/archive`     | Archive (zip/tar).                    | FileArchive      |
 | POST   | `/api/v1/instances/{id}/files/extract`     | Extract archive.                      | FileArchive + FileWrite |
+
+#### 10.3a The files family in detail (M28)
+
+The file family operates on the instance's data directory — the
+same directory the runtime bind-mounts and the backup pipeline
+archives (`{data_dir}/instances/{uuid_short}`) — through the same
+chrooted, §THREAT-2.6-validated path grammar those surfaces use.
+Every `?path=`/body path is root-relative with forward slashes;
+`..` components, absolute paths, backslashes, and symlink escapes
+are refused with `400 validation_failed` on `path`. The instance
+root itself has no relative form and is structurally undeletable.
+
+- **`GET .../files[?path={dir}]`** — one directory's entries
+  (defaults to the root). `200` body:
+  `{"instance_id", "path", "entries": [{"name", "is_dir", "size", "modified"|"null"}]}`.
+- **`GET .../files/content?path={file}`** — the file's raw bytes:
+  `200`, `application/octet-stream`,
+  `Content-Disposition: attachment; filename="{basename}"`.
+  Missing file → `404 not_found`; directory → `400 bad_request`.
+- **`PUT .../files/content?path={file}`** — the request body is
+  the new file content. Atomic (temp-then-rename; parents created
+  as needed). `200` body: `{"path", "size"}`. This pair carries
+  the §13 upload channel: bodies up to 5 GB (the router-wide
+  10 MB JSON limit does not apply to it).
+- **`POST .../files/create`** — body `{"path", "is_dir"}` (a file
+  is created empty; content arrives via `PUT`). `201` body:
+  `{"path", "is_dir"}`.
+- **`DELETE .../files?path={path}`** — one file or directory
+  (directories recursively). `204`.
+- **`POST .../files/rename`** — body
+  `{"old_path", "new_path"}`; one atomic rename inside the root,
+  destination parents created as needed; a directory cannot move
+  inside itself. `200` body: `{"old_path", "new_path"}`.
+- **`POST .../files/archive`** — body
+  `{"paths": [...], "destination", "format": "tar"|"tar.gz"|"zip"}`
+  (format defaults to `tar.gz`). `200` body:
+  `{"destination", "format", "entries", "bytes"}`.
+- **`POST .../files/extract`** — body
+  `{"archive_path", "destination"}`; the §THREAT-2.7 caps
+  (uncompressed size, entry count, nesting depth, link and overlap
+  refusals) are enforced. `200` body:
+  `{"archive_path", "destination", "entries", "bytes", "nested_archives"}`.
+
+Mutations are audited (`instance.file.write` / `.create` /
+`.delete` / `.rename` / `.archive` / `.extract`) with the affected
+path and `"transport": "http"`; reads are not. The §8 `If-Match`
+family does not apply (sub-resources are last-write-wins, matching
+Wings). A parallel SFTP transport (M28) serves the same tree with
+the same grant vocabulary — see
+`docs/architecture/DECISIONS.md` AD-33.
 
 ### 10.4 Allocations
 
