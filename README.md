@@ -154,7 +154,23 @@ abstraction, and the roadmap that subsequent implementation work will follow.
   running-vs-installed engine version comparison, and the
   completed five-platform release matrix — Linux x64/arm64,
   Windows x64, macOS x64/arm64 — with per-arch deb smokes and a
-  `latest.json` carrying all five platforms).
+  `latest.json` carrying all five platforms), and the file
+  surface (M28 — the alpha's #1 published gap, closed as AD-33's
+  one-tree-three-doorways: the real HTTP file API behind the seven
+  declared §10.3 routes plus rename, over the same chrooted
+  `Filesystem` the backup pipeline archives through, with the §13
+  5 GB upload channel and `instance.file.*` audit rows; the
+  `zim_engine_sftp` transport — a russh/ring SSH server whose
+  SFTP subsystem serves the same tree with the same `file.*`
+  grants through a synthetic per-instance root, password auth
+  against the engine's own users with per-username throttling,
+  an Ed25519 host key with the loopback certificate's lifecycle,
+  and `127.0.0.1:2022` (Wings's own port) by default; and the
+  `zim://servers/{id}/files` file manager — breadcrumb,
+  listing, upload/download, new file/folder, rename, delete,
+  archive/extract — with the E2E scenario rewritten from its
+  honest 501 pin into the real three-OS suite plus a
+  browser-driven UI walk and the SSH banner probe).
   M25's own acceptance campaign (16 CI batches) also earned a
   real engine fix: the production TLS accept loop was dropping
   every WebSocket subscriber on arrival (`serve_connection` had
@@ -182,9 +198,10 @@ ZIM/
 ├── zim/                          # ZIM's own code
 │   ├── contracts/                # Versioned contract files
 │   │   └── theme-tokens.v1.json  # Theme token vocabulary (AD-27)
-│   ├── engine/                   # Rust engine workspace (30 crates,
+│   ├── engine/                   # Rust engine workspace (31 crates,
 │   │   │                         #   M3-M19; M27: the engine control
-│   │   │                         #   plane + health's version)
+│   │   │                         #   plane + health's version; M28: the
+│   │   │                         #   SFTP transport crate)
 │   ├── shell/                    # Tauri 2 desktop shell (M21): window, tray,
 │   │   │                         #   engine attach/spawn, zim:// mapping, trust;
 │   │   │                         #   (M23: multi-window — tear-off / merge /
@@ -199,10 +216,11 @@ ZIM/
 │   │   │                         #   (M22: the zim://app chrome — tab strip +
 │   │   │                         #   omnibox + panes; M23: split view, session
 │   │   │                         #   v2, themes, the completed NTP with create /
-│   │   │                         #   import / recents; M27: zim://about; newtab,
-│   │   │                         #   servers, console, and the declared
-│   │   │                         #   per-instance surfaces; src/ TypeScript,
-│   │   │                         #   tests/ node:test suite)
+│   │   │                         #   import / recents; M27: zim://about;
+│   │   │                         #   M28: the zim://servers/{id}/files file
+│   │   │                         #   manager; newtab, servers, console, and
+│   │   │                         #   the declared per-instance surfaces;
+│   │   │                         #   src/ TypeScript, tests/ node:test suite)
 │   ├── e2e/                      # Node/Playwright E2E suite (M25): the real
 │   │                             #   engine binary + real browser; the
 │   │                             #   failure-scenario tests (M27: disk-full,

@@ -54,6 +54,9 @@ export interface EngineHandle {
   readonly dataDir: string;
   /** The loopback port the engine serves TLS on. */
   readonly port: number;
+  /** The loopback port the engine serves SFTP on (M28; every
+   * engine gets its own — concurrent engines must not collide). */
+  readonly sftpPort: number;
   /** The bootstrap admin credential (env-seeded, deterministic). */
   readonly admin: BootstrapAdmin;
   /** `https://127.0.0.1:{port}` — the engine's only origin. */
@@ -73,6 +76,7 @@ interface DiscoveryDoc {
   schema: number;
   pid: number;
   port: number;
+  sftp_port?: number;
 }
 
 const ADMIN_EMAIL = "admin@zim.local";
@@ -141,6 +145,10 @@ export async function launchEngine(options: {
 }): Promise<EngineHandle> {
   const dataDir = options.dataDir ?? tempDir("engine");
   const port = options.port ?? (await freePort());
+  // M28: every engine's SFTP listener rides a reserved free port of
+  // its own (the default 2022 would collide across the concurrent
+  // engines the suite spawns; an explicit env override still wins).
+  const sftpPort = Number(process.env.ZIM_SFTP_PORT ?? 0) || (await freePort());
   const password = "zim-e2e-admin-password";
 
   const child = spawn(engineBinaryPath(), ["--data-dir", dataDir, "--port", String(port)], {
@@ -149,6 +157,7 @@ export async function launchEngine(options: {
       ...process.env,
       ZIM_BOOTSTRAP_ADMIN_EMAIL: ADMIN_EMAIL,
       ZIM_BOOTSTRAP_ADMIN_PASSWORD: password,
+      ZIM_SFTP_PORT: String(sftpPort),
       ...(options.env ?? {}),
     },
   });
@@ -225,6 +234,7 @@ export async function launchEngine(options: {
   const handle: EngineHandle = {
     dataDir,
     port,
+    sftpPort,
     origin: `https://127.0.0.1:${port}`,
     admin: { email: ADMIN_EMAIL, password },
     stop: async () => {

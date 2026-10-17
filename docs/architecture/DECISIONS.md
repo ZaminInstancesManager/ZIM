@@ -978,6 +978,7 @@ no revocation — are written down where an operator will read
 them before relying on them.
 
 
+
 ### AD-32: The local engine-control plane is a per-boot token in the data dir, not a user privilege. (2026-10-17)
 
 **Status:** Accepted (M27 — the durable fix for UPDATES.md §3's
@@ -1019,6 +1020,75 @@ data-dir access cannot stop the engine; a local same-user process
 can — the same trust position as "can kill the process" for any
 desktop app, made auditable instead of silent. THREAT_MODEL §2.17
 carries the full analysis.
+
+### AD-33: The file surface is one chrooted tree with three doorways — the HTTPS API, the SFTP transport, and the UI. (2026-10-17)
+
+**Status:** Accepted (M28 — the post-alpha backlog's first sequenced
+milestone; the alpha's #1 published "what doesn't" item).
+
+**Context:** The `zim_engine_files` crate existed since M17 (the
+backup and install pipelines archive through it), but nothing
+*served* it: the §10.3 files family was a declared-but-501 surface,
+the E2E suite honestly pinned the 501 contract, and the frontend's
+files page was a placeholder note. Migrators from Pterodactyl name
+file management as the daily-driver surface (config edits, world
+uploads, plugin jars), and they arrive with two habits: a web file
+manager *and* an SFTP client. The obvious designs were wrong in
+different directions: a second, SFTP-specific file stack (two path
+grammars to audit, two permission models to drift), or
+SFTP-only-forever (the web manager is the Chrome-shaped product's
+own surface — the tab and the tree belong together).
+
+**Decision:**
+
+- One tree: every doorway resolves into the same chrooted
+  `Filesystem` rooted at `{data_dir}/instances/{uuid_short}` —
+  the same §2.6 grammar, the same §2.7 extraction caps, the same
+  directory the runtime bind-mounts and the backup pipeline
+  archives. There is no SFTP-specific path handling anywhere.
+- One grant vocabulary: the §10.3 table governs both transports
+  operation-for-operation — `file.read` lists/stats, `file.read_content`
+  reads bytes, `file.write` writes/renames, `file.create` creates,
+  `file.delete` deletes, `file.archive` archives (+`file.write` to
+  extract).
+- One audit trail: `instance.file.*` rows carry
+  `"transport": "http" | "sftp"`; SFTP logins audit `auth.login`
+  with the transport and the presented login name.
+- The HTTP family (batch 1) keeps the atomic write discipline
+  (temp-then-rename); `rename` is one `rename(2)` with both ends
+  §2.6-validated and destination parents created.
+- The SFTP transport (batch 2) is a russh server (ring backend —
+  the same no-cmake discipline as the API's rustls) with password
+  auth against the engine's Argon2id user records (username or
+  email), per-username throttling (5 failures / 5 min,
+  cross-connection) over russh's constant-time rejection, and a
+  synthetic per-user root: one directory per visible instance (the
+  API's own visibility walk), sanitized names, chrooted descent.
+  Host key: Ed25519, generated on first boot, persisted
+  (`sftp_host_ed25519`, 0600), regenerated when unreadable — the
+  loopback TLS certificate's lifecycle. Default listener
+  `127.0.0.1:2022` (Wings's own SFTP port), `ZIM_SFTP_ENABLED=0`
+  opts out; the discovery file carries `sftp_port`.
+- The UI (batch 3) is the frontend's own page over the HTTP
+  family — breadcrumb, listing, upload, download, new file/folder,
+  rename, delete, archive/extract — never a second policy.
+
+**Consequences (the honest list):**
+
+- SFTP uploads stream into real file handles at protocol offsets —
+  they are NOT the HTTP route's atomic writes; a crashed transfer
+  can leave a partial file, exactly like every stock SFTP server.
+  The HTTP route stays atomic; the two disciplines are documented
+  side by side, not hidden.
+- An SFTP file write audits once, at handle close (path + total
+  bytes) — one row per file, not per 32 KB packet; a session that
+  dies mid-transfer loses that row (the bytes are still on disk).
+- No symlink creation, no readlink, no setstat through SFTP (§2.6's
+  doctrine: links are the traversal vector; times and modes are not
+  the engine's to change). Publickey auth is refused — passwords
+  are the engine's only user credential today.
+- `cross-instance renames are refused` — a move is one operation
+  inside one chroot.
 
 ## 2. Unresolved questions
 

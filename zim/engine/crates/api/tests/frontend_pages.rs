@@ -363,8 +363,8 @@ async fn pages_serve_the_default_frontend_with_csp() {
     assert_eq!(response.status(), 200);
     assert!(response.text().await.unwrap().contains("tabstrip"));
 
-    // A declared per-instance stub surface (the §3 inventory rows
-    // M22 brings into the package; one entrypoint, six surfaces).
+    // The per-instance files surface — M28 graduated it from the
+    // shared stub to the real file manager page.
     let response = engine
         .client
         .get(engine.page_url("/servers/0a1b2c3d-0000-0000-0000-000000000000/files"))
@@ -372,7 +372,7 @@ async fn pages_serve_the_default_frontend_with_csp() {
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
-    assert!(response.text().await.unwrap().contains("surface"));
+    assert!(response.text().await.unwrap().contains("files-breadcrumb"));
 
     // The console surface, parameterized.
     let response = engine

@@ -33,9 +33,11 @@ function surfaceFromPath(): { instanceId: string; surface: string } | null {
   return { instanceId: decodeURIComponent(match[1]), surface: match[2] };
 }
 
-/** The honest one-liner per surface (what exists, what waits). */
+/** The honest one-liner per surface (what exists, what waits).
+ * The files surface graduated to its own page (M28's
+ * `pages/files.html`); the stub never sees it, but the note stays
+ * gone rather than lying. */
 const SURFACE_NOTES: Record<string, string> = {
-  files: "The file browser ships with the M6 filesystem capability (the engine's file API family).",
   settings: "Instance configuration ships with a later milestone; power controls live on the console today.",
   backups: "The backup list ships with the M8 backup family's frontend view.",
   schedules: "The schedule list ships with the M9 scheduling family's frontend view.",

@@ -1323,7 +1323,7 @@ the alpha.2 release).
 
 ### M28: The file surface — the real HTTP file API + the SFTP transport + the file manager UI
 
-**Status:** IN FLIGHT (2026-10-17).
+**Status:** COMPLETE (2026-10-17) — three large batches + this record.
 
 **Goal:** Close the alpha's #1 functional gap — file management.
 The §10.3 files family stops being a declared-but-501 surface (the
@@ -1333,9 +1333,9 @@ frontend and API-key clients, and an SFTP server for the
 FileZilla/WinSCP-shaped world Pterodactyl migrators already live
 in. One chrooted tree (`{data_dir}/instances/{uuid_short}`), one
 grant vocabulary (`file.*`), one audit trail (`instance.file.*`
-with the transport stamped) — three doorways into it.
+with the transport stamped) — three doorways into it (AD-33).
 
-**Deliverables:**
+**Delivered:**
 
 - **The HTTP file API** (batch 1): the real handlers behind the
   seven declared routes plus `POST .../files/rename` — list /
@@ -1344,39 +1344,44 @@ with the transport stamped) — three doorways into it.
   install pipelines use; the §2.6 grammar and §2.7 caps enforced
   unchanged; the §13 upload channel (5 GB route-level body limit)
   inside the router-wide 10 MB JSON limit; `instance.file.*`
-  audit rows with `"transport": "http"`; the files crate gains
-  `rename` (one §2.6 validation per end, directory-into-itself
-  refused, destination parents created).
-- **The SFTP server** (batch 2): a new `zim_engine_sftp` crate —
-  a russh-based SSH server whose SFTP subsystem serves a
-  synthetic per-user root (one directory per instance the user can
-  read, sanitized-instance-named), chrooted into the same
-  `Filesystem` per instance; password auth against the engine's
-  Argon2id user records with per-username throttling plus russh's
-  constant-time rejection; an Ed25519 host key generated on first
-  boot and persisted in the data dir; the same `file.*` grant
-  checks per operation (read-path vs write-path); audit rows with
-  `"transport": "sftp"`; default loopback `127.0.0.1:2022`
-  (Wings's own SFTP port), `ZIM_SFTP_ENABLED=0` to disable; an
-  in-process russh-client integration suite (real handshake, real
-  SFTP protocol, real round-trip).
-- **The file manager UI** (batch 3): the frontend's
-  `zim://servers/{id}/files` placeholder becomes the real file
-  manager — breadcrumb navigation, listing, upload, download,
-  new file/folder, rename, delete, archive/extract; the E2E files
-  scenario rewritten from its honest 501 pin into the real
-  three-OS scenario (the family is host-filesystem, so every tier
-  of AD-30's two-tier model runs it fully); AD-33 records the
-  one-tree-three-doorways decision.
+  audit rows with `"transport": "http"`; the files crate gained
+  `rename` (one §2.6 validation per end,
+  directory-into-itself refused, destination parents created).
+  Socket-level suite: the round-trip, the grammar refusals, the
+  grant table, the upload channel, the audit trail.
+- **The SFTP transport** (batch 2): the `zim_engine_sftp` crate —
+  a russh-based SSH server (ring backend, the API's own no-cmake
+  discipline) whose SFTP subsystem serves the same tree with the
+  same grants: password auth against the engine's Argon2id users
+  (username or email) with per-username throttling over russh's
+  constant-time rejection; the synthetic per-user root (one
+  directory per visible instance, sanitized names); an Ed25519
+  host key with the loopback TLS certificate's lifecycle; audit
+  rows with `"transport": "sftp"` (one row per written file, at
+  handle close); default `127.0.0.1:2022` (Wings's own port),
+  `ZIM_SFTP_ENABLED=0` opts out; the discovery file carries
+  `sftp_port`. The in-process suite drives a real russh client
+  through a real handshake and the real protocol — the
+  round-trip, the grammar, the grant table, the lockout.
+- **The file manager UI** (batch 3): `zim://servers/{id}/files`
+  graduated from the shared stub to its own page — breadcrumb
+  navigation, listing with honest metadata, upload (the real file
+  input into the atomic channel), download, new file/folder,
+  rename, delete, archive/extract — plus the api.ts client family
+  and the SFTP advertisement on the state line. The E2E files
+  scenario was rewritten from its honest 501 pin into the real
+  three-OS suite (API round-trip + grammar + upload channel + a
+  browser-driven UI walk + the SSH banner probe); the e2e harness
+  allocates each engine its own SFTP port.
 
-**Acceptance criteria:** Engine/Shell/E2E CI green; the files API
-suite (socket-level + E2E) covers the grammar refusals, the grant
-table, the upload channel, and the audit trail; the SFTP suite
-proves login/list/read/write/rename/delete over the real protocol
-in-process; the frontend builds with the real files page; the
-spec (§10.3a), README, and RUST_ENGINE §1 record the new surface.
+**Acceptance criteria:** all met — Engine/Shell/E2E CI green;
+the socket suite covers grammar/grants/channel/audit; the SFTP
+suite proves the protocol over a real handshake in-process; the
+frontend builds with the real files page (fresh committed
+assets); the spec gained §10.3a, RUST_ENGINE §1 gained the crate,
+AD-33 records the decision.
 
-**Estimated effort:** 3 large batches.
+**Estimated effort:** 3 large batches (delivered as estimated).
 
 ### M28+: The post-alpha backlog (unsequenced)
 

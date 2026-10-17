@@ -459,6 +459,43 @@ AD-29 itself records: a page sharing the origin can act under the
 user's session — which is why the *authorization* model (not the
 attribution model) is what the security boundaries lean on.
 
+### 2.19 The SFTP transport (M28, AD-33)
+
+**Scenario:** The file surface's second doorway widens the attack
+surface in four ways: an always-on SSH listener to brute-force, a
+host key to steal or MITM-substitute, a second path grammar to
+escape the chroot through, and a second audit trail to evade.
+
+**Mitigations:**
+- The listener is loopback-only by default (`127.0.0.1:2022`;
+  widening it is an operator's deliberate configuration), the
+  same trust position as the HTTPS API.
+- Brute force is bounded three layers deep: russh's
+  constant-time rejection (3 s), a per-connection attempt cap
+  (6), and a per-username cross-connection throttle (5 failures /
+  5 minutes — locked usernames burn no Argon2id cycles). Every
+  attempt audits `auth.login` with `"transport": "sftp"` and the
+  presented login name (unknown names carry no actor — no account
+  enumeration in the trail).
+- The host key is an Ed25519 key generated on first boot and
+  persisted `0600` under the engine's data dir (readable by the
+  same local trust position that can read `engine.db`); a stolen
+  key plus a loopback bind hijack is the same compromise as
+  reading the database outright.
+- There is no second path grammar: every SFTP operation resolves
+  through the files crate's §2.6 validation inside the instance
+  chroot (traversal, absolute paths, escaping symlinks refused);
+  the synthetic root's directories are the only crossing points,
+  and a rename never crosses instances. Symlink creation,
+  readlink, and setstat are refused outright.
+- Grants are the §10.3 table operation-for-operation — SFTP
+  cannot exceed what the same user's HTTP calls may do.
+
+**Residual risk:** SFTP uploads stream at protocol offsets and
+are not the HTTP route's atomic writes (AD-33's documented
+tradeoff); a crashed transfer can leave a partial file, and its
+close-time audit row is lost with the session.
+
 ## 3. Explicit capability boundaries
 
 The prompt requires explicit capability boundaries for each trust

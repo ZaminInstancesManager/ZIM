@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ZIM — Files</title>
+  <link rel="stylesheet" href="/zim/assets/main.css">
+  <script type="module" src="/zim/assets/files.js"></script>
+</head>
+<body>
+  <main class="page page-stub">
+    <zim-recovery-notice></zim-recovery-notice>
+
+    <header class="page-header">
+      <a class="backlink" href="/zim/servers" title="Servers">←</a>
+      <h1 id="server-name">Server</h1>
+      <span id="server-id" class="pill pill-muted mono">…</span>
+      <span class="pill pill-muted mono">files</span>
+    </header>
+
+    <section class="card" aria-label="Observed state">
+      <div class="console-toolbar">
+        <zim-status-dot id="status-dot" status="unknown" data-label="unknown"></zim-status-dot>
+        <span id="state-label" class="state-label">state: unknown</span>
+        <span class="spacer"></span>
+        <span id="sftp-note" class="pill pill-muted mono" title="The same tree over SFTP">sftp://127.0.0.1:2022</span>
+      </div>
+    </section>
+
+    <section class="card card-login" id="auth-gate" aria-label="Sign in" hidden>
+      <h2 class="card-title">Sign in to ZIM</h2>
+      <zim-login-form id="login"></zim-login-form>
+    </section>
+
+    <section class="card" aria-label="Files">
+      <h2 class="card-title">Files</h2>
+      <nav id="files-breadcrumb" class="quicklinks" aria-label="Current directory"></nav>
+
+      <div class="console-toolbar" id="files-toolbar">
+        <label class="pill pill-action" for="upload-input" title="Upload a file into this directory">⤒ Upload</label>
+        <input id="upload-input" type="file" hidden />
+        <button id="btn-new-folder" class="pill pill-action" type="button" title="Create a directory here">＋ Folder</button>
+        <button id="btn-new-file" class="pill pill-action" type="button" title="Create an empty file here">＋ File</button>
+        <button id="btn-archive" class="pill pill-action" type="button" title="Archive the checked entries here">▤ Archive</button>
+        <button id="btn-extract" class="pill pill-action" type="button" title="Extract an archive here">⤓ Extract</button>
+        <span id="files-message" class="state-label" role="status"></span>
+      </div>
+
+      <form id="create-form" hidden aria-label="New name">
+        <input id="create-name" class="omnibox-input" type="text" autocomplete="off"
+               placeholder="name…" aria-label="New entry name" />
+        <button id="create-confirm" class="pill pill-action" type="submit">Create</button>
+        <button id="create-cancel" class="pill pill-muted" type="button">Cancel</button>
+      </form>
+
+      <table class="files-table" id="files-table">
+        <thead>
+          <tr>
+            <th scope="col" class="files-check"><span class="visually-hidden">Select</span></th>
+            <th scope="col" class="files-name">Name</th>
+            <th scope="col" class="files-size">Size</th>
+            <th scope="col" class="files-modified">Modified</th>
+            <th scope="col" class="files-actions"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody id="files-list">
+          <tr><td colspan="5" class="empty">…</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

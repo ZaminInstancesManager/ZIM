@@ -7,10 +7,12 @@
  * model (AD-30): Linux, macOS, and Windows all exercise every step.
  */
 
+import net from "node:net";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { launchEngine } from "../lib/engine.js";
 import { adminClient, createInstance, firstNodeId } from "../lib/api.js";
+import { launchBrowser, loginViaUi, newContext, uiGoto } from "../lib/browser.js";
 import { uniqueName } from "../lib/util.js";
 
 test("files: the full family round-trips over the real routes", async () => {
@@ -135,6 +137,98 @@ test("files: the upload channel takes bodies past the JSON limit", async () => {
     await client.post(`${files}/create`, { path: "small.txt" });
     const listing = await client.get(`${files}`);
     assert.equal(listing.entries.length, 2);
+  } finally {
+    await engine.stop();
+  }
+});
+
+test("files: the file manager drives the real family in the browser", async () => {
+  const engine = await launchEngine({});
+  const browser = await launchBrowser();
+  try {
+    const client = await adminClient(engine);
+    const nodeId = await firstNodeId(client);
+    const instance = await createInstance(client, uniqueName("files-ui"), { nodeId });
+
+    // Seed a directory tree through the API (the UI starts from a
+    // known state).
+    const files = `/api/v1/instances/${instance.id}/files`;
+    await client.post(`${files}/create`, { path: "worlds", is_dir: true });
+    await client.putRaw(`${files}/content?path=worlds/level.dat`, "level", "application/octet-stream");
+
+    const context = await newContext(browser);
+    const page = await context.newPage();
+    await loginViaUi(page, engine);
+    await uiGoto(page, engine, `servers/${instance.id}/files`);
+
+    // The listing renders the seeded tree with honest metadata.
+    const rows = page.locator("#files-list tr[data-name]");
+    await rows.first().waitFor({ state: "visible", timeout: 15_000 });
+    await page.locator('tr[data-name="worlds"]').waitFor({ state: "visible" });
+    const names = await rows.evaluateAll((nodes) =>
+      nodes.map((node) => (node as unknown as { dataset: { name?: string } }).dataset.name),
+    );
+    assert.deepEqual(names, ["worlds"]);
+
+    // Descend into the directory (the breadcrumb follows).
+    await page.locator('tr[data-name="worlds"] a').click();
+    await page.locator('tr[data-name="level.dat"]').waitFor({ state: "visible" });
+    const breadcrumbText = await page.locator("#files-breadcrumb").innerText();
+    assert.match(breadcrumbText, /worlds/);
+
+    // Upload through the real file input.
+    await page.setInputFiles("#upload-input", {
+      name: "uploaded.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("uploaded via the browser"),
+    });
+    await page.locator('tr[data-name="uploaded.txt"]').waitFor({ state: "visible" });
+
+    // The engine really holds the bytes (the API agrees with the UI).
+    const downloaded = await client.getRaw(`${files}/content?path=worlds/uploaded.txt`);
+    assert.equal(downloaded.bytes.toString("utf8"), "uploaded via the browser");
+
+    // Rename through the prompt dialog.
+    const renameDialog = page.waitForEvent("dialog").then((dialog) => dialog.accept("renamed.txt"));
+    await page.locator('tr[data-name="uploaded.txt"] button[aria-label="rename uploaded.txt"]').click();
+    await renameDialog;
+    await page.locator('tr[data-name="renamed.txt"]').waitFor({ state: "visible" });
+
+    // Delete through the confirm dialog.
+    const deleteDialog = page.waitForEvent("dialog").then((dialog) => dialog.accept());
+    await page.locator('tr[data-name="renamed.txt"] button[aria-label="delete renamed.txt"]').click();
+    await deleteDialog;
+    await page.locator('tr[data-name="renamed.txt"]').waitFor({ state: "detached" });
+
+    await context.close();
+  } finally {
+    await browser.close();
+    await engine.stop();
+  }
+});
+
+test("files: the SFTP transport answers on its own port (the banner probe)", async () => {
+  const engine = await launchEngine({});
+  try {
+    const banner = await new Promise<string>((resolve, reject) => {
+      const socket = net.createConnection({ host: "127.0.0.1", port: engine.sftpPort });
+      const chunks: Buffer[] = [];
+      socket.setTimeout(10_000);
+      socket.on("data", (chunk: Buffer) => {
+        chunks.push(chunk);
+        const text = Buffer.concat(chunks).toString("utf8");
+        if (text.includes("\n")) {
+          socket.destroy();
+          resolve(text.trim());
+        }
+      });
+      socket.on("timeout", () => {
+        socket.destroy();
+        reject(new Error(`no SSH banner within 10s (got ${Buffer.concat(chunks).length} bytes)`));
+      });
+      socket.on("error", reject);
+    });
+    assert.match(banner, /^SSH-2\.0-ZaminZIM/);
   } finally {
     await engine.stop();
   }
