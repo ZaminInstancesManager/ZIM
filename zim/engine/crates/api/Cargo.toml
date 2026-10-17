@@ -71,6 +71,8 @@ uuid = { workspace = true }
 thiserror = { workspace = true }
 # ETag/idempotency fingerprint digests.
 sha2 = { workspace = true }
+# M27: the per-boot engine-control token's entropy source.
+rand_core = { workspace = true }
 # M7: splitting the WebSocket socket (SinkExt/StreamExt) in the
 # stream handler.
 futures-util = { workspace = true }

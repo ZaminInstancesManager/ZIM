@@ -10,6 +10,7 @@
 
 pub mod audit;
 pub mod auth;
+pub mod control;
 pub mod eggs;
 pub mod extensions;
 pub mod frontend;
@@ -205,6 +206,13 @@ pub fn conflict_on_backend(error: PersistenceError, message: &str) -> ApiError {
 /// Append an audit record (best-effort: audit failures are logged
 /// and swallowed — losing the trail must not fail the user-visible
 /// operation; the append-only log keeps no partial state).
+///
+/// M27 (AD-29's attribution hardening): the record carries the
+/// request's call attribution when one is in scope — a believed
+/// `X-ZIM-Addon` id rides as `metadata.addon_id` next to the user
+/// whose credentials authorized the call, and the user agent is
+/// filled from the same middleware-set attribution (both `None`
+/// outside a request, e.g. engine-internal actions).
 pub async fn audit(
     state: &Arc<AppState>,
     actor_id: Option<String>,
@@ -212,6 +220,8 @@ pub async fn audit(
     instance_id: Option<InstanceId>,
     metadata: serde_json::Value,
 ) {
+    let attribution = crate::middleware::current_attribution();
+    let metadata = merge_attribution(metadata, attribution.addon_id.as_deref());
     let record = zim_engine_domain::AuditRecord {
         id: 0,
         timestamp: chrono::Utc::now(),
@@ -221,11 +231,33 @@ pub async fn audit(
         instance_id,
         metadata,
         ip_address: None,
-        user_agent: None,
+        user_agent: attribution.user_agent,
     };
     let result = db_or_500(state, move |p| p.append_audit(&record)).await;
     if let Err(e) = result {
         eprintln!("zim_engine_api: audit append failed for {action:?}: {e}");
+    }
+}
+
+/// Merge the believed addon id into an audit record's metadata
+/// object. The metadata is an object per `AuditRecord::validate`;
+/// a non-object (only possible through a programming error in the
+/// caller) is left untouched — the audit append itself will reject
+/// it, which is the louder failure.
+fn merge_attribution(metadata: serde_json::Value, addon_id: Option<&str>) -> serde_json::Value {
+    match (addon_id, metadata) {
+        (Some(id), serde_json::Value::Object(mut map)) => {
+            // The believed attribution wins over any same-named key a
+            // caller baked into its own metadata — the middleware's
+            // registry check is the only path that makes an addon id
+            // a *fact*.
+            map.insert(
+                "addon_id".to_owned(),
+                serde_json::Value::String(id.to_owned()),
+            );
+            serde_json::Value::Object(map)
+        }
+        (_, other) => other,
     }
 }
 

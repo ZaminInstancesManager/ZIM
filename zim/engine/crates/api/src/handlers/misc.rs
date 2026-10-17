@@ -20,10 +20,17 @@ use zim_engine_domain::JobId;
 /// `GET /api/v1/health` — additive endpoint (spec §2 permits
 /// additive growth within v1): the browser integration layer's
 /// readiness probe. No auth; host validation still applies.
+///
+/// M27: `version` reports the RUNNING engine's build version — the
+/// value the About surface and the update channel's version-lag
+/// note (UPDATES.md §3) surface next to the installed one. It is
+/// the running process's version by construction (`env!`), not a
+/// stored row that could drift from the binary serving it.
 pub async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "status": "ok",
         "service": "zim_engine",
+        "version": env!("CARGO_PKG_VERSION"),
         "api_version": "v1",
     }))
 }
