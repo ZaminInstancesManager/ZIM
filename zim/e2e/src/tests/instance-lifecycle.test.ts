@@ -50,11 +50,13 @@ test("lifecycle: create → start → console ticks → stop (docker tier)", asy
       return lines.some((line) => line.includes("zim-e2e-tick")) ? lines : undefined;
     });
 
-    // Stop: graceful — SIGTERM'd container, state converges to stopped.
+    // Stop: graceful — SIGTERM'd container, state converges to the
+    // engine's four-state vocabulary for "not running": `offline`
+    // (AD-11 — there is no "stopped" status; offline IS stopped).
     await client.post(`/api/v1/instances/${instance.id}/stop`);
-    await eventually("stopped state", async () => {
+    await eventually("offline state", async () => {
       const state = await instanceState(client, instance.id);
-      return state.status === "stopped" ? state : undefined;
+      return state.status === "offline" ? state : undefined;
     });
 
     // And restart still works after a stop (the loop is real).
@@ -64,9 +66,9 @@ test("lifecycle: create → start → console ticks → stop (docker tier)", asy
       return state.status === "running" ? state : undefined;
     });
     await client.post(`/api/v1/instances/${instance.id}/stop`);
-    await eventually("stopped again", async () => {
+    await eventually("offline again", async () => {
       const state = await instanceState(client, instance.id);
-      return state.status === "stopped" ? state : undefined;
+      return state.status === "offline" ? state : undefined;
     });
   } finally {
     await engine.stop();

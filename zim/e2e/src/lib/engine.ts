@@ -4,9 +4,34 @@
  * (`engine.json` — the same contract the desktop shell uses), and
  * own its whole lifecycle including the two fault shapes the
  * suite needs: graceful stop (SIGTERM) and crash (SIGKILL).
+ *
+ * ## Termination discipline (M25 batch 12)
+ *
+ * The suite's own failure modes taught this file three rules the
+ * hard way (a 6-hour CI hang, run 5 of the E2E workflow):
+ *
+ * 1. **A test process must ALWAYS be able to exit.** An engine the
+ *    harness spawned holds its stderr pipe open; if the engine
+ *    ignores SIGTERM (a wedged Docker call mid-shutdown), the open
+ *    pipe keeps the Node event loop alive forever, the test file's
+ *    process never exits, `node --test` never frees its concurrency
+ *    slot, and every later test file hangs without ever starting.
+ *    So `stop()` escalates SIGTERM → SIGKILL and *destroys the stdio
+ *    handles* either way — the parent releases the child's pipes
+ *    even when the child refuses to die.
+ * 2. **No engine outlives the process that spawned it.** Every
+ *    spawned engine is registered process-wide; an `exit` hook
+ *    SIGKILLs the survivors (orphan engines would otherwise keep
+ *    running containers on the host after a failed test).
+ * 3. **A dying engine tells you why it died.** The captured stderr
+ *    is printed on stop whenever it looks noisy (start failures,
+ *    panics, shutdown problems) — the engine's own "instance X
+ *    start failed: …" lines are the single most valuable diagnostic
+ *    the suite has, and losing them to a captured-but-never-printed
+ *    buffer turned a five-minute diagnosis into a five-hour one.
  */
 
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { join } from "node:path";
 import { readFile, rm } from "node:fs/promises";
 import {
@@ -33,12 +58,14 @@ export interface EngineHandle {
   readonly admin: BootstrapAdmin;
   /** `https://127.0.0.1:{port}` — the engine's only origin. */
   readonly origin: string;
-  /** SIGTERM + wait for exit (the graceful path removes engine.json). */
+  /** SIGTERM (graceful) → SIGKILL (escaltor) + reaped pipes. */
   stop(): Promise<void>;
   /** SIGKILL + wait for exit (the crash-reconciliation shape). */
   crash(): Promise<void>;
   /** The captured stderr tail, for failure diagnostics. */
   stderrTail(lines: number): string;
+  /** Print the stderr tail if it looks noisy (diagnostics). */
+  reportIfNoisy(): void;
 }
 
 /** The discovery file's shape (zim/engine/crates/main/src/discovery.rs). */
@@ -49,6 +76,53 @@ interface DiscoveryDoc {
 }
 
 const ADMIN_EMAIL = "admin@zim.local";
+
+// ── The process-wide engine registry (rule 2) ─────────────────────
+
+const liveEngines = new Set<ChildProcess>();
+let exitHookArmed = false;
+
+function registerEngine(child: ChildProcess): void {
+  liveEngines.add(child);
+  child.on("close", () => {
+    liveEngines.delete(child);
+  });
+  if (!exitHookArmed) {
+    exitHookArmed = true;
+    process.on("exit", () => {
+      for (const engine of liveEngines) {
+        try {
+          engine.kill("SIGKILL");
+        } catch {
+          // already gone — the registry just hasn't reaped it yet
+        }
+      }
+    });
+  }
+}
+
+/**
+ * Release every event-loop handle the child holds in THIS process:
+ * destroying the piped stdio streams is what actually lets the test
+ * process exit even when the child ignores both TERM and KILL
+ * (a fully wedged child keeps the loop alive through the socket
+ * handle alone — `unref` on the child covers the process handle).
+ */
+function releasePipes(child: ChildProcess): void {
+  for (const stream of [child.stdout, child.stderr]) {
+    if (stream !== null && stream !== undefined) {
+      stream.destroy();
+    }
+  }
+  try {
+    child.unref();
+  } catch {
+    // already reaped
+  }
+}
+
+/** Stderr lines worth surfacing on stop (rule 3). */
+const NOISY_STDERR = /start failed|panic|shut ?down|error|warn|unavailable/i;
 
 /**
  * Launch a fresh engine. Boot is "healthy" once the discovery file
@@ -78,13 +152,22 @@ export async function launchEngine(options: {
       ...(options.env ?? {}),
     },
   });
+  registerEngine(child);
 
+  // Live echo mode: ZIM_E2E_VERBOSE=1 mirrors the engine's stderr
+  // onto the console as it happens (the probe's instrument — the
+  // engine's own ZIM_DBG trace lines arrive with the diagnosis).
+  const verbose = process.env.ZIM_E2E_VERBOSE === "1";
   const stderrLines: string[] = [];
+  const tag = `[engine :${port}]`;
   child.stderr.on("data", (chunk: Buffer) => {
     for (const line of chunk.toString("utf8").split("\n")) {
       const trimmed = line.trim();
       if (trimmed !== "") {
         stderrLines.push(trimmed);
+        if (verbose) {
+          console.error(`${tag} ${trimmed}`);
+        }
       }
     }
   });
@@ -129,6 +212,7 @@ export async function launchEngine(options: {
   } catch (error) {
     // Boot failed: reap the child and surface what it printed.
     child.kill("SIGKILL");
+    releasePipes(child);
     throw new Error(
       `${String(error)}\nengine stderr tail:\n${stderrLines.slice(-30).join("\n")}`,
     );
@@ -144,21 +228,59 @@ export async function launchEngine(options: {
     origin: `https://127.0.0.1:${port}`,
     admin: { email: ADMIN_EMAIL, password },
     stop: async () => {
-      child.kill("SIGTERM");
-      const code = await withTimeout(exited, 15_000, "engine did not exit after SIGTERM");
-      if (code !== null && code !== 0) {
-        throw new Error(`engine exited ${code} on SIGTERM (expected 0)\n${handle.stderrTail(30)}`);
+      if (child.exitCode !== null || child.signalCode !== null) {
+        // Already dead (a prior crash(), or an external kill): just
+        // release the pipes so the test process can exit.
+        releasePipes(child);
+        await rm(dataDir, { recursive: true, force: true }).catch(() => {});
+        return;
       }
-      await rm(dataDir, { recursive: true, force: true });
+      child.kill("SIGTERM");
+      let code = await withTimeout(exited, 15_000, undefined);
+      if (code === TIMEOUT) {
+        // The graceful deadline passed: surface what the engine was
+        // doing, then escalate — a wedged engine must never wedge
+        // the suite (rule 1).
+        console.error(
+          `${tag} SIGTERM deadline passed — escalating to SIGKILL\n` +
+            `${tag} stderr tail:\n${indent(stderrLines.slice(-40))}`,
+        );
+        child.kill("SIGKILL");
+        code = await withTimeout(exited, 10_000, undefined);
+        if (code === TIMEOUT) {
+          // Even KILL produced no exit event (kernel-level wedge /
+          // zombie reaping stall): release the handles regardless.
+          console.error(`${tag} engine survived SIGKILL — releasing pipes`);
+        }
+      }
+      releasePipes(child);
+      if (typeof code === "number" && code !== 0) {
+        console.error(
+          `${tag} engine exited ${code} on SIGTERM (expected 0)\n` +
+            `${tag} stderr tail:\n${indent(stderrLines.slice(-40))}`,
+        );
+      }
+      await rm(dataDir, { recursive: true, force: true }).catch(() => {});
     },
     crash: async () => {
       child.kill("SIGKILL");
       await withTimeout(exited, 15_000, "engine did not exit after SIGKILL");
+      releasePipes(child);
       // Intentionally KEEP the data dir: reconciliation reads it.
     },
     stderrTail: (lines: number) => stderrLines.slice(-lines).join("\n"),
+    reportIfNoisy: () => {
+      const tail = stderrLines.slice(-60);
+      if (tail.some((line) => NOISY_STDERR.test(line))) {
+        console.error(`${tag} stderr tail (noisy):\n${indent(tail)}`);
+      }
+    },
   };
   return handle;
+}
+
+function indent(lines: string[]): string {
+  return lines.map((line) => `    ${line}`).join("\n");
 }
 
 /**
@@ -212,15 +334,21 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
+/** The sentinel a timed-out race resolves with (see withTimeout). */
+const TIMEOUT = Symbol("withTimeout");
+
 function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
-  what: string,
-): Promise<T> {
+  what: string | undefined,
+): Promise<T | typeof TIMEOUT> {
   return Promise.race([
     promise,
     sleep(timeoutMs).then(() => {
+      if (what === undefined) {
+        return TIMEOUT;
+      }
       throw new Error(what);
     }),
-  ]);
+  ]) as Promise<T | typeof TIMEOUT>;
 }

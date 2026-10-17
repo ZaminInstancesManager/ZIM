@@ -8,8 +8,9 @@
   "scripts": {
     "check": "tsc --project tsconfig.json --noEmit",
     "build": "tsc --project tsconfig.json && node scripts/fix-imports.mjs .build",
-    "test": "npm run build && node --test .build/tests/*.test.js",
-    "test:filter": "npm run build && node --test --test-name-pattern"
+    "test": "npm run build && node --test --test-timeout=420000 .build/tests/*.test.js",
+    "test:filter": "npm run build && node --test --test-timeout=420000 --test-name-pattern",
+    "probe": "npm run build && node .build/probe.js"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

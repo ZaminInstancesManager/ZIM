@@ -33,6 +33,8 @@ export interface ApiClient {
   get(path: string): Promise<any>;
   /** A GET returning the raw status + text (negative-path asserts). */
   tryGet(path: string): Promise<{ status: number; body: string }>;
+  /** A POST returning the raw status + text (contract asserts). */
+  tryPost(path: string, body?: unknown): Promise<{ status: number; body: string }>;
   /** A JSON POST (asserts 2xx). */
   post(path: string, body?: unknown): Promise<any>;
   /** A JSON POST with an explicit content type (raw upload bodies). */
@@ -129,6 +131,12 @@ export function makeClient(engine: EngineHandle): ApiClient {
 
     async tryGet(path: string): Promise<{ status: number; body: string }> {
       const response = await request("GET", path);
+      return { status: response.status, body: await response.text() };
+    },
+
+    async tryPost(path: string, body?: unknown): Promise<{ status: number; body: string }> {
+      const payload = body === undefined ? undefined : JSON.stringify(body);
+      const response = await request("POST", path, payload);
       return { status: response.status, body: await response.text() };
     },
 

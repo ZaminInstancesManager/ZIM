@@ -65,27 +65,31 @@ test("schedules: create → validate → list → update → run-now → delete"
     assert.equal(String(updated.name), "nightly restart (paused)");
     assert.equal(updated.is_active, false);
 
-    // Trigger now: on the docker tier a durable job is created; on
-    // the null tier the engine refuses the dispatch up front — the
-    // power action needs a container runtime that is not there —
-    // and that 400 refusal IS the null tier's honest contract.
+    // Trigger now: the engine's §10.6 run-now contract is a bodyless
+    // 204 — "dispatched" carries no envelope to assert on. On the
+    // docker tier the dispatch happens for real (the power queue
+    // sequences the action); on the null tier the engine refuses up
+    // front with 400 — the power action needs a container runtime
+    // that is not there — and that refusal IS the null tier's honest
+    // contract. (The earlier batch asserted a JSON body here that the
+    // engine never promised; the raw-status form pins the real
+    // contract on both tiers.)
     const tier = await detectTier();
+    const triggered = await client.tryPost(
+      `/api/v1/instances/${instance.id}/schedules/${scheduleId}/run`,
+    );
     if (tier.tier === "docker") {
-      const triggered = await client.post(
-        `/api/v1/instances/${instance.id}/schedules/${scheduleId}/run`,
-      );
-      assert.ok(triggered !== null && triggered !== undefined, "run-now answered");
-    } else {
-      let runRefused = false;
-      try {
-        await client.post(`/api/v1/instances/${instance.id}/schedules/${scheduleId}/run`);
-      } catch (error) {
-        runRefused = (error as { status: number }).status === 400;
-      }
       assert.ok(
-        runRefused,
-        `run-now on the null tier must be refused with 400 (${tier.detail})`,
+        triggered.status >= 200 && triggered.status < 300,
+        `run-now on the docker tier must answer 2xx, got ${triggered.status}: ${triggered.body.slice(0, 200)}`,
       );
+    } else {
+      assert.equal(
+        triggered.status,
+        400,
+        `run-now on the null tier must be refused with 400 (${tier.detail}), got ${triggered.status}: ${triggered.body.slice(0, 200)}`,
+      );
+      assert.match(triggered.body, /runtime/i);
     }
 
     // Delete: the list is empty again.

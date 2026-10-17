@@ -44,10 +44,12 @@ test("backups: create → job seals the archive → list → lock → delete (do
     );
     await client.post(`/api/v1/instances/${instance.id}/stop`);
     await waitFor(
-      "stopped state",
+      "offline state",
       async () => {
         const state = await instanceState(client, instance.id);
-        return state.status === "stopped" ? state : undefined;
+        // AD-11's four-state vocabulary: a stopped instance reports
+        // `offline` — there is no "stopped" status to wait for.
+        return state.status === "offline" ? state : undefined;
       },
       120_000,
       1_000,

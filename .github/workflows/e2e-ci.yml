@@ -45,6 +45,11 @@ jobs:
   e2e:
     name: E2E (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # The platform's own ceiling is 6h — a wedged test file once
+    # burned the whole budget silently (run 5: leaked engine pipes
+    # jammed every concurrency slot). 50 minutes is the honest
+    # ceiling for a suite whose healthy runs are ~10.
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
@@ -109,7 +114,25 @@ jobs:
         run: npm test
         # The harness resolves the engine binary itself
         # (`zim/engine/target/debug/zim_engine[.exe]`, platform-
-        # aware); no env plumbing needed.
+        # aware); no env plumbing needed. `--test-timeout` (in
+        # package.json) bounds every test so a wedged one FAILS with
+        # diagnostics instead of jamming the runner.
+
+      - name: Dump the Docker world (Linux diagnostics)
+        if: failure() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "== docker ps -a (ZIM-labeled) =="
+          docker ps -a --filter label=Service=ZIM || true
+          echo "== networks =="
+          docker network ls || true
+          echo "== pterodactyl0 =="
+          docker network inspect pterodactyl0 --format '{{json .IPAM}}' || true
+          for c in $(docker ps -aq --filter label=Service=ZIM | head -6); do
+            echo "== container $c =="
+            docker inspect "$c" --format '{{json .State}}' || true
+            docker logs --tail 30 "$c" 2>&1 || true
+          done
 
       - name: Upload failure traces
         if: failure()
