@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ZIM — Subusers</title>
+  <link rel="stylesheet" href="/zim/assets/main.css">
+  <script type="module" src="/zim/assets/subusers.js"></script>
+</head>
+<body>
+  <main class="page page-stub">
+    <zim-recovery-notice></zim-recovery-notice>
+
+    <header class="page-header">
+      <a class="backlink" href="/zim/servers" title="Servers">←</a>
+      <h1 id="server-name">Server</h1>
+      <span id="server-id" class="pill pill-muted mono">…</span>
+      <span class="pill pill-muted mono">subusers</span>
+    </header>
+
+    <section class="card" aria-label="Observed state">
+      <div class="console-toolbar">
+        <zim-status-dot id="status-dot" status="unknown" data-label="unknown"></zim-status-dot>
+        <span id="state-label" class="state-label">state: unknown</span>
+        <span class="spacer"></span>
+        <span id="subusers-hint" class="pill pill-muted mono" title="The owner is implicitly authorized">the owner needs no row</span>
+      </div>
+    </section>
+
+    <section class="card card-login" id="auth-gate" aria-label="Sign in" hidden>
+      <h2 class="card-title">Sign in to ZIM</h2>
+      <zim-login-form id="login"></zim-login-form>
+    </section>
+
+    <section class="card" aria-label="Subusers">
+      <h2 class="card-title">Subusers</h2>
+
+      <div class="console-toolbar" id="subusers-toolbar">
+        <button id="btn-add-subuser" class="pill pill-action" type="button" title="Add a subuser by user id">＋ Subuser</button>
+        <button id="btn-refresh" class="pill pill-action" type="button" title="Reload the list">↻ Refresh</button>
+        <span id="subusers-message" class="state-label" role="status"></span>
+      </div>
+
+      <form class="mgmt-form" id="subuser-form" hidden aria-label="New subuser">
+        <div class="field-row">
+          <div class="field">
+            <label for="subuser-id">User id</label>
+            <input id="subuser-id" type="text" autocomplete="off" placeholder="00000000-0000-0000-0000-000000000000" class="mono" />
+            <span class="hint">the user must already exist (see the users family)</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Grants</label>
+          <div id="subuser-grants" class="chip-row"></div>
+        </div>
+        <div class="buttons">
+          <button id="subuser-create" class="pill pill-action" type="submit">Add</button>
+          <button id="subuser-cancel" class="pill pill-muted" type="button">Cancel</button>
+        </div>
+      </form>
+
+      <table class="files-table" id="subusers-table">
+        <thead>
+          <tr>
+            <th scope="col" class="files-name">User</th>
+            <th scope="col" class="mgmt-grants">Grants</th>
+            <th scope="col" class="files-actions"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody id="subusers-list">
+          <tr><td colspan="3" class="empty">…</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

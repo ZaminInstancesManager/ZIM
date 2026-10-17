@@ -60,10 +60,14 @@ export async function api(path, options = {}) {
     const init = {
         credentials: "same-origin",
         method: options.method ?? (options.body !== undefined ? "POST" : "GET"),
-        headers: { Accept: "application/json" },
+        headers: { Accept: "application/json", ...(options.headers ?? {}) },
     };
     if (options.body !== undefined) {
-        init.headers = { Accept: "application/json", "Content-Type": "application/json" };
+        init.headers = {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            ...(options.headers ?? {}),
+        };
         init.body = JSON.stringify(options.body);
     }
     const response = await fetch(`/api/v1${path}`, init);
@@ -320,4 +324,259 @@ export function parentFilePath(path) {
         return ".";
     }
     return trimmed.slice(0, lastSlash);
+}
+/** Whether a job state is terminal — the engine's `JobState`
+ * vocabulary (`succeeded`, `failed`, `cancelled`); anything else
+ * (`pending`, `in_progress`, `cleanup_pending`) is still moving. */
+export function jobIsTerminal(state) {
+    return state === "succeeded" || state === "failed" || state === "cancelled";
+}
+/** Format a byte count for humans (binary units, KB-free) — the
+ * file manager's convention, shared by the management surfaces. */
+export function formatBytes(size) {
+    if (size < 1024) {
+        return `${size} B`;
+    }
+    const units = ["KiB", "MiB", "GiB", "TiB"];
+    let value = size;
+    let unit = -1;
+    do {
+        value /= 1024;
+        unit += 1;
+    } while (value >= 1024 && unit < units.length - 1);
+    return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unit]}`;
+}
+/** `GET /instances/{id}/backups` — the backup rows (sealed and
+ * in-progress together). */
+export async function listBackups(instanceId) {
+    const body = await api(`/instances/${encodeURIComponent(instanceId)}/backups`);
+    return body.data;
+}
+/** `POST /instances/{id}/backups` — create a backup: answers `202`'s
+ * body (both ids + the job's initial state); the row seals when the
+ * durable job completes. */
+export async function createBackup(instanceId) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/backups`, { method: "POST" });
+}
+/** `POST .../backups/{bid}/restore` — restore a backup: extraction
+ * lands in a staging directory and swaps into place, so a failed
+ * restore never corrupts the live data. */
+export async function restoreBackup(instanceId, backupId) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/backups/${encodeURIComponent(backupId)}/restore`, { method: "POST" });
+}
+/** `DELETE .../backups/{bid}` — delete a backup (its archive and row
+ * together). A locked backup refuses with `409 conflict`. */
+export async function deleteBackup(instanceId, backupId) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/backups/${encodeURIComponent(backupId)}`, { method: "DELETE" });
+}
+/** `GET .../backups/{bid}/download` — the archive's raw bytes
+ * (`application/gzip`, `Content-Disposition: attachment`). */
+export async function downloadBackup(instanceId, backupId) {
+    const response = await fetch(`/api/v1/instances/${encodeURIComponent(instanceId)}/backups/${encodeURIComponent(backupId)}/download`, { credentials: "same-origin", headers: { Accept: "application/gzip" } });
+    if (!response.ok) {
+        throw await parseError(response);
+    }
+    return response.arrayBuffer();
+}
+/** `POST .../backups/{bid}/lock` / `DELETE` — toggle the deletion
+ * lock; both answer the updated row. */
+export async function setBackupLock(instanceId, backupId, locked) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/backups/${encodeURIComponent(backupId)}/lock`, { method: locked ? "POST" : "DELETE" });
+}
+/** `GET /jobs/{jid}` — one durable job's row (the create/restore
+ * progress oracle). */
+export async function getJob(jobId) {
+    return api(`/jobs/${encodeURIComponent(jobId)}`);
+}
+/** The structural cron check the engine's domain performs (5
+ * whitespace-separated non-empty fields) — mirrored client-side so
+ * the form can refuse before the round-trip. The engine remains
+ * the authority; this is a preview, not a bypass. */
+export function isStructurallyValidCron(expression) {
+    const fields = expression.trim().split(/\s+/);
+    return fields.length === 5 && fields.every((field) => field.length > 0);
+}
+/** `GET /instances/{id}/schedules` — the schedule rows. */
+export async function listSchedules(instanceId) {
+    const body = await api(`/instances/${encodeURIComponent(instanceId)}/schedules`);
+    return body.data;
+}
+/** `POST /instances/{id}/schedules` — create (201 answers the row;
+ * `next_run_at` stays null until the scheduler computes it). */
+export async function createSchedule(instanceId, body) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/schedules`, {
+        body,
+    });
+}
+/** `PATCH .../schedules/{sid}` — merge-update (pause/resume is the
+ * `is_active` flag; the engine revalidates the merged row). */
+export async function patchSchedule(instanceId, scheduleId, body) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/schedules/${encodeURIComponent(scheduleId)}`, { method: "PATCH", body });
+}
+/** `DELETE .../schedules/{sid}` — delete (204). */
+export async function deleteSchedule(instanceId, scheduleId) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/schedules/${encodeURIComponent(scheduleId)}`, { method: "DELETE" });
+}
+/** `POST .../schedules/{sid}/run` — trigger now (204 bodyless, or
+ * the honest 409/400 refusals: the `only_when_online` gate, or a
+ * missing container runtime on a degraded host). */
+export async function runScheduleNow(instanceId, scheduleId) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/schedules/${encodeURIComponent(scheduleId)}/run`, { method: "POST" });
+}
+/** The engine's `PermissionGrant` vocabulary (the dotted names the
+ * subuser family speaks; unknown names answer 400
+ * `validation_failed` listing them). Grouped the way the engine's
+ * own enum is grouped. */
+export const GRANT_VOCABULARY = [
+    { group: "Power & console", grants: ["websocket.connect", "control.console", "control.start", "control.stop", "control.restart"] },
+    { group: "Files", grants: ["file.read", "file.read_content", "file.write", "file.create", "file.delete", "file.archive"] },
+    { group: "Backups", grants: ["backup.read", "backup.create", "backup.update", "backup.delete", "backup.restore", "backup.download"] },
+    { group: "Allocations", grants: ["allocation.read", "allocation.create", "allocation.update", "allocation.delete"] },
+    { group: "Users", grants: ["user.read", "user.create", "user.update", "user.delete"] },
+    { group: "Schedules", grants: ["schedule.read", "schedule.create", "schedule.update", "schedule.delete"] },
+    { group: "Databases", grants: ["database.read", "database.create", "database.update", "database.delete", "database.view_password"] },
+    { group: "Settings", grants: ["settings.read", "settings.update"] },
+    { group: "Instance", grants: ["install", "transfer", "admin.instance"] },
+    { group: "Workloads", grants: ["workload.read", "workload.create", "workload.update", "workload.delete", "workload.migrate", "workload.snapshot", "workload.deploy", "network.expose", "network.unexpose"] },
+];
+/** Every grant name in one flat list (checkbox order follows
+ * GRANT_VOCABULARY's grouping). */
+export const ALL_GRANTS = GRANT_VOCABULARY.flatMap((entry) => entry.grants);
+/** `GET /instances/{id}/subusers` — the subuser rows. */
+export async function listSubusers(instanceId) {
+    const body = await api(`/instances/${encodeURIComponent(instanceId)}/subusers`);
+    return body.data;
+}
+/** `POST /instances/{id}/subusers` — add a user (must exist; the
+ * owner/caller is already implicitly authorized and refuses with
+ * 409). 201 answers the row. */
+export async function addSubuser(instanceId, userId, grants) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/subusers`, {
+        body: { user_id: userId, grants },
+    });
+}
+/** `PATCH .../subusers/{uid}` — replace the grant set. */
+export async function updateSubuser(instanceId, userId, grants) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/subusers/${encodeURIComponent(userId)}`, { method: "PATCH", body: { grants } });
+}
+/** `DELETE .../subusers/{uid}` — remove (204). */
+export async function removeSubuser(instanceId, userId) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/subusers/${encodeURIComponent(userId)}`, { method: "DELETE" });
+}
+/** `PATCH /instances/{id}` — update the row under §8's concurrency
+ * gate: `If-Match` carries the last-read ETag (the row's own
+ * `etag` field); a stale ETag answers `412 precondition_failed`
+ * with the current one, and the caller re-reads and retries. */
+export async function patchInstance(instanceId, request, etag) {
+    return api(`/instances/${encodeURIComponent(instanceId)}`, {
+        method: "PATCH",
+        body: request,
+        headers: { "If-Match": etag },
+    });
+}
+/** `DELETE /instances/{id}` — delete the instance (unassigns the
+ * primary allocation first; child rows cascade) under the same
+ * §8 If-Match gate. */
+export async function deleteInstance(instanceId, etag) {
+    return api(`/instances/${encodeURIComponent(instanceId)}`, {
+        method: "DELETE",
+        headers: { "If-Match": etag },
+    });
+}
+/** Mebibytes → bytes (the form's unit for memory/swap/disk). */
+export function mibToBytes(mib) {
+    return Math.round(mib * 1024 * 1024);
+}
+/** Bytes → mebibytes, fractional (512 MiB exactly, 1.5 GiB
+ * honestly) — the form's prefill conversion. */
+export function bytesToMib(bytes) {
+    return bytes / (1024 * 1024);
+}
+/** Parse one whole non-negative integer (blank → undefined). */
+function wholeNumber(raw) {
+    const trimmed = raw.trim();
+    if (trimmed === "") {
+        return undefined;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+        return undefined;
+    }
+    return parsed;
+}
+/** Parse one non-negative MiB quantity (blank → undefined; the
+ * value may carry a fraction — 512.5 MiB is a real quantity). */
+function mibNumber(raw) {
+    const trimmed = raw.trim();
+    if (trimmed === "") {
+        return undefined;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+        return undefined;
+    }
+    return parsed;
+}
+/** Build the PATCH body from the form's values. The full-form
+ * save: every editable field rides every save (prefilled values
+ * make them all present); a blank `external_id` stays undefined —
+ * this form never clears what PATCH cannot clear. Returns `null`
+ * when the shape is invalid (a bad number), so the page can refuse
+ * before the round-trip. */
+export function settingsFormToPatch(values) {
+    const name = values.name.trim();
+    if (name === "") {
+        return null;
+    }
+    const memoryMib = mibNumber(values.memoryMib);
+    const swapMib = mibNumber(values.swapMib);
+    const diskMib = mibNumber(values.diskMib);
+    const cpu = wholeNumber(values.cpuMillicores);
+    const io = wholeNumber(values.ioWeight);
+    const backupLimit = wholeNumber(values.backupLimit);
+    const databaseLimit = wholeNumber(values.databaseLimit);
+    const allocationLimit = wholeNumber(values.allocationLimit);
+    if (memoryMib === undefined ||
+        swapMib === undefined ||
+        diskMib === undefined ||
+        cpu === undefined ||
+        io === undefined) {
+        return null;
+    }
+    if ((values.backupLimit.trim() !== "" && backupLimit === undefined) ||
+        (values.databaseLimit.trim() !== "" && databaseLimit === undefined) ||
+        (values.allocationLimit.trim() !== "" && allocationLimit === undefined)) {
+        return null;
+    }
+    const request = {
+        name,
+        description: values.description,
+        startup: values.startup,
+        image: values.image,
+        limits: {
+            memory: mibToBytes(memoryMib),
+            swap: mibToBytes(swapMib),
+            disk: mibToBytes(diskMib),
+            io_weight: io,
+            cpu_millicores: cpu,
+            threads: values.threads.trim() === "" ? null : values.threads.trim(),
+            oom_disabled: values.oomDisabled,
+        },
+        crash_detection_enabled: values.crashDetectionEnabled,
+        skip_egg_scripts: values.skipEggScripts,
+    };
+    if (backupLimit !== undefined) {
+        request.backup_limit = backupLimit;
+    }
+    if (databaseLimit !== undefined) {
+        request.database_limit = databaseLimit;
+    }
+    if (allocationLimit !== undefined) {
+        request.allocation_limit = allocationLimit;
+    }
+    const externalId = values.externalId.trim();
+    if (externalId !== "") {
+        request.external_id = externalId;
+    }
+    return request;
 }
