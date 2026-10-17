@@ -200,18 +200,26 @@ pub fn installed_engine_version(engine_path: &Path) -> Option<String> {
 /// watches the port (or the process) go quiet.
 pub fn request_engine_shutdown(data_dir: &Path, port: u16) -> Result<(), String> {
     let token = std::fs::read_to_string(data_dir.join("engine.token"))
-        .map_err(|e| format!("the engine-control token is unreadable ({}): {e}", data_dir.display()))?
+        .map_err(|e| {
+            format!(
+                "the engine-control token is unreadable ({}): {e}",
+                data_dir.display()
+            )
+        })?
         .trim()
         .to_owned();
     if token.is_empty() {
         return Err("the engine-control token is empty".to_owned());
     }
     let body = "{\"action\":\"shutdown\"}";
-    let (status, _content_type, response) = https_post_json(port, "/api/v1/engine/control", &token, body)
-        .map_err(|e| format!("the engine-control call failed: {e}"))?;
+    let (status, _content_type, response) =
+        https_post_json(port, "/api/v1/engine/control", &token, body)
+            .map_err(|e| format!("the engine-control call failed: {e}"))?;
     if status != 202 {
         let detail = String::from_utf8_lossy(&response);
-        return Err(format!("the engine refused the shutdown (HTTP {status}): {detail}"));
+        return Err(format!(
+            "the engine refused the shutdown (HTTP {status}): {detail}"
+        ));
     }
     Ok(())
 }

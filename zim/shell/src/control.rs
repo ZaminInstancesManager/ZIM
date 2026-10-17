@@ -58,11 +58,9 @@ pub async fn stop_engine(app: &AppHandle) -> Result<(), String> {
     // The request itself is a short, bounded blocking call (the
     // shell's hand-rolled HTTPS client) — keep it off the async
     // runtime's worker.
-    tokio::task::spawn_blocking(move || {
-        crate::engine::request_engine_shutdown(&data_dir, port)
-    })
-    .await
-    .map_err(|e| format!("the engine-control task panicked: {e}"))??;
+    tokio::task::spawn_blocking(move || crate::engine::request_engine_shutdown(&data_dir, port))
+        .await
+        .map_err(|e| format!("the engine-control task panicked: {e}"))??;
 
     // Watch the drain: the health probe stops answering.
     let deadline = tokio::time::Instant::now() + DRAIN_WAIT;

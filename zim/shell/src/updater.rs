@@ -72,21 +72,32 @@ async fn install(app: AppHandle, update: Update) {
     set_label(&app, &format!("Downloading v{version}…"));
     eprintln!("zim_shell: updater: v{version} available, downloading");
     let mut downloaded: u64 = 0;
-    let download = update
-        .download(|chunk, total| {
-            downloaded += chunk as u64;
-            if let Some(total) = total {
-                let percent = (downloaded as f64 / total as f64 * 100.0).round() as u64;
-                set_label(&app, &format!("Downloading v{version}… {percent}%"));
-            }
-        })
+    // The pinned plugin's split API: download() returns the payload
+    // bytes; install(bytes) consumes them — the coordination point
+    // sits exactly between the two.
+    let payload = update
+        .download(
+            |chunk, total| {
+                downloaded += chunk as u64;
+                if let Some(total) = total {
+                    let percent = (downloaded as f64 / total as f64 * 100.0).round() as u64;
+                    set_label(&app, &format!("Downloading v{version}… {percent}%"));
+                }
+            },
+            || {
+                set_label(&app, &format!("Installing v{version}…"));
+            },
+        )
         .await;
-    if let Err(error) = download {
-        set_label(&app, "Update failed");
-        eprintln!("zim_shell: updater: download failed: {error}");
-        restore_label_later(app);
-        return;
-    }
+    let bytes = match payload {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            set_label(&app, "Update failed");
+            eprintln!("zim_shell: updater: download failed: {error}");
+            restore_label_later(app);
+            return;
+        }
+    };
 
     // Windows only: stop the engine BEFORE the installer replaces
     // its files. Servers keep running (the engine's drain leaves
@@ -98,17 +109,14 @@ async fn install(app: AppHandle, update: Update) {
             Ok(()) => {}
             Err(message) => {
                 set_label(&app, "Update failed — engine still running");
-                eprintln!(
-                    "zim_shell: updater: cannot stop the engine for the install: {message}"
-                );
+                eprintln!("zim_shell: updater: cannot stop the engine for the install: {message}");
                 restore_label_later(app);
                 return;
             }
         }
     }
 
-    set_label(&app, &format!("Installing v{version}…"));
-    match update.install().await {
+    match update.install(bytes) {
         Ok(()) => {
             eprintln!("zim_shell: updater: v{version} installed; relaunching");
             // The engine (already drained on Windows; untouched

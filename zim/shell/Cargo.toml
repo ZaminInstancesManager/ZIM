@@ -39,6 +39,11 @@ serde_json = "1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 sha2 = "0.10"
 thiserror = "2"
+# M27: the engine-control client's watched drain — spawn_blocking
+# for the bounded HTTPS calls and async sleeps for the poll loop
+# (tauri's async_runtime wraps tokio, but its re-export surface
+# has no sleep; the shell states its need directly).
+tokio = { version = "1", features = ["rt", "time"] }
 
 # 2026-10-16: every zip crate release from 2.0.0 through 9.0.2 was
 # wholesale-yanked on crates.io (only 9.0.3/9.0.4 remain installable).
