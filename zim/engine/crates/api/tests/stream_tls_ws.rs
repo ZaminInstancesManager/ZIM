@@ -377,7 +377,7 @@ async fn tls_websocket(engine: &TlsEngine, instance_id: &str, cookie: &str) -> W
         .await
         .expect("the TLS handshake completes against the loopback certificate");
 
-    let (socket, response) = tokio_tungstenite::client::client(request, tls_stream)
+    let (socket, response) = tokio_tungstenite::client_async(request, tls_stream)
         .await
         .expect("the wss:// upgrade completes over the production accept loop");
     assert_eq!(response.status(), 101, "the handshake is a protocol switch");
