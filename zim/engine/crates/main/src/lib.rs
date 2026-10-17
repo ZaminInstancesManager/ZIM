@@ -459,8 +459,13 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
     // The file surface's second doorway: the same chrooted tree,
     // the same grant table, served over SSH for the
     // FileZilla-shaped world. Loopback + password-gated by
-    // default; a bind failure is a boot failure (the operator
-    // asked for the surface — ZIM_SFTP_ENABLED=0 opts out).
+    // default. A bind failure DEGRADES (the surface is off, the
+    // engine boots, the HTTP file family keeps working) — the
+    // discovery-file discipline: a busy port on a shared machine
+    // (another engine, an operator's sshd) must never brick the
+    // console, the servers list, and the rest of the product for
+    // the sake of one secondary transport. ZIM_SFTP_ENABLED=0
+    // opts out entirely.
     let sftp = if options.sftp.enabled {
         match zim_engine_sftp::start(
             Arc::clone(&persistence),
@@ -476,7 +481,13 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
                 );
                 Some(running)
             }
-            Err(e) => return Err(format!("cannot start the SFTP transport: {e}")),
+            Err(e) => {
+                eprintln!(
+                    "zim_engine: SFTP transport unavailable ({e}); the file API keeps serving — \
+                     free the port or set ZIM_SFTP_PORT"
+                );
+                None
+            }
         }
     } else {
         eprintln!("zim_engine: SFTP transport disabled (ZIM_SFTP_ENABLED=0)");

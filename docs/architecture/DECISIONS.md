@@ -1068,7 +1068,12 @@ own surface — the tab and the tree belong together).
   (`sftp_host_ed25519`, 0600), regenerated when unreadable — the
   loopback TLS certificate's lifecycle. Default listener
   `127.0.0.1:2022` (Wings's own SFTP port), `ZIM_SFTP_ENABLED=0`
-  opts out; the discovery file carries `sftp_port`.
+  opts out; the discovery file carries `sftp_port`. A bind failure
+  degrades (loud stderr, no sftp_port in discovery, the HTTP file
+  family unaffected) rather than failing the boot — a busy 2022 on
+  a shared machine (another engine's transport, an operator's own
+  listener) must never take the console and the whole product down
+  with one secondary transport.
 - The UI (batch 3) is the frontend's own page over the HTTP
   family — breadcrumb, listing, upload, download, new file/folder,
   rename, delete, archive/extract — never a second policy.

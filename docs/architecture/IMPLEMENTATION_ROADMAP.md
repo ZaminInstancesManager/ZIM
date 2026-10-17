@@ -1359,10 +1359,14 @@ with the transport stamped) — three doorways into it (AD-33).
   host key with the loopback TLS certificate's lifecycle; audit
   rows with `"transport": "sftp"` (one row per written file, at
   handle close); default `127.0.0.1:2022` (Wings's own port),
-  `ZIM_SFTP_ENABLED=0` opts out; the discovery file carries
-  `sftp_port`. The in-process suite drives a real russh client
-  through a real handshake and the real protocol — the
-  round-trip, the grammar, the grant table, the lockout.
+  `ZIM_SFTP_ENABLED=0` opts out, and a busy port DEGRADES (the
+  surface is off, the engine boots, the HTTP file family keeps
+  serving — the discovery-file discipline; concurrent engines and
+  an operator's own 2022 listener must never brick the product);
+  the discovery file carries `sftp_port`. The in-process suite
+  drives a real russh client through a real handshake and the real
+  protocol — the round-trip, the grammar, the grant table, the
+  lockout.
 - **The file manager UI** (batch 3): `zim://servers/{id}/files`
   graduated from the shared stub to its own page — breadcrumb
   navigation, listing with honest metadata, upload (the real file

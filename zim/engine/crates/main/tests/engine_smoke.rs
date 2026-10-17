@@ -193,3 +193,64 @@ async fn ssh_banner(port: u16) -> String {
         .trim_end_matches(['\r', '\n'])
         .to_owned()
 }
+
+/// M28's degrade discipline: an SFTP port already owned by another
+/// process (another engine's transport, an operator's listener) must
+/// never brick the boot — the engine comes up healthy, serves HTTPS,
+/// and the discovery file simply carries no `sftp_port`.
+#[tokio::test]
+async fn a_busy_sftp_port_degrades_instead_of_failing_the_boot() {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let data_dir = std::env::temp_dir().join(format!(
+        "zim_engine_smoke_sftpbusy_{}_{}",
+        std::process::id(),
+        stamp
+    ));
+    let data_dir = data_dir.to_str().unwrap().to_owned();
+
+    // Occupy an SFTP port with an unrelated listener first.
+    let squatter = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let taken_port = squatter.local_addr().unwrap().port();
+
+    let options = zim_engine_main::EngineOptions {
+        data_dir: data_dir.clone().into(),
+        port: 0,
+        bootstrap_admin_email: "smoke@zim.local".to_owned(),
+        bootstrap_admin_password: Some("smoke test password".to_owned()),
+        sftp: zim_engine_sftp::SftpOptions {
+            enabled: true,
+            bind: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            port: taken_port,
+        },
+    };
+    let engine = tokio::time::timeout(Duration::from_secs(30), zim_engine_main::startup(options))
+        .await
+        .expect("the engine boots despite the busy SFTP port")
+        .expect("the engine starts serving");
+
+    // The HTTPS surface is fully alive.
+    let base = format!("https://127.0.0.1:{}/api/v1", engine.local_addr.port());
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .unwrap();
+    let response = client.get(format!("{base}/health")).send().await.unwrap();
+    assert_eq!(response.status(), 200);
+
+    // The discovery file records the HTTPS port but NOT an SFTP one.
+    let discovery = zim_engine_main::discovery::read(std::path::Path::new(&data_dir))
+        .expect("discovery exists");
+    assert_eq!(discovery.port, engine.local_addr.port());
+    assert_eq!(discovery.sftp_port, None, "no sftp_port when degraded");
+
+    // The squatter still owns the port (the engine never took it).
+    let still_owner = squatter.local_addr().unwrap().port();
+    assert_eq!(still_owner, taken_port);
+    drop(squatter);
+
+    engine.shutdown().await;
+    let _ = std::fs::remove_dir_all(&data_dir);
+}
