@@ -485,7 +485,9 @@ async fn wss_stream_carries_console_output_over_the_production_tls_loop() {
         .send()
         .await
         .unwrap();
-    assert_eq!(input.status(), 202);
+    // Console input answers 200 with the echo acknowledgement
+    // (§10.3 — the same status stream_ws.rs asserts).
+    assert_eq!(input.status(), 200);
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     let mut echoed = false;
