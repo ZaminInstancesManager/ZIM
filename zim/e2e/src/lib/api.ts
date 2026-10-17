@@ -234,7 +234,7 @@ export async function createInstance(
     startup?: string;
     owner_id?: string;
   },
-): Promise<CreatedInstance> {
+): Promise<CreatedInstance & { uuid: string; uuid_short: string }> {
   // A fresh engine's node has no free allocations — create the
   // pool once per (client, node) before the first instance.
   const ensured = ensuredNodesFor(client);
@@ -250,7 +250,14 @@ export async function createInstance(
       options.startup ??
       "sh -c 'while true; do echo zim-e2e-tick; sleep 1; done'",
   });
-  return { id: String(instance.id), name: String(instance.name) };
+  // The container's docker name is the instance UUID (not the row
+  // id) — the fault-injection family reaches for it directly.
+  return {
+    id: String(instance.id),
+    name: String(instance.name),
+    uuid: String(instance.uuid),
+    uuid_short: String(instance.uuid_short),
+  };
 }
 
 /** The observed state envelope for one instance. */

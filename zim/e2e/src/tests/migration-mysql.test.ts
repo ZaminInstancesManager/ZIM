@@ -389,10 +389,16 @@ test("migration (live MySQL): the same fixture data through a real panel databas
   const scratch = await mkdtemp(join(tmpdir(), "zim-mysql-seed-"));
   const seedPath = join(scratch, "seed.sql");
   await writeFile(seedPath, seedSql(fixture), "utf8");
-  const seed = await run("mysql", [...cliArgs, database], {
-    timeoutMs: 60_000,
-    env: cliEnv,
-  });
+  // SOURCE (not stdin redirection): the run helper spawns without a
+  // stdin pipe, so the SQL file is named on the client's own
+  // command line — the first CI run taught this the quiet way (an
+  // empty stdin seeded nothing and the importer answered "Table
+  // 'panel.users' doesn't exist").
+  const seed = await run(
+    "mysql",
+    [...cliArgs, database, "-e", `SOURCE ${seedPath.replaceAll("\\", "/")}`],
+    { timeoutMs: 60_000, env: cliEnv },
+  );
   assert.equal(
     seed.code,
     0,

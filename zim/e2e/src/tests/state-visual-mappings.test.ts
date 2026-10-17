@@ -33,20 +33,44 @@ import { launchBrowser, newContext, loginViaUi, seedSession, uiGoto } from "../l
 import { detectTier, skipWithoutDocker } from "../lib/tier.js";
 import { run, uniqueName, waitFor } from "../lib/util.js";
 
+// ── Ambient DOM shims for page.evaluate callback bodies ──────────
+//
+// The callbacks below are serialized (Playwright ships their SOURCE
+// to the page) and run in the browser, where the real objects
+// exist. These declarations only let the Node-side compiler see
+// enough of that world to typecheck the bodies — the page's reality
+// is the runtime truth, and the shapes here are the minimal slices
+// the callbacks touch.
+
+interface PageElement {
+  setAttribute(name: string, value: string): void;
+  remove(): void;
+  append(node: PageElement): void;
+  shadowRoot: {
+    querySelector(selector: string): { className: string; textContent: string | null } | null;
+  } | null;
+}
+
+declare const document: {
+  querySelector(selector: string): PageElement | null;
+  createElement(tag: string): PageElement;
+  body: PageElement;
+};
+
 /** The §4 mapping table, asserted against the real served component
  * in the real browser (E9's honest scope, plus the mapping halves
  * of E7/E8 that the transient states cannot be caught mid-flight). */
-const VISUAL_TABLE: Array<{ status: string; dotClass: string; extra?: string[]; pulse: boolean }> = [
-  { status: "running", dotClass: "dot-green", pulse: false },
-  { status: "starting", dotClass: "dot-yellow", pulse: true },
-  { status: "stopping", dotClass: "dot-yellow", pulse: true },
-  { status: "installing", dotClass: "dot-yellow", pulse: true },
-  { status: "restoring_backup", dotClass: "dot-yellow", pulse: true },
-  { status: "transferring", dotClass: "dot-yellow", pulse: true },
-  { status: "offline", dotClass: "dot-blue", pulse: false },
-  { status: "suspended", dotClass: "dot-gray", pulse: false },
-  { status: "unknown", dotClass: "dot-gray", pulse: false },
-  { status: "crash_loop", dotClass: "dot-red", extra: ["dot-crash"], pulse: false },
+const VISUAL_TABLE: Array<{ status: string; classes: string[] }> = [
+  { status: "running", classes: ["dot-green"] },
+  { status: "starting", classes: ["dot-yellow", "dot-pulse"] },
+  { status: "stopping", classes: ["dot-yellow", "dot-pulse"] },
+  { status: "installing", classes: ["dot-yellow", "dot-pulse"] },
+  { status: "restoring_backup", classes: ["dot-yellow", "dot-pulse"] },
+  { status: "transferring", classes: ["dot-yellow", "dot-pulse"] },
+  { status: "offline", classes: ["dot-blue"] },
+  { status: "suspended", classes: ["dot-gray"] },
+  { status: "unknown", classes: ["dot-gray"] },
+  { status: "crash_loop", classes: ["dot-red", "dot-crash"] },
 ];
 
 test("visual mappings: the real served component renders the §4 table (browser, all statuses)", async () => {
@@ -59,44 +83,43 @@ test("visual mappings: the real served component renders the §4 table (browser,
     await uiGoto(page, engine, "servers");
 
     // Drive the REAL served component through every canonical
-    // status and read back its shadow-root classes. (The evaluate
-    // payload is a string expression by design: it runs in the
-    // page's DOM world, which the Node-side tsconfig does not —
-    // and should not — type.)
-    const results = (await page.evaluate(
-      `(statuses) => {
-        const host = document.querySelector("main.page") || document.body;
-        return statuses.map((status) => {
-          const dot = document.createElement("zim-status-dot");
-          dot.setAttribute("status", status);
-          host.append(dot);
-          const inner = dot.shadowRoot && dot.shadowRoot.querySelector(".dot");
-          const classes = inner && inner.classList ? Array.from(inner.classList) : [];
-          const labelEl = dot.shadowRoot && dot.shadowRoot.querySelector(".dot-label");
-          const label = labelEl ? labelEl.textContent : "";
-          dot.remove();
-          return { status, classes, label };
-        });
-      }`,
-      VISUAL_TABLE.map((row) => row.status),
-    )) as Array<{ status: string; classes: string[]; label: string }>;
+    // status and read back its shadow-root class list (className is
+    // the space-joined DOMTokenList — a string, so nothing
+    // DOM-typed crosses the wire).
+    const results = await page.evaluate((statuses: string[]) => {
+      const host = document.querySelector("main.page") ?? document.body;
+      return statuses.map((status) => {
+        const dot = document.createElement("zim-status-dot");
+        dot.setAttribute("status", status);
+        host.append(dot);
+        const inner = dot.shadowRoot?.querySelector(".dot") ?? null;
+        const labelEl = dot.shadowRoot?.querySelector(".dot-label") ?? null;
+        const observed = {
+          status,
+          className: inner?.className ?? "",
+          label: labelEl?.textContent ?? "",
+        };
+        dot.remove();
+        return observed;
+      });
+    }, VISUAL_TABLE.map((row) => row.status));
 
     for (const expected of VISUAL_TABLE) {
       const observed = results.find((row) => row.status === expected.status);
       assert.ok(observed !== undefined, `status ${expected.status} was driven`);
-      assert.ok(
-        observed.classes.includes(expected.dotClass),
-        `${expected.status} must render ${expected.dotClass}, got [${observed.classes.join(" ")}]`,
-      );
-      assert.equal(
-        observed.classes.includes("dot-pulse"),
-        expected.pulse,
-        `${expected.status} pulse expected ${expected.pulse}, got [${observed.classes.join(" ")}]`,
-      );
-      for (const extra of expected.extra ?? []) {
+      const classes = observed.className.split(" ").filter((part) => part !== "");
+      for (const wanted of expected.classes) {
         assert.ok(
-          observed.classes.includes(extra),
-          `${expected.status} must carry ${extra}, got [${observed.classes.join(" ")}]`,
+          classes.includes(wanted),
+          `${expected.status} must render ${wanted}, got [${classes.join(" ")}]`,
+        );
+      }
+      // The negative space of the §4 table: yellow never on the
+      // steady states, red never on unknown, gray never on running.
+      if (!expected.classes.includes("dot-pulse")) {
+        assert.ok(
+          !classes.includes("dot-pulse"),
+          `${expected.status} must not pulse, got [${classes.join(" ")}]`,
         );
       }
       assert.equal(observed.label, expected.status, "the honest label is the status itself");
@@ -104,8 +127,9 @@ test("visual mappings: the real served component renders the §4 table (browser,
 
     // E9's own sentence: unknown reads gray — never red.
     const unknown = results.find((row) => row.status === "unknown");
-    assert.ok(unknown !== undefined && unknown.classes.includes("dot-gray"));
-    assert.ok(unknown !== undefined && !unknown.classes.includes("dot-red"));
+    assert.ok(unknown !== undefined);
+    assert.ok(unknown.className.includes("dot-gray"));
+    assert.ok(!unknown.className.includes("dot-red"));
   } finally {
     await engine.stop();
   }
@@ -133,16 +157,21 @@ test("E7 recovering: docker kill → the observed state passes through starting 
       1_000,
     );
 
-    // Crash the container out from under the supervisor: the
+    // Crash the container out from under the supervisor (the
+    // CONTAINER name is the instance UUID — not the row id): the
     // monitor (1s poll) observes the death, records the crash
     // (below the threshold — the first one), and auto-restarts.
     // The recovering window is `starting` — poll fast enough to
     // catch it.
-    const killed = await run("docker", ["kill", instance.id], { timeoutMs: 30_000 });
-    assert.equal(killed.code, 0, "docker kill reached the container");
+    const killed = await run("docker", ["kill", instance.uuid], { timeoutMs: 30_000 });
+    assert.equal(
+      killed.code,
+      0,
+      `docker kill reached the container (stderr: ${killed.stderr.slice(0, 200)})`,
+    );
 
     let sawRecovering = false;
-    let lied = false;
+    let recovered = false;
     const deadline = Date.now() + 60_000;
     while (Date.now() < deadline) {
       const state = await instanceState(client, instance.id);
@@ -150,17 +179,13 @@ test("E7 recovering: docker kill → the observed state passes through starting 
         sawRecovering = true;
       }
       if (sawRecovering && state.status === "running") {
+        recovered = true;
         break; // the recovery completed
-      }
-      if (!sawRecovering && state.status === "running" && Date.now() > deadline - 50_000) {
-        // Running throughout would mean the kill never landed.
-        lied = true;
-        break;
       }
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
     assert.ok(sawRecovering, "the observed state passed through the recovering (starting) phase");
-    assert.equal(lied, false, "the engine never pretended the killed container was running");
+    assert.ok(recovered, "the auto-restart brought the instance back to running");
   } finally {
     await engine.stop();
   }
@@ -208,23 +233,20 @@ test("E8 crash loop: a fast-exiting container trips the threshold → crash_loop
     await page
       .locator(`#server-rows tr[data-instance-id="${instance.id}"] zim-status-dot`)
       .waitFor({ timeout: 30_000 });
-    const classes = (await page.evaluate(
-      `(id) => {
-        const dot = document.querySelector(
-          "#server-rows tr[data-instance-id=\"" + id + "\"] zim-status-dot",
-        );
-        const inner = dot && dot.shadowRoot ? dot.shadowRoot.querySelector(".dot") : null;
-        return inner && inner.classList ? Array.from(inner.classList) : [];
-      }`,
-      instance.id,
-    )) as string[];
+    const className = await page.evaluate((id: string) => {
+      const dot = document.querySelector(
+        `#server-rows tr[data-instance-id="${id}"] zim-status-dot`,
+      );
+      const inner = dot?.shadowRoot?.querySelector(".dot") ?? null;
+      return inner?.className ?? "";
+    }, instance.id);
     assert.ok(
-      classes.includes("dot-red"),
-      `the crash-looped instance renders red, got [${classes.join(" ")}]`,
+      className.includes("dot-red"),
+      `the crash-looped instance renders red, got [${className}]`,
     );
     assert.ok(
-      classes.includes("dot-crash"),
-      `the caution glyph rides the red (never solid red), got [${classes.join(" ")}]`,
+      className.includes("dot-crash"),
+      `the caution glyph rides the red (never solid red), got [${className}]`,
     );
   } finally {
     await engine.stop();

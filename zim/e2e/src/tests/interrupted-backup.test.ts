@@ -21,6 +21,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { stat } from "node:fs/promises";
 import { launchEngine } from "../lib/engine.js";
 import { adminClient, createInstance, firstNodeId, instanceState } from "../lib/api.js";
 import { detectTier, skipWithoutDocker } from "../lib/tier.js";
@@ -28,10 +29,23 @@ import { tempDir, uniqueName, waitFor } from "../lib/util.js";
 
 /** A startup that plants a fat file in the mounted data dir before
  * ticking: the backup archive then takes long enough that a crash
- * mid-archive is a *reliable* race, not a lucky one. */
+ * mid-archive is a *reliable* race, not a lucky one. (bs is spelled
+ * in bytes — every busybox agrees on 1048576, and the first CI run
+ * suspects `1M` — and the file's presence is VERIFIED host-side
+ * before the backup: if the container never wrote it, the archive
+ * is instant and the interruption window never opens.) */
 const FAT_STARTUP =
-  "sh -c 'dd if=/dev/zero of=/home/container/big.bin bs=1M count=256 2>/dev/null; " +
+  "sh -c 'dd if=/dev/zero of=/home/container/big.bin bs=1048576 count=256; " +
   "while true; do echo zim-e2e-tick; sleep 1; done'";
+
+/** A file's size, or null when absent. */
+async function statFile(path: string): Promise<number | null> {
+  try {
+    return (await stat(path)).size;
+  } catch {
+    return null;
+  }
+}
 
 /** Recursively collect `.part` files under `root` (missing root:
  * none). */
@@ -93,6 +107,21 @@ test("interrupted backup: SIGKILL mid-archive → boot reconciliation fails the 
       1_000,
     );
 
+    // The fat file must exist host-side before the race is armed:
+    // the instance data dir is <data_root>/instances/{uuid_short},
+    // and a missing big.bin means the archive seals instantly and
+    // there is no interruption window at all.
+    const bigBin = join(dataDir, "instances", instance.uuid_short, "big.bin");
+    await waitFor(
+      "the fat file in the instance data dir",
+      async () => {
+        const stat = await statFile(bigBin);
+        return stat !== null && stat >= 256 * 1024 * 1024 ? stat : undefined;
+      },
+      30_000,
+      500,
+    );
+
     // Create the backup, then crash the engine the moment the job
     // reports in_progress — the archive of 256 MiB is underway.
     const created = await client.post(`/api/v1/instances/${instance.id}/backups`);
@@ -107,7 +136,7 @@ test("interrupted backup: SIGKILL mid-archive → boot reconciliation fails the 
           : undefined;
       },
       30_000,
-      100,
+      50,
     );
     await engine.crash();
 

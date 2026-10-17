@@ -18,7 +18,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { launchEngine } from "../lib/engine.js";
 import { adminClient, createInstance, firstNodeId, instanceState } from "../lib/api.js";
 import { detectTier, skipWithoutDocker } from "../lib/tier.js";
@@ -38,9 +38,12 @@ test("disk full: the backup fails honestly with the OS error, the engine stays a
 
   // The capped data root: 8 MiB of tmpfs under a scratch dir. The
   // engine's SQLite, TLS material, and discovery file fit; the
-  // 48 MiB archive does not.
+  // 48 MiB archive does not. (The mountpoint must exist — mount(8)
+  // fails with exit 32 on an absent target, the first run's quiet
+  // skip.)
   const scratch = tempDir("diskfull");
   const capped = join(scratch, "capped");
+  mkdirSync(capped, { recursive: true });
   const mount = await run(
     "sudo",
     ["mount", "-t", "tmpfs", "-o", "size=8m", "tmpfs", capped],
