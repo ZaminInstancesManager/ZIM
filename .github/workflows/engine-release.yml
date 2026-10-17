@@ -1,9 +1,16 @@
 name: Engine Release
 
+# Engine-only binary releases. The tag namespace is `engine-v*`:
+# plain `v*` tags belong to the App Release pipeline (the full
+# product — shell + engine sidecar + installers + updater channel),
+# whose curated release body must not be raced by this workflow's
+# generated notes when both fire on the same tag (M26: the two
+# pipelines publishing to one tag would let whichever ran last
+# replace the body; the namespaces now make the intent explicit).
 on:
   push:
     tags:
-      - 'v*'
+      - 'engine-v*'
   workflow_dispatch:
     inputs:
       version:

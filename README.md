@@ -132,9 +132,18 @@ abstraction, and the roadmap that subsequent implementation work will follow.
   engine as the `externalBin` sidecar, `.sig` updater artifacts,
   `latest.json` assembly, and the Linux packaged-app deb smoke
   under Xvfb).
-  Remaining: M26 — the first alpha release (tag `v0.1.0`,
+  Remaining: M26 — the first alpha release (tag `v0.1.0-alpha.1`,
   release notes, the Pterodactyl migration guide, and the
-  honest-boundaries follow-ups).
+  honest-boundaries follow-ups). M25's own acceptance campaign
+  (16 CI batches) also earned a real engine fix: the production
+  TLS accept loop was dropping every WebSocket subscriber on
+  arrival (`serve_connection` had no upgrade support — the live
+  event stream had silently never worked over the real server);
+  fixed with `serve_connection_with_upgrades` and kept found by
+  the `stream_tls_ws.rs` regression tests over the production
+  loop. The alpha release notes live at
+  `docs/releases/ALPHA_v0.1.0.md`; the operator's migration
+  walkthrough at `docs/compatibility/PTERODACTYL_MIGRATION_GUIDE.md`.
 - A re-skinned Pterodactyl. The Panel's PHP/Laravel backend and Wings's Go
   daemon are preserved in `upstream/` as audit references and behavioral
   contracts; they are not part of ZIM's runtime architecture.
