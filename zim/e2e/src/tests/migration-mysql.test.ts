@@ -252,13 +252,19 @@ const TABLES: Array<{ table: string; columns: Column[] }> = [
   },
 ];
 
-/** The SQL kind for one column. */
+/** The SQL kind for one column.
+ *
+ * Nullable across the board (ids included): the real panel's
+ * nullability per column is the panel's business — the fixture
+ * carries NULLs wherever the panel does (free allocations' NULL
+ * server_id taught this the hard way), and the importer's
+ * opt_-typed readers handle them all. */
 function sqlType(kind: Column["kind"]): string {
   switch (kind) {
     case "int":
-      return "INT NOT NULL DEFAULT 0";
+      return "INT NULL";
     case "bool":
-      return "TINYINT(1) NOT NULL DEFAULT 0";
+      return "TINYINT(1) NULL";
     case "text":
       return "VARCHAR(191) NULL";
     case "longtext":

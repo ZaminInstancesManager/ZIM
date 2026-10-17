@@ -27,15 +27,15 @@ import { adminClient, createInstance, firstNodeId, instanceState } from "../lib/
 import { detectTier, skipWithoutDocker } from "../lib/tier.js";
 import { tempDir, uniqueName, waitFor } from "../lib/util.js";
 
-/** A startup that plants a fat file in the mounted data dir before
- * ticking: the backup archive then takes long enough that a crash
- * mid-archive is a *reliable* race, not a lucky one. (bs is spelled
- * in bytes — every busybox agrees on 1048576, and the first CI run
- * suspects `1M` — and the file's presence is VERIFIED host-side
- * before the backup: if the container never wrote it, the archive
- * is instant and the interruption window never opens.) */
+/** A startup that plants a fat INCOMPRESSIBLE file in the mounted
+ * data dir before ticking: the backup archive then takes long
+ * enough that a crash mid-archive is a *reliable* race, not a lucky
+ * one. Incompressible matters twice over — 256 MiB of zeros would
+ * gzip to kilobytes and the archive would seal before any poll
+ * could catch it — and the file's full size is VERIFIED host-side
+ * before the backup is armed. */
 const FAT_STARTUP =
-  "sh -c 'dd if=/dev/zero of=/home/container/big.bin bs=1048576 count=256; " +
+  "sh -c 'dd if=/dev/urandom of=/home/container/big.bin bs=1048576 count=256; " +
   "while true; do echo zim-e2e-tick; sleep 1; done'";
 
 /** A file's size, or null when absent. */
@@ -84,8 +84,11 @@ test("interrupted backup: SIGKILL mid-archive → boot reconciliation fails the 
       startup: FAT_STARTUP,
     });
 
-    // The container must have run (and written the fat file) before
-    // the backup has anything to archive.
+    // The container must have run — and the fat file FINISHED —
+    // before the stop: dd's 256 MiB takes seconds, and stopping the
+    // container the moment it reports running kills dd mid-write
+    // (the first CI run's fat-file wait taught exactly that). The
+    // instance data dir is <data_root>/instances/{uuid_short}.
     await client.post(`/api/v1/instances/${instance.id}/start`);
     await waitFor(
       "running state",
@@ -96,6 +99,16 @@ test("interrupted backup: SIGKILL mid-archive → boot reconciliation fails the 
       120_000,
       1_000,
     );
+    const bigBin = join(dataDir, "instances", instance.uuid_short, "big.bin");
+    await waitFor(
+      "the fat file finished in the instance data dir",
+      async () => {
+        const stat = await statFile(bigBin);
+        return stat !== null && stat >= 256 * 1024 * 1024 ? stat : undefined;
+      },
+      120_000,
+      500,
+    );
     await client.post(`/api/v1/instances/${instance.id}/stop`);
     await waitFor(
       "offline state",
@@ -105,21 +118,6 @@ test("interrupted backup: SIGKILL mid-archive → boot reconciliation fails the 
       },
       120_000,
       1_000,
-    );
-
-    // The fat file must exist host-side before the race is armed:
-    // the instance data dir is <data_root>/instances/{uuid_short},
-    // and a missing big.bin means the archive seals instantly and
-    // there is no interruption window at all.
-    const bigBin = join(dataDir, "instances", instance.uuid_short, "big.bin");
-    await waitFor(
-      "the fat file in the instance data dir",
-      async () => {
-        const stat = await statFile(bigBin);
-        return stat !== null && stat >= 256 * 1024 * 1024 ? stat : undefined;
-      },
-      30_000,
-      500,
     );
 
     // Create the backup, then crash the engine the moment the job
