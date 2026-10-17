@@ -340,12 +340,23 @@ function seedSql(fixture: Record<string, Row[]>): string {
   return `${statements.join("\n")}\n`;
 }
 
-/** The known counts the fixture carries (asserted in both paths). */
-const FIXTURE_COUNTS = { users: 2, servers: 3, eggs: 2, allocations: 4, schedules: 2 };
+/** The importer's canonical imported counts for the canonical
+ * fixture — the SAME numbers the crate's own migration.rs asserts
+ * (`fixture_imports_every_mapped_table`). They are deliberately NOT
+ * the fixture's raw row counts: one egg (the privileged-install
+ * one), one instance (the rejected egg's server), and one schedule
+ * (that instance's) are skipped by design, so the imported counts
+ * are the post-mapping outcomes — and the report's table names are
+ * the ZIM-side ones (`instances`, not the Panel's `servers`). */
+const FIXTURE_COUNTS = { users: 2, instances: 2, eggs: 1, allocations: 4, schedules: 1 };
 
-/** Pull `"<n> <word>"`-style counts out of an importer report. */
+/** Pull one table's imported count out of the importer's per-table
+ * report line — the report prints the table name FIRST and the
+ * count after (`  users         2 imported,   0 skipped` —
+ * report.rs's `Display`), so the regex anchors on the line's two
+ * leading spaces and reads the count that follows the padded name. */
 function reportCount(report: string, word: string): number | null {
-  const match = report.match(new RegExp(`(\\d+)\\s+${word}`, "i"));
+  const match = report.match(new RegExp(`^  ${word}\\s+(\\d+) imported`, "im"));
   return match === null ? null : Number(match[1]);
 }
 
