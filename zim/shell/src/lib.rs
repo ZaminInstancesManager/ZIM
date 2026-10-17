@@ -169,6 +169,13 @@ fn run_attach(app: &AppHandle, shared: &Arc<Shared>) {
             }
         }
         Phase::Trouble => {
+            // The failure also goes to stderr — the recovery page is
+            // the user's surface, but the operator diagnosing an
+            // install (the packaged-app smoke reads exactly this
+            // stream) must not be left guessing why nothing happened.
+            if let Some(message) = &status.message {
+                eprintln!("zim_shell: engine attach failed: {message}");
+            }
             navigate_to_page(app, "down.html");
             tray::set_engine_tooltip(app, "ZIM — engine unreachable");
         }

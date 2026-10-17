@@ -338,6 +338,15 @@ impl rustls::client::danger::ServerCertVerifier for LoopbackProbeVerifier {
 /// on the recovery page). The returned pid is informational; the
 /// shell holds no kill handle, by design.
 pub fn spawn_detached(engine_path: &Path, data_dir: &Path) -> std::io::Result<u32> {
+    // First boot: the engine's data dir does not exist yet — the
+    // engine would create it itself at startup, but the log file
+    // below is opened by the SHELL before the engine runs, and
+    // `OpenOptions::create` creates files, not parent directories.
+    // The packaged-app smoke caught exactly this on a fresh install
+    // (the alpha's install bytes were dead-on-arrival: no engine/
+    // directory ever appeared, the spawn failed with ENOENT, and
+    // the old code surfaced it nowhere but down.html).
+    std::fs::create_dir_all(data_dir)?;
     let log_path = data_dir.join("engine.log");
     let log = std::fs::OpenOptions::new()
         .create(true)

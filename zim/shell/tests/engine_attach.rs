@@ -196,6 +196,50 @@ fn attach_finds_a_running_engine_and_maps_newtab() {
 }
 
 #[test]
+fn attach_spawns_into_a_dir_that_does_not_exist_yet() {
+    // The first-boot contract (M27's regression): a fresh install's
+    // engine data dir does not exist — `~/.local/share/<app>/engine`
+    // is first needed by the SHELL, which opens engine.log inside it
+    // before the engine ever runs. The packaged-app smoke found the
+    // alpha's install bytes dead-on-arrival here: spawn_detached
+    // failed with ENOENT and nothing but down.html ever said so.
+    let Some(bin) = engine_bin() else {
+        eprintln!("skipping: ZIM_SHELL_IT_ENGINE is not set to an engine binary");
+        return;
+    };
+    let parent = scratch_data_dir("freshboot");
+    let data_dir = parent.join("engine"); // deliberately NOT created
+
+    let outcome = engine::attach(&data_dir, &bin);
+    let port = match &outcome {
+        AttachOutcome::Spawned { port, .. } => *port,
+        other => panic!("expected Spawned on a virgin data dir, got {other:?}"),
+    };
+    assert!(engine::probe(port).is_ok());
+    assert!(data_dir.join("engine.log").is_file());
+    assert!(data_dir.join("engine.json").is_file());
+
+    #[cfg(unix)]
+    {
+        let pid = engine::discover(&data_dir).map(|d| d.pid);
+        if let Some(pid) = pid {
+            let _ = Command::new("kill")
+                .args(["-TERM", &pid.to_string()])
+                .status();
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while Instant::now() < deadline {
+                if engine::discover(&data_dir).is_none() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
+#[test]
 fn attach_spawns_when_nothing_answers() {
     let Some(bin) = engine_bin() else {
         eprintln!("skipping: ZIM_SHELL_IT_ENGINE is not set to an engine binary");
