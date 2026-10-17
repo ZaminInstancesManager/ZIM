@@ -344,8 +344,9 @@ mod tests {
         // M22: the declared per-instance surfaces route (one shared
         // stub entrypoint; the metrics view renders real samples,
         // the rest are honest placeholders). M28 graduated `files`
-        // to its own entrypoint — the real file manager page.
-        for surface in ["settings", "backups", "schedules", "subusers", "metrics"] {
+        // and M29 `backups` to their own entrypoints — the real
+        // file manager and backup manager pages.
+        for surface in ["settings", "schedules", "subusers", "metrics"] {
             let path = format!("servers/0a1b2c3d-0000-0000-0000-000000000000/{surface}");
             let (file, params) = package
                 .resolve_surface(&path)
@@ -365,6 +366,19 @@ mod tests {
             .resolve_surface("servers/0a1b2c3d-0000-0000-0000-000000000000/files")
             .expect("files routes");
         assert_eq!(file, "pages/files.html");
+        assert_eq!(
+            params,
+            vec![(
+                "id".to_owned(),
+                "0a1b2c3d-0000-0000-0000-000000000000".to_owned()
+            )]
+        );
+
+        // M29: the backups surface routes to the real backup manager.
+        let (file, params) = package
+            .resolve_surface("servers/0a1b2c3d-0000-0000-0000-000000000000/backups")
+            .expect("backups routes");
+        assert_eq!(file, "pages/backups.html");
         assert_eq!(
             params,
             vec![(

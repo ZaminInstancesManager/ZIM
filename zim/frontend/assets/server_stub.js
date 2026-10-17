@@ -1,7 +1,8 @@
 /**
  * `zim://servers/{id}/{surface}` — the per-instance surfaces M22
- * declares ahead of their full features: files, settings, backups,
- * schedules, subusers, metrics (the console keeps its own page).
+ * declares ahead of their full features: settings, schedules,
+ * subusers, metrics (the console keeps its own page; files and
+ * backups graduated to their own pages — M28 and M29).
  *
  * Each surface renders the real instance header (row + observed
  * state, live over the §11 stream) plus its honest placeholder
@@ -30,11 +31,11 @@ function surfaceFromPath() {
 }
 /** The honest one-liner per surface (what exists, what waits).
  * The files surface graduated to its own page (M28's
- * `pages/files.html`); the stub never sees it, but the note stays
- * gone rather than lying. */
+ * `pages/files.html`); the backups surface to `pages/backups.html`
+ * (M29); the stub never sees them, but the notes stay gone rather
+ * than lying. */
 const SURFACE_NOTES = {
     settings: "Instance configuration ships with a later milestone; power controls live on the console today.",
-    backups: "The backup list ships with the M8 backup family's frontend view.",
     schedules: "The schedule list ships with the M9 scheduling family's frontend view.",
     subusers: "Subuser management ships with the M10 subuser family's frontend view.",
     metrics: "Live samples below; charts and history ship with a later milestone.",

@@ -673,3 +673,138 @@ export function parentFilePath(path: string): string {
   }
   return trimmed.slice(0, lastSlash);
 }
+
+// ── Backups (§10.5, M29's first management surface) ────────────────
+
+/** One backup row (`GET .../backups` data element). The row is
+ * created in progress alongside its durable job and *seals* —
+ * `sha256_hash` and `bytes` landing together — when the job
+ * succeeds; a failed job leaves the row unsealed forever, which is
+ * the honest shape (never a fake sealed row). */
+export interface BackupRow {
+  id: string;
+  instance_id: string;
+  job_id: string;
+  uuid: string;
+  file_name: string;
+  bytes: number;
+  sha256_hash: string | null;
+  locked: boolean;
+  completed_at: string | null;
+  [key: string]: unknown;
+}
+
+/** One durable job row (`GET /jobs/{id}`): the create/restore
+ * endpoints answer `{job_id, …}` immediately; this row is where
+ * the truth about progress lives (`state`, `last_error`). */
+export interface JobRow {
+  id: string;
+  kind: string;
+  instance_id: string;
+  state: string;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  last_error: string | null;
+  cleanup_pending: boolean;
+  [key: string]: unknown;
+}
+
+/** Whether a job state is terminal — the engine's `JobState`
+ * vocabulary (`succeeded`, `failed`, `cancelled`); anything else
+ * (`pending`, `in_progress`, `cleanup_pending`) is still moving. */
+export function jobIsTerminal(state: string): boolean {
+  return state === "succeeded" || state === "failed" || state === "cancelled";
+}
+
+/** Format a byte count for humans (binary units, KB-free) — the
+ * file manager's convention, shared by the management surfaces. */
+export function formatBytes(size: number): string {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  let value = size;
+  let unit = -1;
+  do {
+    value /= 1024;
+    unit += 1;
+  } while (value >= 1024 && unit < units.length - 1);
+  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unit]}`;
+}
+
+/** `GET /instances/{id}/backups` — the backup rows (sealed and
+ * in-progress together). */
+export async function listBackups(instanceId: string): Promise<BackupRow[]> {
+  const body = await api<{ data: BackupRow[] }>(
+    `/instances/${encodeURIComponent(instanceId)}/backups`,
+  );
+  return body.data;
+}
+
+/** `POST /instances/{id}/backups` — create a backup: answers `202`'s
+ * body (both ids + the job's initial state); the row seals when the
+ * durable job completes. */
+export async function createBackup(
+  instanceId: string,
+): Promise<{ job_id: string; backup_id: string; uuid: string; state: string }> {
+  return api(`/instances/${encodeURIComponent(instanceId)}/backups`, { method: "POST" });
+}
+
+/** `POST .../backups/{bid}/restore` — restore a backup: extraction
+ * lands in a staging directory and swaps into place, so a failed
+ * restore never corrupts the live data. */
+export async function restoreBackup(
+  instanceId: string,
+  backupId: string,
+): Promise<{ job_id: string; backup_id: string; state: string }> {
+  return api(
+    `/instances/${encodeURIComponent(instanceId)}/backups/${encodeURIComponent(backupId)}/restore`,
+    { method: "POST" },
+  );
+}
+
+/** `DELETE .../backups/{bid}` — delete a backup (its archive and row
+ * together). A locked backup refuses with `409 conflict`. */
+export async function deleteBackup(instanceId: string, backupId: string): Promise<void> {
+  return api(
+    `/instances/${encodeURIComponent(instanceId)}/backups/${encodeURIComponent(backupId)}`,
+    { method: "DELETE" },
+  );
+}
+
+/** `GET .../backups/{bid}/download` — the archive's raw bytes
+ * (`application/gzip`, `Content-Disposition: attachment`). */
+export async function downloadBackup(
+  instanceId: string,
+  backupId: string,
+): Promise<ArrayBuffer> {
+  const response = await fetch(
+    `/api/v1/instances/${encodeURIComponent(instanceId)}/backups/${encodeURIComponent(backupId)}/download`,
+    { credentials: "same-origin", headers: { Accept: "application/gzip" } },
+  );
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  return response.arrayBuffer();
+}
+
+/** `POST .../backups/{bid}/lock` / `DELETE` — toggle the deletion
+ * lock; both answer the updated row. */
+export async function setBackupLock(
+  instanceId: string,
+  backupId: string,
+  locked: boolean,
+): Promise<BackupRow> {
+  return api<BackupRow>(
+    `/instances/${encodeURIComponent(instanceId)}/backups/${encodeURIComponent(backupId)}/lock`,
+    { method: locked ? "POST" : "DELETE" },
+  );
+}
+
+/** `GET /jobs/{jid}` — one durable job's row (the create/restore
+ * progress oracle). */
+export async function getJob(jobId: string): Promise<JobRow> {
+  return api(`/jobs/${encodeURIComponent(jobId)}`);
+}

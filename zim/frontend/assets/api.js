@@ -321,3 +321,66 @@ export function parentFilePath(path) {
     }
     return trimmed.slice(0, lastSlash);
 }
+/** Whether a job state is terminal — the engine's `JobState`
+ * vocabulary (`succeeded`, `failed`, `cancelled`); anything else
+ * (`pending`, `in_progress`, `cleanup_pending`) is still moving. */
+export function jobIsTerminal(state) {
+    return state === "succeeded" || state === "failed" || state === "cancelled";
+}
+/** Format a byte count for humans (binary units, KB-free) — the
+ * file manager's convention, shared by the management surfaces. */
+export function formatBytes(size) {
+    if (size < 1024) {
+        return `${size} B`;
+    }
+    const units = ["KiB", "MiB", "GiB", "TiB"];
+    let value = size;
+    let unit = -1;
+    do {
+        value /= 1024;
+        unit += 1;
+    } while (value >= 1024 && unit < units.length - 1);
+    return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unit]}`;
+}
+/** `GET /instances/{id}/backups` — the backup rows (sealed and
+ * in-progress together). */
+export async function listBackups(instanceId) {
+    const body = await api(`/instances/${encodeURIComponent(instanceId)}/backups`);
+    return body.data;
+}
+/** `POST /instances/{id}/backups` — create a backup: answers `202`'s
+ * body (both ids + the job's initial state); the row seals when the
+ * durable job completes. */
+export async function createBackup(instanceId) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/backups`, { method: "POST" });
+}
+/** `POST .../backups/{bid}/restore` — restore a backup: extraction
+ * lands in a staging directory and swaps into place, so a failed
+ * restore never corrupts the live data. */
+export async function restoreBackup(instanceId, backupId) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/backups/${encodeURIComponent(backupId)}/restore`, { method: "POST" });
+}
+/** `DELETE .../backups/{bid}` — delete a backup (its archive and row
+ * together). A locked backup refuses with `409 conflict`. */
+export async function deleteBackup(instanceId, backupId) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/backups/${encodeURIComponent(backupId)}`, { method: "DELETE" });
+}
+/** `GET .../backups/{bid}/download` — the archive's raw bytes
+ * (`application/gzip`, `Content-Disposition: attachment`). */
+export async function downloadBackup(instanceId, backupId) {
+    const response = await fetch(`/api/v1/instances/${encodeURIComponent(instanceId)}/backups/${encodeURIComponent(backupId)}/download`, { credentials: "same-origin", headers: { Accept: "application/gzip" } });
+    if (!response.ok) {
+        throw await parseError(response);
+    }
+    return response.arrayBuffer();
+}
+/** `POST .../backups/{bid}/lock` / `DELETE` — toggle the deletion
+ * lock; both answer the updated row. */
+export async function setBackupLock(instanceId, backupId, locked) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/backups/${encodeURIComponent(backupId)}/lock`, { method: locked ? "POST" : "DELETE" });
+}
+/** `GET /jobs/{jid}` — one durable job's row (the create/restore
+ * progress oracle). */
+export async function getJob(jobId) {
+    return api(`/jobs/${encodeURIComponent(jobId)}`);
+}

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ZIM — Backups</title>
+  <link rel="stylesheet" href="/zim/assets/main.css">
+  <script type="module" src="/zim/assets/backups.js"></script>
+</head>
+<body>
+  <main class="page page-stub">
+    <zim-recovery-notice></zim-recovery-notice>
+
+    <header class="page-header">
+      <a class="backlink" href="/zim/servers" title="Servers">←</a>
+      <h1 id="server-name">Server</h1>
+      <span id="server-id" class="pill pill-muted mono">…</span>
+      <span class="pill pill-muted mono">backups</span>
+    </header>
+
+    <section class="card" aria-label="Observed state">
+      <div class="console-toolbar">
+        <zim-status-dot id="status-dot" status="unknown" data-label="unknown"></zim-status-dot>
+        <span id="state-label" class="state-label">state: unknown</span>
+        <span class="spacer"></span>
+        <span id="jobs-hint" class="pill pill-muted mono" title="Durable jobs seal every archive">jobs are durable — a failed job never fakes a sealed row</span>
+      </div>
+    </section>
+
+    <section class="card card-login" id="auth-gate" aria-label="Sign in" hidden>
+      <h2 class="card-title">Sign in to ZIM</h2>
+      <zim-login-form id="login"></zim-login-form>
+    </section>
+
+    <section class="card" aria-label="Backups">
+      <h2 class="card-title">Backups</h2>
+
+      <div class="console-toolbar" id="backups-toolbar">
+        <button id="btn-backup-now" class="pill pill-action" type="button" title="Create a backup now (a durable job seals the archive)">⬒ Back up now</button>
+        <button id="btn-refresh" class="pill pill-action" type="button" title="Reload the list">↻ Refresh</button>
+        <span id="backups-message" class="state-label" role="status"></span>
+      </div>
+
+      <table class="files-table" id="backups-table">
+        <thead>
+          <tr>
+            <th scope="col" class="files-name">Archive</th>
+            <th scope="col" class="files-size">Size</th>
+            <th scope="col" class="mgmt-checksum">Checksum</th>
+            <th scope="col" class="files-modified">Sealed</th>
+            <th scope="col" class="mgmt-locked">Lock</th>
+            <th scope="col" class="files-actions"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody id="backups-list">
+          <tr><td colspan="6" class="empty">…</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>
