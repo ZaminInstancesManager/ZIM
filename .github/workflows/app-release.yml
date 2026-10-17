@@ -240,7 +240,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: ZIM Alpha v${{ steps.version.outputs.version }}
-          prerelease: false
+          # M26's alpha labeling: this channel is explicitly
+          # not-production-ready (the notes say so in the first
+          # line), and package managers/UIs should treat it as a
+          # pre-release. The curated body is the honest what-works /
+          # what-doesn't document; the generated per-commit notes
+          # append below it.
+          prerelease: true
+          body_path: docs/releases/ALPHA_v0.1.0.md
           generate_release_notes: true
           files: |
             artifacts/zim-app-windows-x86_64/*

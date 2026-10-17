@@ -1195,10 +1195,26 @@ engine as `externalBin` sidecar, minisign updater artifacts,
 
 **Acceptance status (honest):**
 
-- All 13 scenario files type-check and build locally; the docker
-  tier runs them for real on GitHub's Linux runners, the degraded
-  tier on Windows/macOS (CI is the arbiter — no local Rust
-  toolchain, per the established iterate-on-CI flow).
+- **GREEN, all three platforms** (2026-10-17): the full suite —
+  20 tests on the Linux docker tier, the degraded tier on
+  Windows/macOS — passes on every push after a 16-batch
+  acceptance campaign that ran the iterate-on-CI loop to ground.
+  The campaign's own ledger: test-contract corrections (the
+  offline-status vocabulary — AD-11 has no "stopped"; run-now's
+  bodyless 204; the pane-host selector scoping; the tier probe
+  pinned to the engine's own Docker endpoint), the termination +
+  observability discipline (SIGTERM→SIGKILL engine escalation
+  with stdio release, `--test-timeout`/`--test-force-exit`,
+  noisy-stderr surfacing, the standalone probe and WS probe, the
+  E2E Diagnostics workflow), and **one real engine defect found
+  and fixed**: the production TLS accept loop served connections
+  through hyper-util's plain `serve_connection` — no upgrade
+  support — so every `wss://` subscriber since M7 was dropped the
+  instant they connected (101, then 1006, zero frames; every live
+  surface had silently degraded to buffer-polling). Fixed with
+  `serve_connection_with_upgrades`; `stream_tls_ws.rs` drives the
+  production TLS loop with a real `wss://` client and keeps it
+  found.
 - The webview matrix is covered in layers (3-OS shell compile
   matrix, Linux packaged-app smoke under Xvfb, browser-tier E2E on
   all three platforms); **live-driving WebView2/WKWebView is M26
@@ -1218,9 +1234,10 @@ engine as `externalBin` sidecar, minisign updater artifacts,
   variants remain M26.
 - A real `latest.json` exists only after the first tag is pushed —
   the channel mechanics are shipped and secret-backed, but the
-  first end-to-end channel exercise happens with M26's v0.1.0 tag
-  (engine-release.yml already provides the engine-only binaries;
-  app-release.yml supersedes it for full-product releases).
+  first end-to-end channel exercise happens with M26's
+  v0.1.0-alpha.1 tag (engine-release.yml already provides the
+  engine-only binaries; app-release.yml supersedes it for
+  full-product releases).
 
 **Estimated effort:** 3-4 weeks (delivered as one large batch +
 CI iteration).
