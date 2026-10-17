@@ -384,3 +384,78 @@ export async function setBackupLock(instanceId, backupId, locked) {
 export async function getJob(jobId) {
     return api(`/jobs/${encodeURIComponent(jobId)}`);
 }
+/** The structural cron check the engine's domain performs (5
+ * whitespace-separated non-empty fields) — mirrored client-side so
+ * the form can refuse before the round-trip. The engine remains
+ * the authority; this is a preview, not a bypass. */
+export function isStructurallyValidCron(expression) {
+    const fields = expression.trim().split(/\s+/);
+    return fields.length === 5 && fields.every((field) => field.length > 0);
+}
+/** `GET /instances/{id}/schedules` — the schedule rows. */
+export async function listSchedules(instanceId) {
+    const body = await api(`/instances/${encodeURIComponent(instanceId)}/schedules`);
+    return body.data;
+}
+/** `POST /instances/{id}/schedules` — create (201 answers the row;
+ * `next_run_at` stays null until the scheduler computes it). */
+export async function createSchedule(instanceId, body) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/schedules`, {
+        body,
+    });
+}
+/** `PATCH .../schedules/{sid}` — merge-update (pause/resume is the
+ * `is_active` flag; the engine revalidates the merged row). */
+export async function patchSchedule(instanceId, scheduleId, body) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/schedules/${encodeURIComponent(scheduleId)}`, { method: "PATCH", body });
+}
+/** `DELETE .../schedules/{sid}` — delete (204). */
+export async function deleteSchedule(instanceId, scheduleId) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/schedules/${encodeURIComponent(scheduleId)}`, { method: "DELETE" });
+}
+/** `POST .../schedules/{sid}/run` — trigger now (204 bodyless, or
+ * the honest 409/400 refusals: the `only_when_online` gate, or a
+ * missing container runtime on a degraded host). */
+export async function runScheduleNow(instanceId, scheduleId) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/schedules/${encodeURIComponent(scheduleId)}/run`, { method: "POST" });
+}
+/** The engine's `PermissionGrant` vocabulary (the dotted names the
+ * subuser family speaks; unknown names answer 400
+ * `validation_failed` listing them). Grouped the way the engine's
+ * own enum is grouped. */
+export const GRANT_VOCABULARY = [
+    { group: "Power & console", grants: ["websocket.connect", "control.console", "control.start", "control.stop", "control.restart"] },
+    { group: "Files", grants: ["file.read", "file.read_content", "file.write", "file.create", "file.delete", "file.archive"] },
+    { group: "Backups", grants: ["backup.read", "backup.create", "backup.update", "backup.delete", "backup.restore", "backup.download"] },
+    { group: "Allocations", grants: ["allocation.read", "allocation.create", "allocation.update", "allocation.delete"] },
+    { group: "Users", grants: ["user.read", "user.create", "user.update", "user.delete"] },
+    { group: "Schedules", grants: ["schedule.read", "schedule.create", "schedule.update", "schedule.delete"] },
+    { group: "Databases", grants: ["database.read", "database.create", "database.update", "database.delete", "database.view_password"] },
+    { group: "Settings", grants: ["settings.read", "settings.update"] },
+    { group: "Instance", grants: ["install", "transfer", "admin.instance"] },
+    { group: "Workloads", grants: ["workload.read", "workload.create", "workload.update", "workload.delete", "workload.migrate", "workload.snapshot", "workload.deploy", "network.expose", "network.unexpose"] },
+];
+/** Every grant name in one flat list (checkbox order follows
+ * GRANT_VOCABULARY's grouping). */
+export const ALL_GRANTS = GRANT_VOCABULARY.flatMap((entry) => entry.grants);
+/** `GET /instances/{id}/subusers` — the subuser rows. */
+export async function listSubusers(instanceId) {
+    const body = await api(`/instances/${encodeURIComponent(instanceId)}/subusers`);
+    return body.data;
+}
+/** `POST /instances/{id}/subusers` — add a user (must exist; the
+ * owner/caller is already implicitly authorized and refuses with
+ * 409). 201 answers the row. */
+export async function addSubuser(instanceId, userId, grants) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/subusers`, {
+        body: { user_id: userId, grants },
+    });
+}
+/** `PATCH .../subusers/{uid}` — replace the grant set. */
+export async function updateSubuser(instanceId, userId, grants) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/subusers/${encodeURIComponent(userId)}`, { method: "PATCH", body: { grants } });
+}
+/** `DELETE .../subusers/{uid}` — remove (204). */
+export async function removeSubuser(instanceId, userId) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/subusers/${encodeURIComponent(userId)}`, { method: "DELETE" });
+}

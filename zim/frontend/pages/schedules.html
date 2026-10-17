@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ZIM — Schedules</title>
+  <link rel="stylesheet" href="/zim/assets/main.css">
+  <script type="module" src="/zim/assets/schedules.js"></script>
+</head>
+<body>
+  <main class="page page-stub">
+    <zim-recovery-notice></zim-recovery-notice>
+
+    <header class="page-header">
+      <a class="backlink" href="/zim/servers" title="Servers">←</a>
+      <h1 id="server-name">Server</h1>
+      <span id="server-id" class="pill pill-muted mono">…</span>
+      <span class="pill pill-muted mono">schedules</span>
+    </header>
+
+    <section class="card" aria-label="Observed state">
+      <div class="console-toolbar">
+        <zim-status-dot id="status-dot" status="unknown" data-label="unknown"></zim-status-dot>
+        <span id="state-label" class="state-label">state: unknown</span>
+        <span class="spacer"></span>
+        <span id="schedules-hint" class="pill pill-muted mono" title="The scheduler computes next_run_at">5-field cron · minute hour day month weekday</span>
+      </div>
+    </section>
+
+    <section class="card card-login" id="auth-gate" aria-label="Sign in" hidden>
+      <h2 class="card-title">Sign in to ZIM</h2>
+      <zim-login-form id="login"></zim-login-form>
+    </section>
+
+    <section class="card" aria-label="Schedules">
+      <h2 class="card-title">Schedules</h2>
+
+      <div class="console-toolbar" id="schedules-toolbar">
+        <button id="btn-new-schedule" class="pill pill-action" type="button" title="Create a schedule">＋ Schedule</button>
+        <button id="btn-refresh" class="pill pill-action" type="button" title="Reload the list">↻ Refresh</button>
+        <span id="schedules-message" class="state-label" role="status"></span>
+      </div>
+
+      <form class="mgmt-form" id="schedule-form" hidden aria-label="New schedule">
+        <div class="field-row">
+          <div class="field">
+            <label for="schedule-name">Name</label>
+            <input id="schedule-name" type="text" autocomplete="off" placeholder="nightly restart" />
+          </div>
+          <div class="field">
+            <label for="schedule-cron">Cron (5 fields)</label>
+            <input id="schedule-cron" type="text" autocomplete="off" placeholder="0 4 * * *" class="mono" />
+            <span class="hint">minute hour day month weekday</span>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="schedule-action">Action</label>
+            <select id="schedule-action">
+              <option value="power-start">Power: start</option>
+              <option value="power-stop">Power: stop</option>
+              <option value="power-restart" selected>Power: restart</option>
+              <option value="power-kill">Power: kill</option>
+              <option value="send-command">Send a console command</option>
+            </select>
+          </div>
+          <div class="field" id="schedule-command-field" hidden>
+            <label for="schedule-command">Command</label>
+            <input id="schedule-command" type="text" autocomplete="off" placeholder="say scheduled restart…" class="mono" />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="schedule-online">Only while running</label>
+            <select id="schedule-online">
+              <option value="no" selected>No — fire regardless</option>
+              <option value="yes">Yes — skip unless the instance is running</option>
+            </select>
+          </div>
+        </div>
+        <div class="buttons">
+          <button id="schedule-create" class="pill pill-action" type="submit">Create</button>
+          <button id="schedule-cancel" class="pill pill-muted" type="button">Cancel</button>
+        </div>
+      </form>
+
+      <table class="files-table" id="schedules-table">
+        <thead>
+          <tr>
+            <th scope="col" class="files-name">Schedule</th>
+            <th scope="col" class="mgmt-cron">Cron</th>
+            <th scope="col" class="mgmt-state">State</th>
+            <th scope="col" class="files-modified">Last / next run</th>
+            <th scope="col" class="files-actions"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody id="schedules-list">
+          <tr><td colspan="5" class="empty">…</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

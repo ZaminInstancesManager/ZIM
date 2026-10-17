@@ -808,3 +808,176 @@ export async function setBackupLock(
 export async function getJob(jobId: string): Promise<JobRow> {
   return api(`/jobs/${encodeURIComponent(jobId)}`);
 }
+
+// ── Schedules (§10.6, M29's second management surface) ─────────────
+
+/** One schedule action — the domain's internally-tagged enum:
+ * a power command, or a line of console input. */
+export type ScheduleActionBody =
+  | { type: "power"; action: "start" | "stop" | "restart" | "kill" }
+  | { type: "send_command"; command: string };
+
+/** One schedule row (`GET .../schedules` data element). */
+export interface ScheduleRow {
+  id: string;
+  instance_id: string;
+  name: string;
+  cron: string;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  is_active: boolean;
+  only_when_online: boolean;
+  actions: ScheduleActionBody[];
+  [key: string]: unknown;
+}
+
+/** The create/PATCH request body (create requires it all; PATCH
+ * merges — empty strings leave name/cron untouched per the
+ * handler's contract). */
+export interface ScheduleRequestBody {
+  name?: string;
+  cron?: string;
+  is_active?: boolean;
+  only_when_online?: boolean;
+  actions?: ScheduleActionBody[];
+}
+
+/** The structural cron check the engine's domain performs (5
+ * whitespace-separated non-empty fields) — mirrored client-side so
+ * the form can refuse before the round-trip. The engine remains
+ * the authority; this is a preview, not a bypass. */
+export function isStructurallyValidCron(expression: string): boolean {
+  const fields = expression.trim().split(/\s+/);
+  return fields.length === 5 && fields.every((field) => field.length > 0);
+}
+
+/** `GET /instances/{id}/schedules` — the schedule rows. */
+export async function listSchedules(instanceId: string): Promise<ScheduleRow[]> {
+  const body = await api<{ data: ScheduleRow[] }>(
+    `/instances/${encodeURIComponent(instanceId)}/schedules`,
+  );
+  return body.data;
+}
+
+/** `POST /instances/{id}/schedules` — create (201 answers the row;
+ * `next_run_at` stays null until the scheduler computes it). */
+export async function createSchedule(
+  instanceId: string,
+  body: ScheduleRequestBody,
+): Promise<ScheduleRow> {
+  return api<ScheduleRow>(`/instances/${encodeURIComponent(instanceId)}/schedules`, {
+    body,
+  });
+}
+
+/** `PATCH .../schedules/{sid}` — merge-update (pause/resume is the
+ * `is_active` flag; the engine revalidates the merged row). */
+export async function patchSchedule(
+  instanceId: string,
+  scheduleId: string,
+  body: ScheduleRequestBody,
+): Promise<ScheduleRow> {
+  return api<ScheduleRow>(
+    `/instances/${encodeURIComponent(instanceId)}/schedules/${encodeURIComponent(scheduleId)}`,
+    { method: "PATCH", body },
+  );
+}
+
+/** `DELETE .../schedules/{sid}` — delete (204). */
+export async function deleteSchedule(instanceId: string, scheduleId: string): Promise<void> {
+  return api(
+    `/instances/${encodeURIComponent(instanceId)}/schedules/${encodeURIComponent(scheduleId)}`,
+    { method: "DELETE" },
+  );
+}
+
+/** `POST .../schedules/{sid}/run` — trigger now (204 bodyless, or
+ * the honest 409/400 refusals: the `only_when_online` gate, or a
+ * missing container runtime on a degraded host). */
+export async function runScheduleNow(instanceId: string, scheduleId: string): Promise<void> {
+  return api(
+    `/instances/${encodeURIComponent(instanceId)}/schedules/${encodeURIComponent(scheduleId)}/run`,
+    { method: "POST" },
+  );
+}
+
+// ── Subusers (§10.7, M29's third management surface) ───────────────
+
+/** One subuser row (`GET .../subusers` data element): the engine's
+ * permission row joined with the user's public identity. */
+export interface SubuserRow {
+  user_id: string;
+  instance_id: string;
+  email: string;
+  username: string;
+  grants: string[];
+  [key: string]: unknown;
+}
+
+/** The engine's `PermissionGrant` vocabulary (the dotted names the
+ * subuser family speaks; unknown names answer 400
+ * `validation_failed` listing them). Grouped the way the engine's
+ * own enum is grouped. */
+export const GRANT_VOCABULARY: { group: string; grants: string[] }[] = [
+  { group: "Power & console", grants: ["websocket.connect", "control.console", "control.start", "control.stop", "control.restart"] },
+  { group: "Files", grants: ["file.read", "file.read_content", "file.write", "file.create", "file.delete", "file.archive"] },
+  { group: "Backups", grants: ["backup.read", "backup.create", "backup.update", "backup.delete", "backup.restore", "backup.download"] },
+  { group: "Allocations", grants: ["allocation.read", "allocation.create", "allocation.update", "allocation.delete"] },
+  { group: "Users", grants: ["user.read", "user.create", "user.update", "user.delete"] },
+  { group: "Schedules", grants: ["schedule.read", "schedule.create", "schedule.update", "schedule.delete"] },
+  { group: "Databases", grants: ["database.read", "database.create", "database.update", "database.delete", "database.view_password"] },
+  { group: "Settings", grants: ["settings.read", "settings.update"] },
+  { group: "Instance", grants: ["install", "transfer", "admin.instance"] },
+  { group: "Workloads", grants: ["workload.read", "workload.create", "workload.update", "workload.delete", "workload.migrate", "workload.snapshot", "workload.deploy", "network.expose", "network.unexpose"] },
+];
+
+/** Every grant name in one flat list (checkbox order follows
+ * GRANT_VOCABULARY's grouping). */
+export const ALL_GRANTS: string[] = GRANT_VOCABULARY.flatMap((entry) => entry.grants);
+
+/** The add/update request body (both replace the grant set). */
+export interface SubuserRequestBody {
+  user_id?: string;
+  grants: string[];
+}
+
+/** `GET /instances/{id}/subusers` — the subuser rows. */
+export async function listSubusers(instanceId: string): Promise<SubuserRow[]> {
+  const body = await api<{ data: SubuserRow[] }>(
+    `/instances/${encodeURIComponent(instanceId)}/subusers`,
+  );
+  return body.data;
+}
+
+/** `POST /instances/{id}/subusers` — add a user (must exist; the
+ * owner/caller is already implicitly authorized and refuses with
+ * 409). 201 answers the row. */
+export async function addSubuser(
+  instanceId: string,
+  userId: string,
+  grants: string[],
+): Promise<SubuserRow> {
+  return api<SubuserRow>(`/instances/${encodeURIComponent(instanceId)}/subusers`, {
+    body: { user_id: userId, grants },
+  });
+}
+
+/** `PATCH .../subusers/{uid}` — replace the grant set. */
+export async function updateSubuser(
+  instanceId: string,
+  userId: string,
+  grants: string[],
+): Promise<SubuserRow> {
+  return api<SubuserRow>(
+    `/instances/${encodeURIComponent(instanceId)}/subusers/${encodeURIComponent(userId)}`,
+    { method: "PATCH", body: { grants } },
+  );
+}
+
+/** `DELETE .../subusers/{uid}` — remove (204). */
+export async function removeSubuser(instanceId: string, userId: string): Promise<void> {
+  return api(
+    `/instances/${encodeURIComponent(instanceId)}/subusers/${encodeURIComponent(userId)}`,
+    { method: "DELETE" },
+  );
+}

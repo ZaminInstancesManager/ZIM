@@ -1296,3 +1296,19 @@ a.ntp-workload:hover { border-color: var(--color-accent); }
   flex-wrap: wrap;
   gap: 4px;
 }
+
+/** The cron column: mono, no wrap. */
+.files-table .mgmt-cron {
+  white-space: nowrap;
+}
+
+/** The state column (active/paused pills, the only-while-running
+ * note under them). */
+.files-table .mgmt-state {
+  white-space: nowrap;
+}
+
+/** The grants column: chips wrap, the count dims under them. */
+.files-table .mgmt-grants {
+  max-width: 420px;
+}
