@@ -23,7 +23,7 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio_rustls::rustls;
-use tokio_rustls::rustls::pki_types::{CertificateDer, IPAddress, ServerName};
+use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::Message;
@@ -96,7 +96,6 @@ impl TlsEngine {
         let scheduler =
             zim_engine_scheduler::Scheduler::new(Arc::clone(&persistence), Arc::clone(&supervisor));
         let frontend = Arc::new(zim_engine_frontend_loader::FrontendService::new(
-            data_dir.clone(),
             data_dir.clone(),
             semver::Version::new(0, 0, 1),
             "v1.0.0",
@@ -301,8 +300,8 @@ impl rustls::client::danger::ServerCertVerifier for AcceptLoopback {
         _server_name: &ServerName<'_>,
         _ocsp_response: &[u8],
         _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerVerified::assertion())
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
     }
 
     fn verify_tls12_signature(
@@ -371,9 +370,8 @@ async fn tls_websocket(engine: &TlsEngine, instance_id: &str, cookie: &str) -> W
     let tcp = tokio::net::TcpStream::connect(("127.0.0.1", port))
         .await
         .expect("the engine port accepts TCP");
-    let server_name = ServerName::IpAddress(
-        IPAddress::try_from(std::net::IpAddr::from([127, 0, 0, 1])).expect("loopback parses"),
-    );
+    let server_name =
+        ServerName::try_from(std::net::IpAddr::from([127, 0, 0, 1])).expect("loopback parses");
     let tls_stream = connector
         .connect(server_name, tcp)
         .await
