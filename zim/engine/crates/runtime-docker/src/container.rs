@@ -159,6 +159,26 @@ pub(crate) async fn start(
         )));
     }
 
+    // The container runs as the Wings-parity user (988:988 unless
+    // the workload's spec overrides it) while THIS engine runs as
+    // the desktop user that owns the data root — a bind-mounted
+    // directory the container cannot write is the classic
+    // silent first-boot failure (a game server that cannot save
+    // its world; the E2E failure-scenario suite caught it as "the
+    // fat file never appeared"). Wings solves this by running as
+    // root and chowning the directory; a desktop engine cannot be
+    // root, so the honest ladder is: chown when we happen to have
+    // the rights, else widen the DIRECTORY itself (0777, never
+    // recursive — files inside keep their own modes) so the
+    // container user can create its files. THREAT_MODEL's local
+    // boundary is the OS user; the widened dir trades nothing that
+    // boundary actually protects.
+    let effective_user = cfg
+        .user
+        .clone()
+        .unwrap_or_else(|| settings.container_user.clone());
+    ensure_container_writable(&cfg.data_dir, &effective_user);
+
     ensure_image(docker, &cfg.image, settings.pull_policy).await?;
 
     // Destroy + recreate (Wings's OnBeforeStart): a container that
@@ -380,6 +400,75 @@ fn nonzero<T: Default + PartialEq>(value: T) -> Option<T> {
     } else {
         Some(value)
     }
+}
+
+/// Make the instance's data directory writable by the container's
+/// user (see `start` for the full rationale).
+///
+/// `user` is the effective container user ("uid:gid" per the
+/// Docker spec). The ladder:
+/// 1. `chown` the directory to that uid:gid — succeeds when the
+///    engine runs as root (the Wings deployment shape) and is a
+///    no-op failure otherwise;
+/// 2. `chmod 0777` the directory itself — the desktop-engine
+///    fallback. Never recursive: existing files keep their modes;
+///    only the directory's create-entry right is widened.
+///
+/// Best-effort by design: a failure (exotic filesystems, SELinux
+/// denials) degrades to the container discovering its own
+/// read-only reality at write time — which is exactly where the
+/// honest error surfaces anyway. A `root` or empty user (images
+/// with their own USER / root entrypoints) skips the ladder: root
+/// needs no help.
+fn ensure_container_writable(data_dir: &std::path::Path, user: &str) {
+    let Some((uid, gid)) = parse_uid_gid(user) else {
+        return; // root or image-managed user: nothing to do
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let owned_by_container_user = std::fs::metadata(data_dir)
+            .ok()
+            .map(|meta| {
+                use std::os::unix::fs::MetadataExt;
+                meta.uid() == uid && meta.gid() == gid
+            })
+            .unwrap_or(false);
+        if owned_by_container_user {
+            return;
+        }
+        // 1. The chown path (root engines — the Wings shape).
+        if std::os::unix::fs::chown(data_dir, Some(uid), Some(gid)).is_ok() {
+            return;
+        }
+        // 2. The desktop fallback: widen the directory, nothing else.
+        if let Ok(mut perms) = std::fs::metadata(data_dir).map(|m| m.permissions()) {
+            perms.set_mode(0o777);
+            let _ = std::fs::set_permissions(data_dir, perms);
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (data_dir, user, uid, gid);
+    }
+}
+
+/// Parse a Docker `user` string's `uid:gid` half (only numeric ids
+/// matter here; named users resolve inside the container, where the
+/// host-side ladder cannot reach them — those images manage their
+/// own ownership, the managed-database pattern).
+fn parse_uid_gid(user: &str) -> Option<(u32, u32)> {
+    let trimmed = user.trim();
+    if trimmed.is_empty() || trimmed == "root" || trimmed == "0" || trimmed == "0:0" {
+        return None;
+    }
+    let mut parts = trimmed.split(':');
+    let uid = parts.next()?.parse::<u32>().ok()?;
+    let gid = match parts.next() {
+        Some(gid) => gid.parse::<u32>().ok()?,
+        None => uid,
+    };
+    Some((uid, gid))
 }
 
 // ── Stop / kill ───────────────────────────────────────────────────
@@ -692,5 +781,21 @@ mod tests {
             split("registry.io:5000/img"),
             ("registry.io:5000/img".into(), "latest".into())
         );
+    }
+
+    #[test]
+    fn uid_gid_parsing() {
+        assert_eq!(parse_uid_gid("988:988"), Some((988, 988)));
+        assert_eq!(parse_uid_gid("988"), Some((988, 988)));
+        assert_eq!(parse_uid_gid("1000:1001"), Some((1000, 1001)));
+        // Root and image-managed users skip the ladder entirely.
+        assert_eq!(parse_uid_gid("root"), None);
+        assert_eq!(parse_uid_gid("0"), None);
+        assert_eq!(parse_uid_gid("0:0"), None);
+        assert_eq!(parse_uid_gid(""), None);
+        // Named users resolve inside the container; the host-side
+        // ladder cannot reach them.
+        assert_eq!(parse_uid_gid("pterodactyl"), None);
+        assert_eq!(parse_uid_gid("988:not-a-number"), None);
     }
 }

@@ -240,7 +240,12 @@ fn load_nodes(conn: &mut Conn) -> Result<Vec<PanelNode>, PanelSourceError> {
 fn load_locations(conn: &mut Conn) -> Result<Vec<PanelLocation>, PanelSourceError> {
     load(
         conn,
-        "SELECT id, short, long FROM locations ORDER BY id",
+        // `long` is a MySQL reserved word (the DOUBLE synonym) —
+        // the panel's column is named that anyway, so the SELECT
+        // quotes it. Found by the live-MySQL E2E (M27): the
+        // fixture-only path never speaks SQL, so no earlier test
+        // could have seen the parser's refusal.
+        "SELECT id, short, `long` FROM locations ORDER BY id",
         |row| PanelLocation {
             id: int(row, "id"),
             short: text(row, "short"),
