@@ -29,8 +29,8 @@ use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
-use zim_engine_api::{ApiConfig, AppState};
 use zim_engine_api::tls::{generate_loopback_certificate, serve_https, RunningServer};
+use zim_engine_api::{ApiConfig, AppState};
 use zim_engine_application::ports::Persistence;
 use zim_engine_application::supervision::Supervisor;
 use zim_engine_auth::{ApiKeyManager, SessionManager, TabTokenManager};
@@ -68,10 +68,7 @@ impl TlsEngine {
                 shutdown_grace: Duration::from_secs(5),
             },
         );
-        let data_dir = std::env::temp_dir().join(format!(
-            "zim-tls-ws-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let data_dir = std::env::temp_dir().join(format!("zim-tls-ws-{}", uuid::Uuid::new_v4()));
         let backups = zim_engine_backups::BackupService::new(
             Arc::clone(&persistence),
             Arc::clone(&jobs),
@@ -344,11 +341,7 @@ impl rustls::client::danger::ServerCertVerifier for AcceptLoopback {
 /// Open the TLS connection and perform the `wss://` upgrade with the
 /// session cookie and the `zim-events.v1` sub-protocol — the exact
 /// production handshake shape.
-async fn tls_websocket(
-    engine: &TlsEngine,
-    instance_id: &str,
-    cookie: &str,
-) -> Ws {
+async fn tls_websocket(engine: &TlsEngine, instance_id: &str, cookie: &str) -> Ws {
     let url = engine.ws_url(&format!("/stream?instance_id={instance_id}"));
     let mut request = url
         .into_client_request()
