@@ -10,7 +10,8 @@
     "build": "tsc --project tsconfig.json && node scripts/fix-imports.mjs .build",
     "test": "npm run build && node --test --test-timeout=420000 --test-force-exit .build/tests/*.test.js",
     "test:filter": "npm run build && node --test --test-timeout=420000 --test-force-exit --test-name-pattern",
-    "probe": "npm run build && node .build/probe.js"
+    "probe": "npm run build && node .build/probe.js",
+    "wsprobe": "npm run build && node .build/wsprobe.js"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
