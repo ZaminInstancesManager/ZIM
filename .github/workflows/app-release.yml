@@ -148,6 +148,30 @@ jobs:
                -o -name '*.exe' -o -name '*.msi' -o -name '*.msi.zip' \
                -o -name '*.dmg' -o -name '*.app.tar.gz' \
                -o -name '*.sig' \) -exec cp {} staging/ \;
+          # The darwin updater payload needs the arch in its name:
+          # BOTH darwin legs produce `Zamin.ZIM.app.tar.gz`, and the
+          # release upload collapses same-named assets into one —
+          # latest.json then points BOTH darwin platforms at
+          # whichever upload survived, with the other arch's
+          # signature failing against the wrong bytes (alpha.2's
+          # first publish did exactly that). The suffix matches the
+          # dmg naming (`_x64` / `_aarch64`), and the minisign
+          # signature signs the bytes, not the name, so the rename
+          # rides along.
+          if [[ "${{ matrix.platform }}" == darwin-* ]]; then
+            arch="x64"
+            if [[ "${{ matrix.platform }}" == *aarch64 ]]; then arch="aarch64"; fi
+            for payload in staging/*.app.tar.gz; do
+              [[ -e "$payload" ]] || continue
+              stem="${payload%.app.tar.gz}"
+              mv "$payload" "${stem}_${arch}.app.tar.gz"
+            done
+            for signature in staging/*.app.tar.gz.sig; do
+              [[ -e "$signature" ]] || continue
+              stem="${signature%.app.tar.gz.sig}"
+              mv "$signature" "${stem}_${arch}.app.tar.gz.sig"
+            done
+          fi
           ls -la staging/
           test "$(ls staging | wc -l)" -gt 0
 

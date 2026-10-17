@@ -19,12 +19,18 @@ REPO = "ZaminInstancesManager/ZIM"
 # artifact-name → (updater platform key, payload filename suffixes).
 # M27: the full §1 desktop matrix — Linux arm64 and macOS x64 joined
 # the channel (their payloads ride the same minisign discipline).
+# The darwin payloads are ARCH-QUALIFIED (`_x64` / `_aarch64`):
+# Tauri names both legs' updater payload `Zamin.ZIM.app.tar.gz`, and
+# the release upload collapses same-named assets into one — the
+# workflow's collect step renames them so the channel cannot point
+# both darwin platforms at one arch's bytes (alpha.2's first
+# publish did exactly that, caught by the signature mismatch).
 WANTED = {
     "zim-app-windows-x86_64": ("windows-x86_64", ("-setup.exe",)),
     "zim-app-linux-x86_64": ("linux-x86_64", (".AppImage",)),
     "zim-app-linux-aarch64": ("linux-aarch64", (".AppImage",)),
-    "zim-app-darwin-aarch64": ("darwin-aarch64", (".app.tar.gz",)),
-    "zim-app-darwin-x86_64": ("darwin-x86_64", (".app.tar.gz",)),
+    "zim-app-darwin-aarch64": ("darwin-aarch64", ("_aarch64.app.tar.gz",)),
+    "zim-app-darwin-x86_64": ("darwin-x86_64", ("_x64.app.tar.gz",)),
 }
 
 
