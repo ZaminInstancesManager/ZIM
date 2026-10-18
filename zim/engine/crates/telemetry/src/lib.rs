@@ -416,7 +416,7 @@ mod tests {
     #[test]
     fn append_replaces_the_same_timestamp_row() {
         let persistence = store();
-        let instance = InstanceId::from_uuid(uuid::Uuid::new_v4());
+        let instance = seed_instance(persistence.as_ref(), 1);
         let ts = t0();
         persistence
             .append_metrics_sample(&MetricsSample {
