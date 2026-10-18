@@ -1451,13 +1451,90 @@ the surfaces; the stub keeps only `metrics`.
 
 **Estimated effort:** 3 large batches (delivered as estimated).
 
+### M30: The metrics surface — telemetry ingestion + the real charts page
+
+**Status:** COMPLETE (2026-10-19) — three large batches + this record.
+
+**Goal:** Graduate the last declared-but-stubbed page_surface
+(`metrics` — every other surface graduated in M28/M29) and close the
+post-alpha backlog's telemetry gap in one move: the backlog's line
+was *"Telemetry ingestion — the module is specified; the engine
+phones nobody home"* — M30 delivers the specified half and keeps
+the second half true (AD-34: ingestion is local, durable, and
+derived-at-read; no exporter, no egress, ever, without a new ADR).
+The architecture's deferred `crates/telemetry` register entry ships.
+
+**Delivered:**
+
+- **The telemetry ingestion pipeline** (batch 1):
+  `zim_engine_telemetry` (the window vocabulary, the pure series
+  pipeline, the retention service) + the domain `MetricsSample`
+  row + migration 0006 + the `Persistence` port family
+  (append/list/prune). The supervision monitor — already sampling
+  the runtime every poll tick for the live stream — persists the
+  same observation at the telemetry cadence (10 s default,
+  `ZIM_METRICS_PERSIST_SECS`, `0` = off) on a detached blocking
+  hop: a stalled store write can never stall the monitor, and a
+  failed append is dropped, not retried. Raw counters only —
+  rates and percentages are derived at read time from consecutive
+  rows (a stored rate would freeze the denominator choice the
+  window query should be free to make). Retention: 7 days default
+  (`ZIM_METRICS_RETENTION_HOURS`), pruned on a background loop
+  with a boot-time first pass; rows ride the per-instance
+  `ON DELETE CASCADE` posture. The mock runtime grew
+  `with_ticking_stats()` — advancing cumulative counters so
+  derived deltas read honest rates in every engine-side test.
+- **The history endpoint + the page** (batch 2):
+  `GET /instances/{id}/metrics/history?window=15m|1h|6h|24h|7d`
+  (§10.3b) — the derived series (points + summary +
+  `resolution_seconds`), downsampled to the chart's point budget
+  (180) with last-per-bucket; `null` means unknown (a runtime that
+  never reported the field, or a counter reset across a restart),
+  never zero. The frontend's `zim://servers/{id}/metrics` serves
+  its own page: four canvas charts (CPU host-share, memory with
+  the dashed limit, network rx/tx, processes), the window
+  switcher, a 15 s visible-tab auto-refresh, and a live strip over
+  the §11 stream (CPU% from consecutive sample deltas, memory/pids
+  gauges — the wire event carries no network counters, so network
+  lives on the history charts alone, honestly). The pure chart
+  geometry lives in `src/charts.ts` (DOM-free, unit-tested:
+  value→pixel mapping, the unknown-is-a-gap rule, the 1/2/5 axis
+  ladder). The manifest: 1.6.0; `pages/server_stub.html` and its
+  asset/source are deleted — the stub era ends with every declared
+  surface graduated.
+- **The E2E graduation + the records** (batch 3):
+  `metrics-surface.test.ts` — tier-honest (AD-30): the window
+  switcher, the endpoint's answer shape, the structured 400, and
+  the honest empty state run identically on every OS; the
+  live-sample walk rides the docker tier alone (a real busybox
+  container, `ZIM_METRICS_PERSIST_SECS=2`, the series filling, the
+  charts' known-point counts, the live strip waking, the 15m
+  re-render). AD-34 records the privacy posture; the README's
+  shipped-list and layout notes record the surface.
+
+**Acceptance criteria:** all met — Engine/Shell/E2E CI green on
+m30-dev; the frontend builds with the real page (fresh committed
+assets, manifest 1.6.0, 95 unit tests); the engine-side suites
+cover the store round-trips (window bounds, limit cap, re-observe
+replaces, prune side, instance-delete cascade), the supervision
+ingestion contract (cadence bounds the row count, freeze on stop,
+the ZERO off-switch), the series pipeline (derivation, resets,
+downsampling, lookback seeding, future-row cut), and the endpoint
+walks (derived shape, window ladder, 400, empty, 401); the loader's
+routing test graduates and asserts the stub is gone; the E2E walk
+drives the real engine on every tier.
+
+**Estimated effort:** 3 large batches (delivered as estimated).
+
 ### M28+: The post-alpha backlog (unsequenced)
 
 With M26/M27 shipped (`v0.1.0-alpha.1` / `v0.1.0-alpha.2`), the
 sequenced milestone track is exhausted — everything from here on is
 backlog, to be sequenced into milestones when the alpha feedback
 shapes the priorities. M29 sequenced itself off this register (the
-declared-but-stubbed management surfaces — see above); the honest
+declared-but-stubbed management surfaces — see above), and M30 did
+it twice over (the last declared stub, `metrics`, plus the
+register's own telemetry-ingestion line — see above); the honest
 sources remain the alpha notes' what-doesn't and rough-edge lists,
 the architecture's deferred
 crates, and this roadmap's §4 out-of-scope register:
@@ -1469,8 +1546,8 @@ crates, and this roadmap's §4 out-of-scope register:
 - **Addon marketplace** — signed `.zimpkg` upload works; a central
   catalog (discovery, update pinning, publisher identity) does not
   exist.
-- **Telemetry ingestion** — the module is specified; the engine
-  phones nobody home.
+- ~~**Telemetry ingestion**~~ — delivered by M30 (local-only, per
+  AD-34; the engine still phones nobody home).
 - **Managed-database UI** — the engine stores and operates the
   database rows; the management surface is unbuilt.
 - **Legacy client/application API compatibility** — deliberate;
