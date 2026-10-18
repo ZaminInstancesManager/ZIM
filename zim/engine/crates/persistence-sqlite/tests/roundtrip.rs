@@ -689,8 +689,8 @@ fn port_trait_object_dispatch_works() {
     let node = sample_node("via-trait");
     port.put_node(&node).unwrap();
     assert_eq!(port.get_node(&node.id).unwrap().unwrap(), node);
-    // Migration 0005 (user_recents) is the current head.
-    assert_eq!(port.schema_version().unwrap(), 5);
+    // Migration 0006 (metrics_samples) is the current head.
+    assert_eq!(port.schema_version().unwrap(), 6);
 }
 
 #[test]
