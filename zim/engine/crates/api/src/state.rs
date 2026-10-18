@@ -14,6 +14,7 @@ use zim_engine_frontend_loader::FrontendService;
 use zim_engine_installs::InstallService;
 use zim_engine_jobs::JobSystem;
 use zim_engine_scheduler::Scheduler;
+use zim_engine_telemetry::TelemetryService;
 use zim_engine_transfers::TransferService;
 
 use crate::config::ApiConfig;
@@ -114,6 +115,10 @@ pub struct AppState {
     pub installs: Arc<InstallService>,
     /// The cron scheduler (M9): schedule firing + run-now.
     pub scheduler: Arc<Scheduler>,
+    /// The telemetry service (M30): the durable metrics series'
+    /// query path (the ingestion half lives in the supervision
+    /// monitor; the retention half runs on the service's own loop).
+    pub telemetry: Arc<TelemetryService>,
     /// The frontend loader (M11): the active frontend package —
     /// the `/zim/` page surface and the §10.14 package endpoints.
     pub frontend: Arc<FrontendService>,
@@ -135,7 +140,7 @@ impl AppState {
     /// Assemble the state from its parts. The two limiters are
     /// constructed from `config`'s budgets.
     ///
-    /// (Thirteen parts is the honest composition surface — a builder
+    /// (Sixteen parts is the honest composition surface — a builder
     /// would hide which halves are optional; nothing here is.)
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -149,6 +154,7 @@ impl AppState {
         transfers: Arc<TransferService>,
         installs: Arc<InstallService>,
         scheduler: Arc<Scheduler>,
+        telemetry: Arc<TelemetryService>,
         frontend: Arc<FrontendService>,
         extensions: Arc<ExtensionsService>,
         themes: Arc<ThemeService>,
@@ -172,6 +178,7 @@ impl AppState {
             transfers,
             installs,
             scheduler,
+            telemetry,
             frontend,
             extensions,
             themes,

@@ -452,6 +452,7 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         Arc::clone(&transfers),
         Arc::clone(&installs),
         Arc::clone(&scheduler),
+        Arc::clone(&telemetry),
         Arc::clone(&frontend),
         Arc::clone(&extensions),
         Arc::clone(&themes),

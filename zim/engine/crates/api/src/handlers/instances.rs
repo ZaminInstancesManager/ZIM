@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Path, RawQuery, State};
+use axum::extract::{Path, Query, RawQuery, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
@@ -1743,6 +1743,71 @@ pub async fn metrics(
         "instance_id": instance_id,
         "samples": events,
         "last_generation": state.supervisor.stream().last_generation(instance_id),
+    })))
+}
+
+/// The `GET /instances/{id}/metrics/history` query string (M30):
+/// `?window=15m|1h|6h|24h|7d` (default `1h`).
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct MetricsHistoryQuery {
+    /// The history window's wire name.
+    pub window: Option<String>,
+}
+
+/// `GET /instances/{id}/metrics/history?window=1h` — M30: the
+/// durable series over the telemetry store (the monitor's persisted
+/// samples, derived and downsampled to the chart's point budget).
+/// The live lane above answers "now"; this endpoint answers "the
+/// last hour/day/week" — including across an engine restart, which
+/// the in-memory lane cannot. Requires any instance grant (the
+/// same §10.3 posture as the recent-samples view).
+///
+/// The response: `{instance_id, window, resolution_seconds,
+/// points[], summary}` — each point carries the derived CPU
+/// percent (host-share), the memory gauges, and the network rates
+/// plus raw counters; `null` means "unknown" for a field the
+/// runtime never reported, never "zero".
+pub async fn metrics_history(
+    State(state): State<Arc<AppState>>,
+    Extension(caller): Extension<Caller>,
+    Path(id): Path<String>,
+    Query(query): Query<MetricsHistoryQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    use zim_engine_telemetry::{HistorySeries, MetricsWindow, TelemetryError};
+
+    let instance_id = parse_uuid::<InstanceId>(&id, "id")?;
+    let (_instance, _ctx) = load_instance_for_caller(&state, &caller, &instance_id).await?;
+
+    let window_text = query.window.as_deref().unwrap_or("1h");
+    let window = MetricsWindow::parse(window_text).ok_or_else(|| {
+        ApiError::validation(
+            "window must be one of: 15m, 1h, 6h, 24h, 7d",
+            "window",
+        )
+    })?;
+
+    // The store read rides the spawn_blocking bridge (the M3
+    // sync-port discipline every persistence hop takes).
+    let now = Utc::now();
+    let telemetry = Arc::clone(&state.telemetry);
+    let series = tokio::task::spawn_blocking(move || telemetry.history(&instance_id, window, now))
+        .await
+        .map_err(|e| {
+            ApiError::internal(format!("telemetry history task join error: {e}"))
+        })?
+        .map_err(|e: TelemetryError| ApiError::internal(e.to_string()))?;
+
+    let HistorySeries {
+        points,
+        summary,
+        resolution_seconds,
+    } = series;
+    Ok(Json(serde_json::json!({
+        "instance_id": instance_id,
+        "window": window.as_str(),
+        "resolution_seconds": resolution_seconds,
+        "points": points,
+        "summary": summary,
     })))
 }
 

@@ -4076,6 +4076,7 @@ dependencies = [
  "zim_engine_persistence_sqlite",
  "zim_engine_scheduler",
  "zim_engine_streaming",
+ "zim_engine_telemetry",
  "zim_engine_transfers",
  "zip",
 ]

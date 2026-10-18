@@ -1312,3 +1312,47 @@ a.ntp-workload:hover { border-color: var(--color-accent); }
 .files-table .mgmt-grants {
   max-width: 420px;
 }
+
+/* ── M30: the metrics surface — window switcher, summary, charts ── */
+
+/** The window switcher's pill row (the §10.3a vocabulary). */
+.window-bar {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.window-bar .window-pill[aria-pressed="true"] {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+/** The one-line summary strip under the toolbar. */
+.metrics-summary {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  margin: calc(var(--spacing-unit) * 0.5) 0 0;
+}
+
+/** The 2×2 chart grid (one column on narrow panes). */
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: calc(var(--spacing-unit) * 1.5);
+  margin-top: calc(var(--spacing-unit) * 1.5);
+}
+
+/** One chart card: surface, radius, and a canvas that fills it. */
+.chart-card {
+  margin: 0;
+  background: var(--color-surface-2);
+  border-radius: 10px;
+  padding: calc(var(--spacing-unit) * 0.75);
+  overflow: hidden;
+}
+
+.chart-canvas {
+  display: block;
+  width: 100%;
+  height: 140px;
+}
