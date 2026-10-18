@@ -429,8 +429,16 @@ mod tests {
             ),
         ];
         let series = assemble_history(MetricsWindow::Hour1, &samples, now);
-        assert_eq!(series.points.len(), 1);
-        let point = series.points[0];
+        // The two rows straddle a 20 s bucket boundary (5 s before a
+        // 12:00:00-aligned now), so both render: the first as the
+        // gauge-only point, the second with its derived rates.
+        assert_eq!(series.points.len(), 2);
+        let gauge = series.points[0];
+        assert_eq!(gauge.ts, now - chrono::Duration::seconds(5));
+        assert_eq!(gauge.cpu_percent, None);
+        assert_eq!(gauge.network_rx_bytes_per_sec, None);
+        assert_eq!(gauge.memory_usage_bytes, Some(4 * 1024 * 1024));
+        let point = series.points[1];
         assert_eq!(point.ts, now);
         // 0.1 / 1.0 = 10 % of the host.
         assert_eq!(point.cpu_percent, Some(10.0));
@@ -485,8 +493,8 @@ mod tests {
         assert_eq!(series.points[0].ts, base + chrono::Duration::seconds(19));
         assert_eq!(series.points[1].ts, base + chrono::Duration::seconds(25));
         // The 25 s point's rate spans the two surviving samples:
-        // (25000 - 19000) B over 6 s = 100 B/s.
-        assert_eq!(series.points[1].network_rx_bytes_per_sec, Some(100.0));
+        // (25000 - 19000) B over 6 s = 1000 B/s.
+        assert_eq!(series.points[1].network_rx_bytes_per_sec, Some(1000.0));
     }
 
     #[test]
@@ -650,11 +658,16 @@ mod tests {
             sample(instance, now, 0, None, None, Some(4096), None, None),
         ];
         let series = assemble_history(MetricsWindow::Hour1, &samples, now);
-        assert_eq!(series.points.len(), 1);
-        assert_eq!(series.points[0].cpu_percent, None);
-        assert_eq!(series.points[0].network_rx_bytes_per_sec, None);
-        assert_eq!(series.points[0].memory_usage_bytes, Some(4096));
-        assert_eq!(series.points[0].memory_percent, Some(50.0));
+        // The two rows straddle a 20 s bucket boundary: both render,
+        // the first gauge-only, the second carrying the newer gauges.
+        assert_eq!(series.points.len(), 2);
+        for point in &series.points {
+            assert_eq!(point.cpu_percent, None);
+            assert_eq!(point.network_rx_bytes_per_sec, None);
+        }
+        assert_eq!(series.points[0].memory_usage_bytes, Some(2048));
+        assert_eq!(series.points[1].memory_usage_bytes, Some(4096));
+        assert_eq!(series.points[1].memory_percent, Some(50.0));
         assert_eq!(series.summary.memory_bytes_max, Some(4096));
         assert_eq!(series.summary.network_rx_bytes_total, None);
     }
