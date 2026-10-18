@@ -725,6 +725,9 @@ async fn supervisor_crash_loop_over_docker() {
             monitor_poll_interval: Duration::from_millis(200),
             stop_deadline: Duration::from_secs(10),
             stream_metrics: false,
+            // The docker suites assert observed behavior, not the
+            // telemetry store; keep the durable series off.
+            metrics_persist_interval: Duration::ZERO,
         },
         test_settings().data_root,
     );
@@ -866,6 +869,9 @@ async fn supervisor_reconcile_over_docker() {
             monitor_poll_interval: Duration::from_millis(200),
             stop_deadline: Duration::from_secs(10),
             stream_metrics: false,
+            // The docker suites assert observed behavior, not the
+            // telemetry store; keep the durable series off.
+            metrics_persist_interval: Duration::ZERO,
         },
         test_settings().data_root,
     );
@@ -1026,6 +1032,9 @@ async fn console_pump_publishes_to_hub_through_supervisor() {
             monitor_poll_interval: Duration::from_millis(200),
             stop_deadline: Duration::from_secs(10),
             stream_metrics: false,
+            // The docker suites assert observed behavior, not the
+            // telemetry store; keep the durable series off.
+            metrics_persist_interval: Duration::ZERO,
         },
         test_settings().data_root,
     );
@@ -1173,6 +1182,9 @@ async fn console_retention_bounds_under_load() {
             monitor_poll_interval: Duration::from_millis(200),
             stop_deadline: Duration::from_secs(10),
             stream_metrics: false,
+            // The docker suites assert observed behavior, not the
+            // telemetry store; keep the durable series off.
+            metrics_persist_interval: Duration::ZERO,
         },
         test_settings().data_root,
     );
