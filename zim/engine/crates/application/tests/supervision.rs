@@ -31,6 +31,9 @@ fn test_policy() -> SupervisionPolicy {
         // The supervision tests assert exact call/state sequences;
         // metrics events would add unrelated publishes.
         stream_metrics: false,
+        // ...and no telemetry persistence either (the ingestion
+        // tests below turn it on explicitly).
+        metrics_persist_interval: Duration::ZERO,
     }
 }
 
@@ -958,4 +961,143 @@ async fn console_pump_replace_semantics_across_restart() {
     );
 
     f.supervisor.shutdown().await;
+}
+
+// ── M30 telemetry ingestion: the monitor persists at its cadence ──────────
+
+/// Ingestion contract (M30): while the instance runs, the monitor
+/// persists the runtime's stats observations at the telemetry
+/// cadence — not the poll cadence — and a stopped instance stops
+/// accumulating rows.
+#[tokio::test]
+async fn monitor_persists_telemetry_samples_at_the_cadence() {
+    let store = in_memory_store();
+    let user = seed_user(store.as_ref());
+    let node = seed_local_node(store.as_ref());
+    let instance = seed_instance(store.as_ref(), &node, &user, 25701);
+    let mock = MockRuntime::always_running().with_ticking_stats();
+    let factory = MockRuntimeFactory::new(mock.clone());
+    let supervisor = Supervisor::new(
+        Arc::clone(&store),
+        Arc::new(factory),
+        SupervisionPolicy {
+            monitor_poll_interval: Duration::from_millis(25),
+            stop_deadline: Duration::from_millis(500),
+            stream_metrics: false,
+            metrics_persist_interval: Duration::from_millis(80),
+            ..test_policy()
+        },
+        std::env::temp_dir().join("zim-supervision-test"),
+    );
+    supervisor.load_local().await.unwrap();
+    supervisor
+        .request_power(&instance.id, PowerAction::Start)
+        .await
+        .unwrap();
+
+    // The monitor polls at 25 ms but persists at 80 ms: over a
+    // fixed ~500 ms window the store holds a handful of rows — more
+    // than two (a per-poll writer would have ~20) and fewer than a
+    // dozen (a stalled writer would have two at most). The bounding
+    // is what the cadence split means.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let now = Utc::now();
+    let rows = store
+        .list_metrics_history(
+            &instance.id,
+            now - chrono::Duration::seconds(5),
+            now + chrono::Duration::seconds(5),
+            100,
+        )
+        .unwrap();
+    assert!(
+        (3..=10).contains(&rows.len()),
+        "the persist cadence (80 ms) must bound the row count, got {}",
+        rows.len()
+    );
+
+    // Every persisted row carries the ticking workload's shape
+    // (advancing cumulative CPU and network counters).
+    assert!(rows.iter().all(|row| row.cpu_usage_total_ns.is_some()));
+    assert!(rows.iter().all(|row| row.network_rx_bytes.is_some()));
+    assert!(
+        rows.last().unwrap().cpu_usage_total_ns.unwrap()
+            > rows.first().unwrap().cpu_usage_total_ns.unwrap()
+    );
+
+    // Stop: the monitor ends with the run; the row count freezes.
+    supervisor
+        .request_power(&instance.id, PowerAction::Stop { deadline: Duration::from_millis(500) })
+        .await
+        .unwrap();
+    let frozen = store
+        .list_metrics_history(
+            &instance.id,
+            now - chrono::Duration::seconds(5),
+            Utc::now() + chrono::Duration::seconds(5),
+            100,
+        )
+        .unwrap()
+        .len();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let after = store
+        .list_metrics_history(
+            &instance.id,
+            now - chrono::Duration::seconds(5),
+            Utc::now() + chrono::Duration::seconds(5),
+            100,
+        )
+        .unwrap()
+        .len();
+    assert_eq!(frozen, after);
+}
+
+/// The ingestion off-switch: `metrics_persist_interval: ZERO` (the
+/// test policy) means the store stays empty while the stream still
+/// publishes when `stream_metrics` is on.
+#[tokio::test]
+async fn zero_persist_interval_keeps_the_store_empty() {
+    let store = in_memory_store();
+    let user = seed_user(store.as_ref());
+    let node = seed_local_node(store.as_ref());
+    let instance = seed_instance(store.as_ref(), &node, &user, 25702);
+    let mock = MockRuntime::always_running().with_ticking_stats();
+    let factory = MockRuntimeFactory::new(mock.clone());
+    let supervisor = Supervisor::new(
+        Arc::clone(&store),
+        Arc::new(factory),
+        SupervisionPolicy {
+            monitor_poll_interval: Duration::from_millis(25),
+            stop_deadline: Duration::from_millis(500),
+            stream_metrics: true,
+            metrics_persist_interval: Duration::ZERO,
+            ..test_policy()
+        },
+        std::env::temp_dir().join("zim-supervision-test"),
+    );
+    supervisor.load_local().await.unwrap();
+    supervisor
+        .request_power(&instance.id, PowerAction::Start)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // The live stream carried samples (the hub retained them)...
+    let samples = supervisor.stream().recent_metrics(instance.id, 100);
+    assert!(!samples.is_empty());
+    // ...but the durable series did not (the off-switch is real).
+    let now = Utc::now();
+    let rows = store
+        .list_metrics_history(
+            &instance.id,
+            now - chrono::Duration::seconds(5),
+            Utc::now() + chrono::Duration::seconds(5),
+            100,
+        )
+        .unwrap();
+    assert!(rows.is_empty());
+    supervisor
+        .request_power(&instance.id, PowerAction::Stop { deadline: Duration::from_millis(500) })
+        .await
+        .unwrap();
 }

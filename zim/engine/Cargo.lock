@@ -4280,6 +4280,7 @@ dependencies = [
  "zim_engine_scheduler",
  "zim_engine_sftp",
  "zim_engine_streaming",
+ "zim_engine_telemetry",
  "zim_engine_transfers",
  "zim_engine_workloads_database",
  "zim_engine_workloads_dev_process",
@@ -4405,6 +4406,20 @@ dependencies = [
  "thiserror",
  "tokio",
  "zim_engine_domain",
+]
+
+[[package]]
+name = "zim_engine_telemetry"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "zim_engine_application",
+ "zim_engine_domain",
+ "zim_engine_persistence_sqlite",
 ]
 
 [[package]]

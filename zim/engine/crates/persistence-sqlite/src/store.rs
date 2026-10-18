@@ -12,13 +12,15 @@
 //! trips foreign keys when the row is a parent (see the crate docs).
 
 use crate::migrations;
+use chrono::{DateTime, Utc};
 use rusqlite::params;
 use zim_engine_application::ports::{Persistence, PersistenceError};
 use zim_engine_domain::{
     Allocation, AllocationId, AuditRecord, Backup, BackupId, CommandTemplate, Egg, EggId,
     EggVariable, ExtensionId, ExtensionRegistration, ExtensionSignature, Instance, InstanceId,
-    InstanceStatus, InstanceVariable, Job, JobId, JobState, Node, NodeId, Permission,
-    PermissionSet, RecentServer, Schedule, ScheduleId, Transfer, TransferId, User, UserId,
+    InstanceStatus, InstanceVariable, Job, JobId, JobState, MetricsSample, Node, NodeId,
+    Permission, PermissionSet, RecentServer, Schedule, ScheduleId, Transfer, TransferId, User,
+    UserId,
 };
 
 // ─── Error & conversion helpers ───────────────────────────────────────────
@@ -715,6 +717,89 @@ impl Persistence for crate::SqlitePersistence {
                 .map_err(db_err)?;
             let owner = *user;
             collect_rows(&mut rows, move |row| row_to_recent(row, owner))
+        })
+    }
+
+    // ── Metrics samples (M30 telemetry ingestion) ──────────────
+
+    fn append_metrics_sample(&self, sample: &MetricsSample) -> Result<(), PersistenceError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO metrics_samples (
+                    instance_id, ts, cpu_usage_total_ns, system_cpu_total_ns, online_cpus,
+                    memory_usage_bytes, memory_limit_bytes, pids_current,
+                    network_rx_bytes, network_tx_bytes
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                ON CONFLICT (instance_id, ts) DO UPDATE SET
+                    cpu_usage_total_ns = excluded.cpu_usage_total_ns,
+                    system_cpu_total_ns = excluded.system_cpu_total_ns,
+                    online_cpus = excluded.online_cpus,
+                    memory_usage_bytes = excluded.memory_usage_bytes,
+                    memory_limit_bytes = excluded.memory_limit_bytes,
+                    pids_current = excluded.pids_current,
+                    network_rx_bytes = excluded.network_rx_bytes,
+                    network_tx_bytes = excluded.network_tx_bytes",
+                params![
+                    uuid_to_text(sample.instance_id),
+                    ts(&sample.ts),
+                    sample.cpu_usage_total_ns,
+                    sample.system_cpu_total_ns,
+                    sample.online_cpus,
+                    sample.memory_usage_bytes,
+                    sample.memory_limit_bytes,
+                    sample.pids_current,
+                    sample.network_rx_bytes,
+                    sample.network_tx_bytes,
+                ],
+            )
+            .map(|_| ())
+            .map_err(db_err)
+        })
+    }
+
+    fn list_metrics_history(
+        &self,
+        instance: &InstanceId,
+        since: DateTime<Utc>,
+        until: DateTime<Utc>,
+        limit: u32,
+    ) -> Result<Vec<MetricsSample>, PersistenceError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT instance_id, ts, cpu_usage_total_ns, system_cpu_total_ns,
+                            online_cpus, memory_usage_bytes, memory_limit_bytes, pids_current,
+                            network_rx_bytes, network_tx_bytes
+                     FROM metrics_samples
+                     WHERE instance_id = ?1 AND ts >= ?2 AND ts <= ?3
+                     ORDER BY ts ASC
+                     LIMIT ?4",
+                )
+                .map_err(db_err)?;
+            // The cap is generous by design: the telemetry query path
+            // downsamples to the chart's point budget after the read,
+            // so a wide raw fetch is bounded but never the formatter.
+            let capped = i64::from(limit.min(20_000));
+            let mut rows = stmt
+                .query(params![
+                    uuid_to_text(instance),
+                    ts(&since),
+                    ts(&until),
+                    capped
+                ])
+                .map_err(db_err)?;
+            collect_rows(&mut rows, row_to_metrics_sample)
+        })
+    }
+
+    fn prune_metrics_before(&self, cutoff: DateTime<Utc>) -> Result<u64, PersistenceError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "DELETE FROM metrics_samples WHERE ts < ?1",
+                params![ts(&cutoff)],
+            )
+            .map(|removed| u64::try_from(removed).unwrap_or(u64::MAX))
+            .map_err(db_err)
         })
     }
 
@@ -1506,6 +1591,21 @@ fn row_to_recent(row: &rusqlite::Row<'_>, user: UserId) -> Result<RecentServer, 
         instance_id: uuid_from_text(&row.get::<_, String>(0).map_err(db_err)?, "instance")?.into(),
         last_opened_at: parse_ts(&row.get::<_, String>(1).map_err(db_err)?)?,
         open_count: row.get::<_, i64>(2).map_err(db_err)?.max(1) as u64,
+    })
+}
+
+fn row_to_metrics_sample(row: &rusqlite::Row<'_>) -> Result<MetricsSample, PersistenceError> {
+    Ok(MetricsSample {
+        instance_id: uuid_from_text(&row.get::<_, String>(0).map_err(db_err)?, "instance")?.into(),
+        ts: parse_ts(&row.get::<_, String>(1).map_err(db_err)?)?,
+        cpu_usage_total_ns: row.get::<_, Option<i64>>(2).map_err(db_err)?.map(|v| v.max(0) as u64),
+        system_cpu_total_ns: row.get::<_, Option<i64>>(3).map_err(db_err)?.map(|v| v.max(0) as u64),
+        online_cpus: row.get::<_, Option<i64>>(4).map_err(db_err)?.map(|v| v.max(0) as u64),
+        memory_usage_bytes: row.get::<_, Option<i64>>(5).map_err(db_err)?.map(|v| v.max(0) as u64),
+        memory_limit_bytes: row.get::<_, Option<i64>>(6).map_err(db_err)?.map(|v| v.max(0) as u64),
+        pids_current: row.get::<_, Option<i64>>(7).map_err(db_err)?.map(|v| v.max(0) as u64),
+        network_rx_bytes: row.get::<_, Option<i64>>(8).map_err(db_err)?.map(|v| v.max(0) as u64),
+        network_tx_bytes: row.get::<_, Option<i64>>(9).map_err(db_err)?.map(|v| v.max(0) as u64),
     })
 }
 

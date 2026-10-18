@@ -1,0 +1,34 @@
+[package]
+name = "zim_engine_telemetry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+
+[lib]
+name = "zim_engine_telemetry"
+path = "src/lib.rs"
+
+[dependencies]
+# The persistence port (metrics rows) — the crate's only store access.
+zim_engine_application = { workspace = true }
+# The MetricsSample entity + typed ids.
+zim_engine_domain = { workspace = true }
+# Timestamps everywhere.
+chrono = { workspace = true }
+# The retention loop + the async persistence bridge.
+tokio = { workspace = true }
+# The error surface.
+thiserror = { workspace = true }
+# The history envelope the API serializes.
+serde = { workspace = true }
+
+[dev-dependencies]
+# In-memory store for the retention + history tests.
+zim_engine_persistence_sqlite = { workspace = true }
+# Fresh ids in the test fixtures.
+uuid = { workspace = true }

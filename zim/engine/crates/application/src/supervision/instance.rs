@@ -36,6 +36,14 @@ pub struct SupervisionPolicy {
     /// events on each poll (M7). Off only for tests that assert
     /// exact event sequences.
     pub stream_metrics: bool,
+    /// How often the monitor *persists* a resource-usage sample
+    /// (M30 telemetry ingestion). The stream keeps its live 1 s
+    /// cadence; the durable series does not need per-second
+    /// resolution, and the store should not carry it. 10 s is
+    /// 8,640 rows/instance/day — comfortable under the 7-day
+    /// retention window. `Duration::ZERO` disables persistence
+    /// (tests that assert exact store contents).
+    pub metrics_persist_interval: Duration,
 }
 
 impl Default for SupervisionPolicy {
@@ -45,6 +53,7 @@ impl Default for SupervisionPolicy {
             monitor_poll_interval: Duration::from_secs(1),
             stop_deadline: Duration::from_secs(30),
             stream_metrics: true,
+            metrics_persist_interval: Duration::from_secs(10),
         }
     }
 }
@@ -659,6 +668,10 @@ async fn console_pump_loop(inner: Arc<InstanceInner>) {
 /// M7 replaces polling with runtime events; the invariant logic
 /// (crash counting, crash-loop parking, auto-restart) stays.
 async fn monitor_loop(inner: Arc<InstanceInner>) {
+    // M30: when the monitor last persisted a telemetry sample
+    // (None = the next running sample persists immediately, so a
+    // freshly-started instance's series begins at its start).
+    let mut last_persist: Option<std::time::Instant> = None;
     loop {
         tokio::select! {
             _ = inner.cancel.cancelled() => break,
@@ -687,12 +700,31 @@ async fn monitor_loop(inner: Arc<InstanceInner>) {
                     // streams a resource-usage sample per tick
                     // (Wings's stats cadence); a failed sample is
                     // skipped, not fatal — telemetry must never
-                    // trip the monitor.
-                    if inner.policy.stream_metrics {
-                        if let Ok(usage) = inner.runtime.stats().await {
+                    // trip the monitor. M30 doubles the consumer:
+                    // the same observation feeds the durable series
+                    // at the telemetry cadence (the store's rows,
+                    // the history endpoint's source).
+                    let usage = if inner.policy.stream_metrics
+                        || inner.policy.metrics_persist_interval > Duration::ZERO
+                    {
+                        inner.runtime.stats().await.ok()
+                    } else {
+                        None
+                    };
+                    if let Some(usage) = usage {
+                        if inner.policy.stream_metrics {
                             inner
                                 .stream
                                 .publish(inner.id, EventData::ResourceUsage(usage_to_wire(&usage)));
+                        }
+                        let due = inner.policy.metrics_persist_interval > Duration::ZERO
+                            && match last_persist {
+                                None => true,
+                                Some(at) => at.elapsed() >= inner.policy.metrics_persist_interval,
+                            };
+                        if due {
+                            last_persist = Some(std::time::Instant::now());
+                            persist_telemetry_sample(&inner, &usage);
                         }
                     }
                 }
@@ -809,6 +841,38 @@ async fn handle_crash(inner: &Arc<InstanceInner>, exit_code: Option<i32>, oom_ki
 }
 
 // ── Small state helpers (all lock-then-release; never across await) ──
+
+/// Persist one telemetry sample (M30): the runtime's observation as
+/// a domain [`MetricsSample`] row, appended through the persistence
+/// port on a detached blocking task — a stalled store write must
+/// never stall the monitor (the M3 sync-port discipline: the port
+/// is `Send + Sync` for exactly this hop). A failed append is
+/// logged and dropped, not retried: the next cadence tick brings
+/// the next sample, and a hole in the series is honest (the
+/// derivation path treats consecutive-row deltas, so a missing row
+/// widens one interval rather than corrupting it).
+fn persist_telemetry_sample(inner: &InstanceInner, usage: &ResourceUsage) {
+    let sample = zim_engine_domain::MetricsSample {
+        instance_id: inner.id,
+        ts: Utc::now(),
+        cpu_usage_total_ns: usage.cpu_usage_total_ns,
+        system_cpu_total_ns: usage.system_cpu_total_ns,
+        online_cpus: usage.online_cpus,
+        memory_usage_bytes: usage.memory_usage_bytes,
+        memory_limit_bytes: usage.memory_limit_bytes,
+        pids_current: usage.pids_current,
+        network_rx_bytes: usage.network_rx_bytes,
+        network_tx_bytes: usage.network_tx_bytes,
+    };
+    let persistence = Arc::clone(&inner.persistence);
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = persistence.append_metrics_sample(&sample) {
+            eprintln!(
+                "zim_engine: supervision: telemetry sample append failed: {e}"
+            );
+        }
+    });
+}
 
 /// Map the runtime's resource-usage observation onto the streaming
 /// crate's wire form (the application layer cannot leak its own

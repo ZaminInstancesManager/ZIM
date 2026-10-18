@@ -21,6 +21,7 @@ members = [
     "crates/authz",
     "crates/audit",
     "crates/metrics",
+    "crates/telemetry",
     "crates/platform",
     "crates/frontend-loader",
     "crates/migrate-pterodactyl",
@@ -37,10 +38,11 @@ members = [
 # (docs/architecture/RUST_ENGINE.md §1, §12.4) but not built in M2:
 #   crates/persistence-postgres   (multi-node authoritative storage; deferred)
 #   crates/runtime-host           (opt-in non-container runtime; TBD)
-#   crates/telemetry              (opt-in telemetry ingestion; TBD)
 # These will be added to `members` in their corresponding implementation
 # milestones. The M16 workload crates ARE members (M16, issue #11);
 # the engine consumes them behind the `workloads-all` feature.
+# crates/telemetry joined in M30 (the telemetry ingestion module —
+# local-only persistence of the monitor's resource-usage samples).
 
 [workspace.package]
 version = "0.1.0"
@@ -75,6 +77,7 @@ zim_engine_auth = { path = "crates/auth" }
 zim_engine_authz = { path = "crates/authz" }
 zim_engine_audit = { path = "crates/audit" }
 zim_engine_metrics = { path = "crates/metrics" }
+zim_engine_telemetry = { path = "crates/telemetry" }
 zim_engine_platform = { path = "crates/platform" }
 zim_engine_frontend_loader = { path = "crates/frontend-loader" }
 zim_engine_migrate_pterodactyl = { path = "crates/migrate-pterodactyl" }

@@ -60,6 +60,11 @@ pub struct EngineOptions {
     /// The SFTP transport's listener options (M28; env
     /// `ZIM_SFTP_ENABLED` / `ZIM_SFTP_PORT`).
     pub sftp: zim_engine_sftp::SftpOptions,
+    /// The telemetry ingestion options (M30; env
+    /// `ZIM_METRICS_RETENTION_HOURS` /
+    /// `ZIM_METRICS_PRUNE_INTERVAL_SECS`) — local-only persistence
+    /// of the monitor's resource-usage samples.
+    pub metrics: zim_engine_telemetry::TelemetryOptions,
 }
 
 impl Default for EngineOptions {
@@ -70,6 +75,7 @@ impl Default for EngineOptions {
             bootstrap_admin_email: "admin@zim.local".to_owned(),
             bootstrap_admin_password: None,
             sftp: zim_engine_sftp::SftpOptions::default(),
+            metrics: zim_engine_telemetry::TelemetryOptions::default(),
         }
     }
 }
@@ -101,6 +107,7 @@ impl EngineOptions {
             }
         }
         opts.sftp = zim_engine_sftp::SftpOptions::from_env(opts.sftp);
+        opts.metrics = zim_engine_telemetry::TelemetryOptions::from_env(opts.metrics);
         opts
     }
 }
@@ -254,10 +261,17 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
         };
 
     // ── Supervision + restart reconciliation (invariants 1, 10) ──
+    // M30: the supervision policy carries the telemetry persist
+    // cadence — the monitor samples the runtime every poll tick
+    // for the live stream, and persists the same observation at
+    // the lower telemetry cadence for the durable history series.
     let supervisor = Supervisor::new(
         Arc::clone(&persistence),
         runtime_factory,
-        SupervisionPolicy::default(),
+        SupervisionPolicy {
+            metrics_persist_interval: options.metrics.persist_interval,
+            ..SupervisionPolicy::default()
+        },
         options.data_dir.clone(),
     );
     let reconciled = supervisor
@@ -335,6 +349,21 @@ pub async fn startup(options: EngineOptions) -> Result<RunningEngine, String> {
     let scheduler =
         zim_engine_scheduler::Scheduler::new(Arc::clone(&persistence), Arc::clone(&supervisor));
     scheduler.start();
+
+    // ── Telemetry ingestion (M30) ───────────────────────────────
+    // The retention half of the telemetry module: a background
+    // prune that keeps the monitor's persisted samples inside the
+    // policy's window (the first pass runs now — a fresh boot is
+    // when a previous run's overdue rows deserve pruning). The
+    // ingestion half lives in the supervision monitor (the samples
+    // are already being sampled there); the query half arrives
+    // with the metrics surface's history endpoint. Nothing leaves
+    // the machine — the engine still phones nobody home (AD-34).
+    let telemetry = zim_engine_telemetry::TelemetryService::new(
+        Arc::clone(&persistence),
+        options.metrics.policy(),
+    );
+    telemetry.start();
 
     // ── Credential managers (in-memory by design; see auth crate) ─
     let sessions = Arc::new(SessionManager::new(Default::default()));

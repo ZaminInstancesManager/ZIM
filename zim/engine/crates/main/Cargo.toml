@@ -37,6 +37,9 @@ zim_engine_auth = { workspace = true }
 zim_engine_authz = { workspace = true }
 zim_engine_audit = { workspace = true }
 zim_engine_metrics = { workspace = true }
+# M30: the telemetry ingestion service (retention loop + history
+# query knobs), composed here.
+zim_engine_telemetry = { workspace = true }
 zim_engine_platform = { workspace = true }
 zim_engine_frontend_loader = { workspace = true }
 # M24: the addon system — ExtensionsService + ThemeService

@@ -53,6 +53,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "user_recents",
         sql: include_str!("../migrations/0005_user_recents.sql"),
     },
+    Migration {
+        version: 6,
+        name: "metrics_samples",
+        sql: include_str!("../migrations/0006_metrics_samples.sql"),
+    },
 ];
 
 /// The highest version this binary knows how to apply.
