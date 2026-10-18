@@ -355,6 +355,7 @@ mod tests {
     use zim_engine_domain::InstanceId;
 
     /// Build one raw sample at `t0 + seconds` with the given counters.
+    #[allow(clippy::too_many_arguments)]
     fn sample(
         instance: InstanceId,
         t0: DateTime<Utc>,
@@ -463,7 +464,7 @@ mod tests {
                 Some(counter * 1_000_000),
                 Some(counter * 10_000_000),
                 Some(1024),
-                Some(counter as u64 * 100),
+                Some(counter * 100),
                 Some(0),
             ));
         }
