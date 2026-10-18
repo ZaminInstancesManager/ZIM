@@ -218,11 +218,18 @@ test("management: the settings surface saves under the §8 gate (and 412s honest
     await loginViaUi(page, engine);
     await uiGoto(page, engine, `servers/${instance.id}/settings`);
 
-    // The form prefills from the row (name + the etag pill shows).
+    // The form prefills from the row. The prefill's own readiness
+    // signal comes FIRST — the etag pill carries the loaded row's
+    // etag — and only then is the field's value honest to assert
+    // (the input is visible long before the row arrives; asserting
+    // early races the page's load under the suite's parallel load).
     const nameField = page.locator("#set-name");
     await nameField.waitFor({ state: "visible", timeout: 15_000 });
+    await page
+      .locator("#etag-pill")
+      .filter({ hasText: /inst-/ })
+      .waitFor({ state: "visible", timeout: 15_000 });
     assert.equal(await nameField.inputValue(), instance.name);
-    await page.locator("#etag-pill").filter({ hasText: /inst-/ }).waitFor({ state: "visible" });
 
     // Rename and save: the engine's row agrees with the UI.
     const renamed = `${instance.name}-renamed`;
