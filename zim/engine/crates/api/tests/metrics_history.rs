@@ -255,28 +255,33 @@ async fn history_serves_the_derived_series_for_a_running_instance() {
         .unwrap();
     assert_eq!(response.status(), 202);
 
-    // Wait for the durable series to fill (several persisted rows).
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    // Wait for the durable series to fill. The 15-minute window's
+    // 5 s buckets are what make a fast-cadence series visible:
+    // the 1h view's 20 s buckets would honestly collapse these rows
+    // (the downsampling is the point, not a bug).
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     let mut points: Vec<Value>;
     loop {
         let response = engine
             .client
-            .get(engine.url(&format!("/instances/{instance_id}/metrics/history")))
+            .get(engine.url(&format!(
+                "/instances/{instance_id}/metrics/history?window=15m"
+            )))
             .header("Cookie", format!("zim_session={cookie}"))
             .send()
             .await
             .unwrap();
         assert_eq!(response.status(), 200);
         let body: Value = response.json().await.unwrap();
-        // The default window is 1h with its documented resolution.
-        assert_eq!(body["window"], json!("1h"));
-        assert_eq!(body["resolution_seconds"], json!(20));
+        // The 15-minute window carries its documented resolution.
+        assert_eq!(body["window"], json!("15m"));
+        assert_eq!(body["resolution_seconds"], json!(5));
         assert_eq!(body["instance_id"], json!(instance_id));
         points = body["points"].as_array().unwrap().clone();
         if points.len() >= 3 || tokio::time::Instant::now() > deadline {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(120)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
     assert!(
         points.len() >= 3,
@@ -286,9 +291,22 @@ async fn history_serves_the_derived_series_for_a_running_instance() {
 
     // The derived shape: the ticking workload's CPU reads a flat
     // 10 % (host-share), the network rates are positive, and the
-    // memory gauges ride along. (The 10 % carries float dust —
-    // 0.1 * 100 rounds a hair above — so the tolerance.)
-    for point in &points {
+    // memory gauges ride along. The series' first fetched row can
+    // render as a gauge-only point (rates unknown — no predecessor
+    // yet), so the shape walk asserts over the derived points.
+    // (The 10 % carries float dust — 0.1 * 100 rounds a hair above
+    // — so the tolerance.)
+    let derived: Vec<&Value> = points
+        .iter()
+        .filter(|point| point["cpu_percent"].is_number())
+        .collect();
+    assert!(
+        derived.len() >= 2,
+        "at least two derived points (got {} of {})",
+        derived.len(),
+        points.len()
+    );
+    for point in &derived {
         assert!(point["ts"].is_string(), "every point is timestamped");
         let cpu = point["cpu_percent"].as_f64().unwrap();
         assert!(
@@ -301,10 +319,12 @@ async fn history_serves_the_derived_series_for_a_running_instance() {
         assert!(point["memory_percent"].as_f64().is_some());
     }
 
-    // The summary agrees with the points.
+    // The summary agrees with the points (the same 15m view).
     let response = engine
         .client
-        .get(engine.url(&format!("/instances/{instance_id}/metrics/history")))
+        .get(engine.url(&format!(
+            "/instances/{instance_id}/metrics/history?window=15m"
+        )))
         .header("Cookie", format!("zim_session={cookie}"))
         .send()
         .await
@@ -392,7 +412,7 @@ async fn an_unknown_window_is_a_structured_refusal() {
         .unwrap();
     assert_eq!(response.status(), 400);
     let body: Value = response.json().await.unwrap();
-    assert_eq!(body["error"]["code"], json!("bad_request"));
+    assert_eq!(body["error"]["code"], json!("validation_failed"));
     assert_eq!(body["error"]["field"], json!("window"));
     assert!(body["error"]["message"]
         .as_str()
