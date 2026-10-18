@@ -282,11 +282,76 @@ mod tests {
         Utc.with_ymd_and_hms(2026, 10, 19, 12, 0, 0).unwrap()
     }
 
+    /// Seed the FK chain a metrics row hangs from (node -> user ->
+    /// allocation -> instance) and return the instance id. The
+    /// samples table carries the per-instance ON DELETE CASCADE
+    /// posture, so a bare id would trip the foreign key; `index`
+    /// varies the unique columns (user email, allocation port) so
+    /// one store can carry several seeded instances.
+    fn seed_instance(store: &dyn Persistence, index: u16) -> InstanceId {
+        use zim_engine_domain::{Instance, Node, User};
+        let node = Node {
+            id: zim_engine_domain::NodeId::new(),
+            name: format!("telemetry-test-{index}"),
+            location_id: zim_engine_domain::LocationId::new(),
+            fqdn: "localhost".to_owned(),
+            scheme: zim_engine_domain::Scheme::Https,
+            public_port: 8443,
+            listen_port: 8444,
+            capabilities: Default::default(),
+            deployment: zim_engine_domain::NodeDeployment::LocalLinux,
+            last_heartbeat: None,
+            last_seen_state: Default::default(),
+        };
+        store.put_node(&node).unwrap();
+        let user = User {
+            id: zim_engine_domain::UserId::new(),
+            email: format!("telemetry-{index}@example.org"),
+            username: format!("telemetry-{index}"),
+            external_id: None,
+            password_hash: None,
+            oauth_subject: None,
+            is_admin: false,
+            root_admin: false,
+        };
+        store.put_user(&user).unwrap();
+        let allocation_id = store
+            .create_allocation(&node.id, "127.0.0.1".parse().unwrap(), 25_700 + index, None)
+            .unwrap();
+        let (uuid, uuid_short) = Instance::legacy_uuid_pair();
+        let instance = Instance {
+            id: InstanceId::new(),
+            external_id: None,
+            uuid,
+            uuid_short,
+            node_id: node.id,
+            name: "Telemetry Test".to_owned(),
+            description: String::new(),
+            status: zim_engine_domain::InstanceStatus::Offline,
+            skip_egg_scripts: false,
+            owner_id: user.id,
+            limits: Default::default(),
+            allocation_id,
+            egg_id: zim_engine_domain::EggId::new(),
+            startup: zim_engine_domain::CommandTemplate::new("sleep 600"),
+            image: "busybox:latest".parse().unwrap(),
+            allocation_limit: None,
+            database_limit: None,
+            backup_limit: 0,
+            crash_detection_enabled: true,
+            installed_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        store.put_instance(&instance).unwrap();
+        instance.id
+    }
+
     #[test]
     fn history_reads_only_the_requested_instance() {
         let persistence = store();
-        let a = InstanceId::from_uuid(uuid::Uuid::new_v4());
-        let b = InstanceId::from_uuid(uuid::Uuid::new_v4());
+        let a = seed_instance(persistence.as_ref(), 1);
+        let b = seed_instance(persistence.as_ref(), 2);
         for instance in [a, b] {
             persistence
                 .append_metrics_sample(&MetricsSample {
@@ -311,7 +376,7 @@ mod tests {
     #[test]
     fn retention_prunes_only_older_rows() {
         let persistence = store();
-        let instance = InstanceId::from_uuid(uuid::Uuid::new_v4());
+        let instance = seed_instance(persistence.as_ref(), 1);
         // A 1-hour retention policy; rows at now-30 s (kept) and
         // now-2 h (pruned). The rows are placed against the real
         // clock because the prune cutoff is real-now — a fixed
@@ -381,7 +446,7 @@ mod tests {
     #[test]
     fn a_narrower_retention_shortens_wide_windows_honestly() {
         let persistence = store();
-        let instance = InstanceId::from_uuid(uuid::Uuid::new_v4());
+        let instance = seed_instance(persistence.as_ref(), 1);
         // Rows across the last 24 h; retention of 2 h.
         for hour in [1, 3, 12, 23] {
             persistence
