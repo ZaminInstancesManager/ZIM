@@ -60,6 +60,13 @@ fn ts_opt(dt: &Option<chrono::DateTime<chrono::Utc>>) -> Option<String> {
     dt.as_ref().map(ts)
 }
 
+/// Bind a `u64` counter as SQLite's signed integer (saturating at
+/// the type's ceiling — no real CPU-time or byte counter approaches
+/// it; the guard keeps the cast honest rather than wrapping).
+fn u64_to_sql(value: u64) -> i64 {
+    value.min(i64::MAX as u64) as i64
+}
+
 fn parse_ts(text: &str) -> Result<chrono::DateTime<chrono::Utc>, PersistenceError> {
     chrono::DateTime::parse_from_rfc3339(text)
         .map(|dt| dt.with_timezone(&chrono::Utc))
@@ -742,14 +749,14 @@ impl Persistence for crate::SqlitePersistence {
                 params![
                     uuid_to_text(sample.instance_id),
                     ts(&sample.ts),
-                    sample.cpu_usage_total_ns,
-                    sample.system_cpu_total_ns,
-                    sample.online_cpus,
-                    sample.memory_usage_bytes,
-                    sample.memory_limit_bytes,
-                    sample.pids_current,
-                    sample.network_rx_bytes,
-                    sample.network_tx_bytes,
+                    sample.cpu_usage_total_ns.map(u64_to_sql),
+                    sample.system_cpu_total_ns.map(u64_to_sql),
+                    sample.online_cpus.map(u64_to_sql),
+                    sample.memory_usage_bytes.map(u64_to_sql),
+                    sample.memory_limit_bytes.map(u64_to_sql),
+                    sample.pids_current.map(u64_to_sql),
+                    sample.network_rx_bytes.map(u64_to_sql),
+                    sample.network_tx_bytes.map(u64_to_sql),
                 ],
             )
             .map(|_| ())
@@ -1598,14 +1605,38 @@ fn row_to_metrics_sample(row: &rusqlite::Row<'_>) -> Result<MetricsSample, Persi
     Ok(MetricsSample {
         instance_id: uuid_from_text(&row.get::<_, String>(0).map_err(db_err)?, "instance")?.into(),
         ts: parse_ts(&row.get::<_, String>(1).map_err(db_err)?)?,
-        cpu_usage_total_ns: row.get::<_, Option<i64>>(2).map_err(db_err)?.map(|v| v.max(0) as u64),
-        system_cpu_total_ns: row.get::<_, Option<i64>>(3).map_err(db_err)?.map(|v| v.max(0) as u64),
-        online_cpus: row.get::<_, Option<i64>>(4).map_err(db_err)?.map(|v| v.max(0) as u64),
-        memory_usage_bytes: row.get::<_, Option<i64>>(5).map_err(db_err)?.map(|v| v.max(0) as u64),
-        memory_limit_bytes: row.get::<_, Option<i64>>(6).map_err(db_err)?.map(|v| v.max(0) as u64),
-        pids_current: row.get::<_, Option<i64>>(7).map_err(db_err)?.map(|v| v.max(0) as u64),
-        network_rx_bytes: row.get::<_, Option<i64>>(8).map_err(db_err)?.map(|v| v.max(0) as u64),
-        network_tx_bytes: row.get::<_, Option<i64>>(9).map_err(db_err)?.map(|v| v.max(0) as u64),
+        cpu_usage_total_ns: row
+            .get::<_, Option<i64>>(2)
+            .map_err(db_err)?
+            .map(|v| v.max(0) as u64),
+        system_cpu_total_ns: row
+            .get::<_, Option<i64>>(3)
+            .map_err(db_err)?
+            .map(|v| v.max(0) as u64),
+        online_cpus: row
+            .get::<_, Option<i64>>(4)
+            .map_err(db_err)?
+            .map(|v| v.max(0) as u64),
+        memory_usage_bytes: row
+            .get::<_, Option<i64>>(5)
+            .map_err(db_err)?
+            .map(|v| v.max(0) as u64),
+        memory_limit_bytes: row
+            .get::<_, Option<i64>>(6)
+            .map_err(db_err)?
+            .map(|v| v.max(0) as u64),
+        pids_current: row
+            .get::<_, Option<i64>>(7)
+            .map_err(db_err)?
+            .map(|v| v.max(0) as u64),
+        network_rx_bytes: row
+            .get::<_, Option<i64>>(8)
+            .map_err(db_err)?
+            .map(|v| v.max(0) as u64),
+        network_tx_bytes: row
+            .get::<_, Option<i64>>(9)
+            .map_err(db_err)?
+            .map(|v| v.max(0) as u64),
     })
 }
 

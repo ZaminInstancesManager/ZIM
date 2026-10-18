@@ -289,8 +289,11 @@ fn summarize(points: &[HistoryPoint]) -> HistorySummary {
             summary.cpu_percent_max = Some(summary.cpu_percent_max.map_or(cpu, |max| max.max(cpu)));
         }
         if let Some(memory) = point.memory_usage_bytes {
-            summary.memory_bytes_max =
-                Some(summary.memory_bytes_max.map_or(memory, |max| max.max(memory)));
+            summary.memory_bytes_max = Some(
+                summary
+                    .memory_bytes_max
+                    .map_or(memory, |max| max.max(memory)),
+            );
         }
         if let Some(rate) = point.network_rx_bytes_per_sec {
             summary.network_rx_bytes_per_sec_peak = Some(
@@ -313,17 +316,19 @@ fn summarize(points: &[HistoryPoint]) -> HistorySummary {
         // total) contribute nothing.
         if index > 0 {
             let previous = &points[index - 1];
-            if let (Some(before), Some(after)) =
-                (previous.network_rx_bytes_total, point.network_rx_bytes_total)
-            {
+            if let (Some(before), Some(after)) = (
+                previous.network_rx_bytes_total,
+                point.network_rx_bytes_total,
+            ) {
                 if after >= before {
                     rx_total += after - before;
                     rx_known = true;
                 }
             }
-            if let (Some(before), Some(after)) =
-                (previous.network_tx_bytes_total, point.network_tx_bytes_total)
-            {
+            if let (Some(before), Some(after)) = (
+                previous.network_tx_bytes_total,
+                point.network_tx_bytes_total,
+            ) {
                 if after >= before {
                     tx_total += after - before;
                     tx_known = true;
@@ -401,7 +406,16 @@ mod tests {
         // 8 MiB memory. Deriving before downsampling is what keeps
         // the single surviving point's rates real.
         let samples = vec![
-            sample(instance, now, -5, Some(0), Some(0), Some(4 * 1024 * 1024), Some(0), Some(0)),
+            sample(
+                instance,
+                now,
+                -5,
+                Some(0),
+                Some(0),
+                Some(4 * 1024 * 1024),
+                Some(0),
+                Some(0),
+            ),
             sample(
                 instance,
                 now,
@@ -482,9 +496,36 @@ mod tests {
         // at -950 s (fetched to seed the first rate) and two
         // in-window rows at -10 s and now.
         let samples = vec![
-            sample(instance, now, -950, Some(0), Some(0), Some(1024), Some(0), Some(0)),
-            sample(instance, now, -10, Some(0), Some(0), Some(1024), Some(2000), Some(0)),
-            sample(instance, now, 0, Some(0), Some(0), Some(1024), Some(4000), Some(0)),
+            sample(
+                instance,
+                now,
+                -950,
+                Some(0),
+                Some(0),
+                Some(1024),
+                Some(0),
+                Some(0),
+            ),
+            sample(
+                instance,
+                now,
+                -10,
+                Some(0),
+                Some(0),
+                Some(1024),
+                Some(2000),
+                Some(0),
+            ),
+            sample(
+                instance,
+                now,
+                0,
+                Some(0),
+                Some(0),
+                Some(1024),
+                Some(4000),
+                Some(0),
+            ),
         ];
         let series = assemble_history(MetricsWindow::Minutes15, &samples, now);
         // The lookback row's own point is cut; the first in-window
@@ -503,8 +544,26 @@ mod tests {
         // renders with its gauges and unknown rates — never a zero
         // baseline that would read "idle".
         let samples = vec![
-            sample(instance, now, -40, Some(0), Some(0), Some(2048), Some(500), Some(0)),
-            sample(instance, now, -20, Some(0), Some(0), Some(2048), Some(900), Some(0)),
+            sample(
+                instance,
+                now,
+                -40,
+                Some(0),
+                Some(0),
+                Some(2048),
+                Some(500),
+                Some(0),
+            ),
+            sample(
+                instance,
+                now,
+                -20,
+                Some(0),
+                Some(0),
+                Some(2048),
+                Some(900),
+                Some(0),
+            ),
         ];
         let series = assemble_history(MetricsWindow::Hour1, &samples, now);
         assert_eq!(series.points.len(), 2);
@@ -606,9 +665,36 @@ mod tests {
         // A row beyond `now` (a clock skew or a race) must never
         // render into the window.
         let samples = vec![
-            sample(instance, now, -40, Some(0), Some(0), Some(1024), Some(0), Some(0)),
-            sample(instance, now, -20, Some(0), Some(0), Some(1024), Some(100), Some(0)),
-            sample(instance, now, 30, Some(0), Some(0), Some(1024), Some(200), Some(0)),
+            sample(
+                instance,
+                now,
+                -40,
+                Some(0),
+                Some(0),
+                Some(1024),
+                Some(0),
+                Some(0),
+            ),
+            sample(
+                instance,
+                now,
+                -20,
+                Some(0),
+                Some(0),
+                Some(1024),
+                Some(100),
+                Some(0),
+            ),
+            sample(
+                instance,
+                now,
+                30,
+                Some(0),
+                Some(0),
+                Some(1024),
+                Some(200),
+                Some(0),
+            ),
         ];
         let series = assemble_history(MetricsWindow::Hour1, &samples, now);
         assert_eq!(series.points.len(), 2);

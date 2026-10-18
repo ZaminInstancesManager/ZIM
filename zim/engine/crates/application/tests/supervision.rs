@@ -1027,7 +1027,12 @@ async fn monitor_persists_telemetry_samples_at_the_cadence() {
 
     // Stop: the monitor ends with the run; the row count freezes.
     supervisor
-        .request_power(&instance.id, PowerAction::Stop { deadline: Duration::from_millis(500) })
+        .request_power(
+            &instance.id,
+            PowerAction::Stop {
+                deadline: Duration::from_millis(500),
+            },
+        )
         .await
         .unwrap();
     let frozen = store
@@ -1097,7 +1102,12 @@ async fn zero_persist_interval_keeps_the_store_empty() {
         .unwrap();
     assert!(rows.is_empty());
     supervisor
-        .request_power(&instance.id, PowerAction::Stop { deadline: Duration::from_millis(500) })
+        .request_power(
+            &instance.id,
+            PowerAction::Stop {
+                deadline: Duration::from_millis(500),
+            },
+        )
         .await
         .unwrap();
 }

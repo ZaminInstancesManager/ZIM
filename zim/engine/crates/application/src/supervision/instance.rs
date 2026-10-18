@@ -867,9 +867,7 @@ fn persist_telemetry_sample(inner: &InstanceInner, usage: &ResourceUsage) {
     let persistence = Arc::clone(&inner.persistence);
     tokio::task::spawn_blocking(move || {
         if let Err(e) = persistence.append_metrics_sample(&sample) {
-            eprintln!(
-                "zim_engine: supervision: telemetry sample append failed: {e}"
-            );
+            eprintln!("zim_engine: supervision: telemetry sample append failed: {e}");
         }
     });
 }

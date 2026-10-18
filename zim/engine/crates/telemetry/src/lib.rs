@@ -191,8 +191,7 @@ impl TelemetryService {
         window: MetricsWindow,
         now: DateTime<Utc>,
     ) -> Result<Vec<MetricsSample>, TelemetryError> {
-        let mut since =
-            now - chrono::Duration::seconds(window.seconds() + WINDOW_LOOKBACK_SECS);
+        let mut since = now - chrono::Duration::seconds(window.seconds() + WINDOW_LOOKBACK_SECS);
         let retention_secs = self.policy.retention.as_secs() as i64;
         if retention_secs > 0 {
             let retention_edge = now - chrono::Duration::seconds(retention_secs);
@@ -226,8 +225,7 @@ impl TelemetryService {
     /// store is the M3 sync port; the loop below bridges it onto
     /// the async runtime.
     pub fn enforce_retention(&self) -> Result<u64, TelemetryError> {
-        let cutoff =
-            Utc::now() - chrono::Duration::seconds(self.policy.retention.as_secs() as i64);
+        let cutoff = Utc::now() - chrono::Duration::seconds(self.policy.retention.as_secs() as i64);
         Ok(self.persistence.prune_metrics_before(cutoff)?)
     }
 
@@ -301,10 +299,7 @@ mod tests {
                 })
                 .unwrap();
         }
-        let service = TelemetryService::new(
-            Arc::clone(&persistence),
-            TelemetryPolicy::default(),
-        );
+        let service = TelemetryService::new(Arc::clone(&persistence), TelemetryPolicy::default());
         let series = service.history(&a, MetricsWindow::Hour1, t0()).unwrap();
         // One row -> one gauge-only point (no predecessor to derive
         // from, so the rates are None — see series.rs).
@@ -406,7 +401,9 @@ mod tests {
             },
         );
         let now = t0();
-        let series = service.history(&instance, MetricsWindow::Days7, now).unwrap();
+        let series = service
+            .history(&instance, MetricsWindow::Days7, now)
+            .unwrap();
         // Only the row inside the retention window renders; the
         // series says what it has, not what the window asked for.
         assert_eq!(series.points.len(), 1);
