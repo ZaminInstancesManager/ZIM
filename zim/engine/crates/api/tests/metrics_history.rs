@@ -291,7 +291,10 @@ async fn history_serves_the_derived_series_for_a_running_instance() {
     for point in &points {
         assert!(point["ts"].is_string(), "every point is timestamped");
         let cpu = point["cpu_percent"].as_f64().unwrap();
-        assert!((cpu - 10.0).abs() < 0.01, "cpu reads a flat 10 %, got {cpu}");
+        assert!(
+            (cpu - 10.0).abs() < 0.01,
+            "cpu reads a flat 10 %, got {cpu}"
+        );
         assert!(point["network_rx_bytes_per_sec"].as_f64().unwrap() > 0.0);
         assert!(point["network_tx_bytes_per_sec"].as_f64().unwrap() > 0.0);
         assert!(point["memory_usage_bytes"].as_u64().unwrap() > 0);
@@ -308,7 +311,10 @@ async fn history_serves_the_derived_series_for_a_running_instance() {
         .unwrap();
     let body: Value = response.json().await.unwrap();
     let avg = body["summary"]["cpu_percent_avg"].as_f64().unwrap();
-    assert!((avg - 10.0).abs() < 0.01, "summary avg is the flat 10 %, got {avg}");
+    assert!(
+        (avg - 10.0).abs() < 0.01,
+        "summary avg is the flat 10 %, got {avg}"
+    );
     let max = body["summary"]["cpu_percent_max"].as_f64().unwrap();
     assert!((max - 10.0).abs() < 0.01);
     assert!(body["summary"]["memory_bytes_max"].as_u64().unwrap() > 0);
@@ -388,12 +394,10 @@ async fn an_unknown_window_is_a_structured_refusal() {
     let body: Value = response.json().await.unwrap();
     assert_eq!(body["error"]["code"], json!("bad_request"));
     assert_eq!(body["error"]["field"], json!("window"));
-    assert!(
-        body["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("15m, 1h, 6h, 24h, 7d")
-    );
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("15m, 1h, 6h, 24h, 7d"));
 }
 
 #[tokio::test]
@@ -425,9 +429,7 @@ async fn history_requires_a_credential() {
 
     let response = engine
         .client
-        .get(engine.url(&format!(
-            "/instances/{instance_id}/metrics/history"
-        )))
+        .get(engine.url(&format!("/instances/{instance_id}/metrics/history")))
         .send()
         .await
         .unwrap();

@@ -375,7 +375,10 @@ mod tests {
             .entrypoints
             .values()
             .any(|file| file.contains("server_stub")));
-        assert!(!package.files.keys().any(|path| path.contains("server_stub")));
+        assert!(!package
+            .files
+            .keys()
+            .any(|path| path.contains("server_stub")));
 
         // Undeclared surface → None (the 404 path).
         assert!(package.resolve_surface("settings").is_none());

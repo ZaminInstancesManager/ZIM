@@ -155,7 +155,7 @@ pub fn assemble_history(
         points.push(gauge_only_point(first));
     }
     for pair in samples.windows(2) {
-        let (a, b) = (pair[0], pair[1]);
+        let (a, b) = (&pair[0], &pair[1]);
         points.push(HistoryPoint {
             ts: b.ts,
             cpu_percent: cpu_percent(a, b),

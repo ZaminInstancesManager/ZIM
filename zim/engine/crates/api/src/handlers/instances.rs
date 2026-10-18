@@ -1780,10 +1780,7 @@ pub async fn metrics_history(
 
     let window_text = query.window.as_deref().unwrap_or("1h");
     let window = MetricsWindow::parse(window_text).ok_or_else(|| {
-        ApiError::validation(
-            "window must be one of: 15m, 1h, 6h, 24h, 7d",
-            "window",
-        )
+        ApiError::validation("window must be one of: 15m, 1h, 6h, 24h, 7d", "window")
     })?;
 
     // The store read rides the spawn_blocking bridge (the M3
@@ -1792,9 +1789,7 @@ pub async fn metrics_history(
     let telemetry = Arc::clone(&state.telemetry);
     let series = tokio::task::spawn_blocking(move || telemetry.history(&instance_id, window, now))
         .await
-        .map_err(|e| {
-            ApiError::internal(format!("telemetry history task join error: {e}"))
-        })?
+        .map_err(|e| ApiError::internal(format!("telemetry history task join error: {e}")))?
         .map_err(|e: TelemetryError| ApiError::internal(e.to_string()))?;
 
     let HistorySeries {
