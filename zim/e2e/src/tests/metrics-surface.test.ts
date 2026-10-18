@@ -97,7 +97,9 @@ test("metrics: the window switcher and the honest empty state run on every tier"
     await page.locator("#metrics-empty").waitFor({ state: "visible", timeout: 15_000 });
     await context.close();
   } finally {
-    await browser.close();
+    if (browser !== null) {
+      await browser.close();
+    }
     await engine.stop();
   }
 });
@@ -109,9 +111,12 @@ test("metrics: the running workload's series fills and the charts render it (doc
   }
   // A fast persist cadence so the durable series fills in test time
   // (the default 10 s would make this walk wait a minute for three
-  // points).
+  // points). The browser joins only for the rendering assertions —
+  // the series-fill wait rides the API alone, halving the walk's
+  // footprint on the shared runner (the suite's heavy legs run in
+  // parallel; every browser-minute is borrowed from siblings).
   const engine = await launchEngine({ env: { ZIM_METRICS_PERSIST_SECS: "2" } });
-  const browser = await launchBrowser();
+  let browser: Awaited<ReturnType<typeof launchBrowser>> | null = null;
   try {
     const client = await adminClient(engine);
     const nodeId = await firstNodeId(client);
@@ -128,7 +133,7 @@ test("metrics: the running workload's series fills and the charts render it (doc
     // derived shape (memory gauges ride every point).
     await eventually("persisted series", async () => {
       const history = (await client.get(
-        `/api/v1/instances/${instance.id}/metrics/history`,
+        `/api/v1/instances/${instance.id}/metrics/history?window=15m`,
       )) as Record<string, unknown>;
       const points = history.points as Array<Record<string, unknown>>;
       if (points.length < 3) {
@@ -146,7 +151,9 @@ test("metrics: the running workload's series fills and the charts render it (doc
 
     // The page renders the series: the memory canvas carries its
     // known-point count; the summary line narrates the window.
-    const context = await newContext(browser);
+    browser = await launchBrowser();
+    const activeBrowser = browser;
+    const context = await newContext(activeBrowser);
     const page = await context.newPage();
     await loginViaUi(page, engine);
     await uiGoto(page, engine, `servers/${instance.id}/metrics`);
@@ -185,7 +192,9 @@ test("metrics: the running workload's series fills and the charts render it (doc
     });
     await context.close();
   } finally {
-    await browser.close();
+    if (browser !== null) {
+      await browser.close();
+    }
     await engine.stop();
   }
 });
