@@ -257,7 +257,7 @@ async fn history_serves_the_derived_series_for_a_running_instance() {
 
     // Wait for the durable series to fill (several persisted rows).
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    let mut points: Vec<Value> = Vec::new();
+    let mut points: Vec<Value>;
     loop {
         let response = engine
             .client
