@@ -257,6 +257,39 @@ const TABLES: Array<{ table: string; columns: Column[] }> = [
       { name: "created_at", kind: "datetime" },
     ],
   },
+  {
+    // M31: the importer reads these tables — the live-MySQL walk
+    // seeds them from the same canonical fixture so the real panel
+    // database carries what a modern panel does.
+    table: "database_hosts",
+    columns: [
+      { name: "id", kind: "int" },
+      { name: "name", kind: "text" },
+      { name: "host", kind: "text" },
+      { name: "port", kind: "int" },
+      { name: "username", kind: "text" },
+      { name: "password", kind: "text" },
+      { name: "max_databases", kind: "int" },
+      { name: "node_id", kind: "int" },
+      { name: "created_at", kind: "datetime" },
+      { name: "updated_at", kind: "datetime" },
+    ],
+  },
+  {
+    table: "databases",
+    columns: [
+      { name: "id", kind: "int" },
+      { name: "server_id", kind: "int" },
+      { name: "database_host_id", kind: "int" },
+      { name: "database", kind: "text" },
+      { name: "username", kind: "text" },
+      { name: "remote", kind: "text" },
+      { name: "password", kind: "text" },
+      { name: "max_connections", kind: "int" },
+      { name: "created_at", kind: "datetime" },
+      { name: "updated_at", kind: "datetime" },
+    ],
+  },
 ];
 
 /** The SQL kind for one column.

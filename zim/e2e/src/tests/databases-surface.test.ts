@@ -112,7 +112,7 @@ test("databases: the manager drives the real family in the browser", async () =>
 
     // Rotate through the UI: the confirm is accepted by the router,
     // a NEW one-time password lands in the second prompt.
-    await page.locator(`button[aria-label="rotate s${instance.uuid_short}_world"]`).click();
+    await page.locator(`button[aria-label="rotate the password for s${instance.uuid_short}_world"]`).click();
     await page
       .locator("#databases-message")
       .filter({ hasText: /rotated/ })
@@ -130,7 +130,7 @@ test("databases: the manager drives the real family in the browser", async () =>
 
     // The reveal button (the view_password gate's UI leg): a third
     // prompt carries the SAME (rotated) password.
-    await page.locator(`button[aria-label="reveal s${instance.uuid_short}_world"]`).click();
+    await page.locator(`button[aria-label="reveal the password for s${instance.uuid_short}_world"]`).click();
     await page
       .locator("#databases-message")
       .filter({ hasText: /revealed/ })
@@ -235,7 +235,7 @@ test("databases: an anonymous reveal is a 401 and the owner's is honest", async 
     const promptValues = routeDialogs(page);
     const row = page.locator("#databases-list tr[data-database-id]");
     await row.first().waitFor({ state: "visible", timeout: 15_000 });
-    await page.locator(`button[aria-label="reveal ${created.name}"]`).click();
+    await page.locator(`button[aria-label="reveal the password for ${created.name}"]`).click();
     await page
       .locator("#databases-message")
       .filter({ hasText: /revealed/ })

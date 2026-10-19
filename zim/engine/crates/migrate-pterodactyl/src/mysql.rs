@@ -143,6 +143,30 @@ fn load<T>(conn: &mut Conn, sql: &str, map: fn(&Row) -> T) -> Result<Vec<T>, Pan
     Ok(rows.iter().map(map).collect())
 }
 
+/// [`load`] for tables a panel may legitimately lack: MySQL's 1146
+/// ("Table 'panel.x' doesn't exist") yields an empty vec — a
+/// pre-2017 panel without `database_hosts`, or a minimal test
+/// schema, is a panel with no such rows, not a failed read (the
+/// deferred-counter's own tolerance, applied to a mapped table).
+/// Every OTHER error propagates.
+fn load_if_present<T>(
+    conn: &mut Conn,
+    sql: &str,
+    map: fn(&Row) -> T,
+) -> Result<Vec<T>, PanelSourceError> {
+    match conn.exec::<Row, _, _>(sql, ()) {
+        Ok(rows) => Ok(rows.iter().map(map).collect()),
+        Err(error) => {
+            let text = format!("{error}");
+            if text.contains("doesn't exist") {
+                Ok(Vec::new())
+            } else {
+                Err(PanelSourceError::Read(text))
+            }
+        }
+    }
+}
+
 fn count(conn: &mut Conn, table: &str) -> Result<u64, PanelSourceError> {
     conn.exec_first::<u64, _, _>(format!("SELECT COUNT(*) FROM `{table}`"), ())
         .map_err(|e| PanelSourceError::Read(format!("{e}")))
@@ -448,7 +472,7 @@ fn load_server_transfers(conn: &mut Conn) -> Result<Vec<PanelServerTransfer>, Pa
 
 /// `database_hosts` rows (M31: mapped, no longer deferred).
 fn load_database_hosts(conn: &mut Conn) -> Result<Vec<PanelDatabaseHost>, PanelSourceError> {
-    load(
+    load_if_present(
         conn,
         "SELECT id, name, host, port, username, password, max_databases, node_id, \
          created_at, updated_at FROM database_hosts ORDER BY id",
@@ -469,7 +493,7 @@ fn load_database_hosts(conn: &mut Conn) -> Result<Vec<PanelDatabaseHost>, PanelS
 
 /// `databases` rows (M31: mapped, no longer deferred).
 fn load_databases(conn: &mut Conn) -> Result<Vec<PanelDatabase>, PanelSourceError> {
-    load(
+    load_if_present(
         conn,
         "SELECT id, server_id, database_host_id, database, username, remote, password, \
          max_connections, created_at, updated_at FROM databases ORDER BY id",
