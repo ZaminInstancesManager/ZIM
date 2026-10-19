@@ -1243,3 +1243,65 @@ Where two documents disagree, the precedence is:
 The audit documents are *evidence*, not contracts; if an audit
 document and an architecture document disagree, the architecture
 document is canonical (and the audit document should be updated).
+
+### AD-34: Telemetry ingestion is local, durable, and derived-at-read — the engine still phones nobody home. (2026-10-19)
+
+**Status:** Accepted (M30 — the post-alpha backlog's telemetry gap;
+the architecture's deferred `telemetry` crate delivered).
+
+**Context:** The architecture's crate register listed
+`zim_engine_telemetry` as "TBD, opt-in"; the post-alpha backlog
+named the honest line — *"Telemetry ingestion — the module is
+specified; the engine phones nobody home."* The metrics surface's
+stub page rendered recent live samples, but charts and history
+needed a durable series, and "telemetry" in the industry usually
+means the opposite of what a self-hosted, loopback-only product
+should do: an SDK that ships usage to a vendor. The obvious designs
+were wrong in different directions: phoning home (a privacy
+posture ZIM never made and cannot keep), or keeping everything
+in-memory like the §11 stream (a restart erases the hour the user
+wanted to see), or persisting *derived* rates (a stored percentage
+freezes the denominator choice the window query should be free to
+make — a 10 s sample averaged over a 5 s bucket and a 5 minute
+bucket are different truths).
+
+**Decision:**
+
+- **Ingestion is local-only.** The supervision monitor — already
+  sampling the runtime's stats every poll tick for the live stream —
+  persists the same observation at a lower cadence (10 s default,
+  `ZIM_METRICS_PERSIST_SECS`; `0` disables) into the engine's own
+  SQLite store. No exporter, no collector, no network egress, no
+  identifiers beyond the instance id: the engine still phones
+  nobody home, and this ADR is the promise that M30 did not
+  silently change that.
+- **Raw counters only, derived at read.** The persisted row carries
+  the runtime's cumulative (CPU ns, network bytes) and gauge
+  (memory, pids) counters verbatim; rates and percentages are
+  computed by the query path (`zim_engine_telemetry`) from
+  consecutive rows at the resolution the window asks for. A
+  restart's counter reset is `null` for that interval (unknown, not
+  negative); a missing runtime field is `null` forever after
+  (unknown, not zero).
+- **Two cadences, one sampler.** The stream keeps its 1 s live
+  cadence; the store carries the 10 s history cadence (8,640
+  rows/instance/day). A second sampler would double the runtime's
+  stats API load for the same truth; a single 1 s writer would
+  spend the engine's store on resolution no chart asks for.
+- **Retention is bounded and enforced.** 7 days by default
+  (`ZIM_METRICS_RETENTION_HOURS`), pruned on a background loop with
+  a boot-time first pass; the widest query window (7d) matches the
+  default retention so the vocabulary never promises more than the
+  store keeps. Rows ride the per-instance `ON DELETE CASCADE`
+  posture — a deleted instance's samples go with it.
+- **The query is a fixed window vocabulary** (`15m`/`1h`/`6h`/
+  `24h`/`7d`), downsampled to the chart's point budget (180) with
+  last-per-bucket, served as `GET /instances/{id}/metrics/history`
+  (§10.3b) under the same any-grant posture as the live view.
+
+**Consequences:** The metrics surface charts a series that survives
+engine restarts; the store grows bounded and slowly; the privacy
+posture is unchanged and documented; and a future *opt-in* export
+(because a fleet operator asks for it, never by default) would be a
+new ADR on top of this one — the local store is the substrate it
+would read from, not a backdoor it replaces.

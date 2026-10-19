@@ -36,6 +36,9 @@ zim_engine_installs = { workspace = true }
 # scheduler (the §10.6 run-now endpoint + AppState wiring).
 zim_engine_eggs = { workspace = true }
 zim_engine_scheduler = { workspace = true }
+# M30: the telemetry service — the §10.3a metrics history endpoint
+# (the durable series' query path).
+zim_engine_telemetry = { workspace = true }
 # M11: the frontend loader — the §10.14 package endpoints and the
 # `/zim/` page-serving surface over the active package.
 zim_engine_frontend_loader = { workspace = true }

@@ -350,6 +350,73 @@ export async function metricsSnapshot(id: string): Promise<MetricsSnapshot> {
   return api(`/instances/${encodeURIComponent(id)}/metrics`);
 }
 
+// ── Metrics history (M30: the telemetry store's derived series) ───
+
+/** One derived point of the durable metrics series
+ * (`GET /instances/{id}/metrics/history`). `null` means the runtime
+ * never reported the field — unknown, never zero. */
+export interface MetricsHistoryPoint {
+  /** RFC 3339 timestamp of the point's sample. */
+  ts: string;
+  /** Workload CPU as a share of host CPU over the preceding
+   * interval (0–100). */
+  cpu_percent: number | null;
+  /** Memory usage at the sample (bytes). */
+  memory_usage_bytes: number | null;
+  /** The memory limit in force (bytes). */
+  memory_limit_bytes: number | null;
+  /** Memory usage as a share of the limit (0–100). */
+  memory_percent: number | null;
+  /** Process count at the sample. */
+  pids_current: number | null;
+  /** Receive rate over the preceding interval (bytes/second). */
+  network_rx_bytes_per_sec: number | null;
+  /** Transmit rate over the preceding interval (bytes/second). */
+  network_tx_bytes_per_sec: number | null;
+  /** The cumulative receive counter at the sample (raw). */
+  network_rx_bytes_total: number | null;
+  /** The cumulative transmit counter at the sample (raw). */
+  network_tx_bytes_total: number | null;
+}
+
+/** The summary statistics of one rendered series. */
+export interface MetricsHistorySummary {
+  point_count: number;
+  first_ts: string | null;
+  last_ts: string | null;
+  cpu_percent_avg: number | null;
+  cpu_percent_max: number | null;
+  memory_bytes_max: number | null;
+  network_rx_bytes_total: number | null;
+  network_tx_bytes_total: number | null;
+  network_rx_bytes_per_sec_peak: number | null;
+  network_tx_bytes_per_sec_peak: number | null;
+}
+
+/** The durable series envelope (`GET /instances/{id}/metrics/history`). */
+export interface MetricsHistory {
+  instance_id: string;
+  window: string;
+  resolution_seconds: number;
+  points: MetricsHistoryPoint[];
+  summary: MetricsHistorySummary;
+}
+
+/** The window vocabulary the engine accepts (§10.3a). */
+export const METRICS_WINDOWS: readonly string[] = ["15m", "1h", "6h", "24h", "7d"];
+
+/** The durable metrics series for one instance (M30). The window
+ * defaults engine-side to `1h` when omitted. */
+export async function metricsHistory(id: string, window?: string): Promise<MetricsHistory> {
+  const query = window !== undefined ? `?window=${encodeURIComponent(window)}` : "";
+  return api(`/instances/${encodeURIComponent(id)}/metrics/history${query}`);
+}
+
+/** Format a byte rate for humans ("1.2 KiB/s", "3.4 MiB/s"). */
+export function formatRate(bytesPerSecond: number): string {
+  return `${formatBytes(bytesPerSecond)}/s`;
+}
+
 // ── Status visual model (BROWSER_INTEGRATION.md §4) ───────────────
 
 /** The visual classification of a lifecycle status. */

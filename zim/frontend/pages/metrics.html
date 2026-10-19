@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ZIM — Metrics</title>
+  <link rel="stylesheet" href="/zim/assets/main.css">
+  <script type="module" src="/zim/assets/metrics.js"></script>
+</head>
+<body>
+  <main class="page page-stub">
+    <zim-recovery-notice></zim-recovery-notice>
+
+    <header class="page-header">
+      <a class="backlink" href="/zim/servers" title="Servers">←</a>
+      <h1 id="server-name">Server</h1>
+      <span id="server-id" class="pill pill-muted mono">…</span>
+      <span class="pill pill-muted mono">metrics</span>
+    </header>
+
+    <section class="card" aria-label="Observed state">
+      <div class="console-toolbar">
+        <zim-status-dot id="status-dot" status="unknown" data-label="unknown"></zim-status-dot>
+        <span id="state-label" class="state-label">state: unknown</span>
+        <span class="spacer"></span>
+        <span id="live-cpu" class="pill pill-muted mono" title="Live CPU over the event stream (host share)">cpu —</span>
+        <span id="live-memory" class="pill pill-muted mono" title="Live memory usage / limit">memory —</span>
+        <span id="live-pids" class="pill pill-muted mono" title="Live process count">processes —</span>
+      </div>
+    </section>
+
+    <section class="card card-login" id="auth-gate" aria-label="Sign in" hidden>
+      <h2 class="card-title">Sign in to ZIM</h2>
+      <zim-login-form id="login"></zim-login-form>
+    </section>
+
+    <section class="card" aria-label="Metrics">
+      <h2 class="card-title">Metrics</h2>
+
+      <div class="console-toolbar">
+        <div id="window-bar" class="window-bar" role="group" aria-label="History window"></div>
+        <button id="btn-refresh" class="pill pill-action" type="button" title="Reload the series">↻ Refresh</button>
+        <span id="metrics-message" class="state-label" role="status"></span>
+      </div>
+
+      <p id="summary-line" class="metrics-summary mono" aria-live="polite">—</p>
+
+      <p id="metrics-empty" class="empty" hidden>
+        No samples in this window — the server has not been running, or its
+        runtime reports no stats. The series begins with the next start.
+      </p>
+
+      <div id="charts-grid" class="charts-grid">
+        <figure class="chart-card" aria-label="CPU chart">
+          <canvas id="chart-cpu" class="chart-canvas" data-series="cpu" width="480" height="140" role="img"></canvas>
+        </figure>
+        <figure class="chart-card" aria-label="Memory chart">
+          <canvas id="chart-memory" class="chart-canvas" data-series="memory" width="480" height="140" role="img"></canvas>
+        </figure>
+        <figure class="chart-card" aria-label="Network chart">
+          <canvas id="chart-network" class="chart-canvas" data-series="network" width="480" height="140" role="img"></canvas>
+        </figure>
+        <figure class="chart-card" aria-label="Processes chart">
+          <canvas id="chart-pids" class="chart-canvas" data-series="pids" width="480" height="140" role="img"></canvas>
+        </figure>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -32,6 +32,7 @@ async fn engine_boots_bootstraps_and_serves_https() {
             bind: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
             port: 0,
         },
+        metrics: Default::default(),
     };
 
     let engine = tokio::time::timeout(Duration::from_secs(20), zim_engine_main::startup(options))
@@ -225,6 +226,7 @@ async fn a_busy_sftp_port_degrades_instead_of_failing_the_boot() {
             bind: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
             port: taken_port,
         },
+        metrics: Default::default(),
     };
     let engine = tokio::time::timeout(Duration::from_secs(30), zim_engine_main::startup(options))
         .await

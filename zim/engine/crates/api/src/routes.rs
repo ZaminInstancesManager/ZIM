@@ -110,6 +110,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(instances::console_input),
         )
         .route("/instances/{id}/metrics", get(instances::metrics))
+        .route(
+            "/instances/{id}/metrics/history",
+            get(instances::metrics_history),
+        )
         // ── Files (§10.3, M28) ───────────────────────────────
         // The content pair carries the §13 upload channel (5 GB)
         // layered inside the router-wide 10 MB JSON limit — the

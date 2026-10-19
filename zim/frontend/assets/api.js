@@ -161,6 +161,18 @@ export async function createInstance(request) {
 export async function metricsSnapshot(id) {
     return api(`/instances/${encodeURIComponent(id)}/metrics`);
 }
+/** The window vocabulary the engine accepts (§10.3a). */
+export const METRICS_WINDOWS = ["15m", "1h", "6h", "24h", "7d"];
+/** The durable metrics series for one instance (M30). The window
+ * defaults engine-side to `1h` when omitted. */
+export async function metricsHistory(id, window) {
+    const query = window !== undefined ? `?window=${encodeURIComponent(window)}` : "";
+    return api(`/instances/${encodeURIComponent(id)}/metrics/history${query}`);
+}
+/** Format a byte rate for humans ("1.2 KiB/s", "3.4 MiB/s"). */
+export function formatRate(bytesPerSecond) {
+    return `${formatBytes(bytesPerSecond)}/s`;
+}
 /** Map an engine status string onto the §4 visual model (the
  * engine's canonical `visual_color`, mirrored). */
 export function visualStatus(status) {

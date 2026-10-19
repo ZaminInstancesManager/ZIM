@@ -10,7 +10,7 @@
 //! Off by default — production composition roots never enable it.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -65,6 +65,15 @@ pub struct MockRuntime {
     /// `send_input` echoes the line back (the live console path for
     /// tests without a Docker daemon).
     echo_console: bool,
+    /// Whether `stats()` reports a ticking workload (M30): every
+    /// call advances the cumulative CPU and network counters by a
+    /// fixed step, so consecutive samples produce meaningful deltas
+    /// for the telemetry derivation path (CPU percent and network
+    /// rates need *changing* counters, not constant ones).
+    ticking_stats: bool,
+    /// The `stats()` call counter backing [`Self::ticking_stats`]
+    /// (1-based call index handed to the sample builder).
+    stats_calls: Arc<AtomicU64>,
 }
 
 struct MockCore {
@@ -106,6 +115,8 @@ impl MockRuntime {
             calls: Arc::new(Mutex::new(MockCalls::default())),
             stop_latency,
             echo_console: false,
+            ticking_stats: false,
+            stats_calls: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -119,6 +130,19 @@ impl MockRuntime {
     /// without a Docker daemon.
     pub fn with_echo_console(mut self) -> Self {
         self.echo_console = true;
+        self
+    }
+
+    /// Enable the ticking stats mode (M30): each `stats()` call
+    /// reports a workload whose cumulative counters advance — CPU
+    /// time grows 100 ms per call against 1 s of host CPU, the
+    /// network counters grow 2 KiB down / 512 B up per call, and
+    /// the gauges (memory, pids) walk small cycles. Consecutive
+    /// samples then derive honest rates and percentages (10 % CPU,
+    /// a steady byte rate) instead of the constant-sample shape the
+    /// default mock reports.
+    pub fn with_ticking_stats(mut self) -> Self {
+        self.ticking_stats = true;
         self
     }
 
@@ -378,11 +402,31 @@ impl Runtime for MockRuntime {
     }
 
     async fn stats(&self) -> Result<ResourceUsage, RuntimeError> {
+        if !self.ticking_stats {
+            return Ok(ResourceUsage {
+                memory_usage_bytes: Some(1024),
+                memory_limit_bytes: Some(2048),
+                pids_current: Some(1),
+                ..Default::default()
+            });
+        }
+        // 1-based: the first call is call 1, so the first sample is
+        // already non-zero and a delta from a zero baseline.
+        let call = self.stats_calls.fetch_add(1, Ordering::AcqRel) + 1;
         Ok(ResourceUsage {
-            memory_usage_bytes: Some(1024),
-            memory_limit_bytes: Some(2048),
-            pids_current: Some(1),
-            ..Default::default()
+            // +100 ms of workload CPU per call against +1 s of host
+            // CPU: the derived utilization reads a flat 10 %.
+            cpu_usage_total_ns: Some(call.saturating_mul(100_000_000)),
+            system_cpu_total_ns: Some(call.saturating_mul(1_000_000_000)),
+            online_cpus: Some(2),
+            // The gauges walk small cycles (1–4 MiB, 1–3 pids) so
+            // summaries and charts see variation without noise.
+            memory_usage_bytes: Some(1024 * 1024 * (1 + call % 4)),
+            memory_limit_bytes: Some(1024 * 1024 * 8),
+            pids_current: Some(1 + call % 3),
+            // +2 KiB down / +512 B up per call.
+            network_rx_bytes: Some(call.saturating_mul(2048)),
+            network_tx_bytes: Some(call.saturating_mul(512)),
         })
     }
 }

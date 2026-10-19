@@ -25,8 +25,8 @@
 use chrono::{DateTime, Utc};
 use zim_engine_domain::{
     Allocation, AuditRecord, Backup, Egg, EggId, ExtensionRegistration, Instance, InstanceId,
-    InstanceStatus, InstanceVariable, Job, JobId, JobState, Node, NodeId, Permission, RecentServer,
-    Schedule, ScheduleId, Transfer, TransferId, User, UserId,
+    InstanceStatus, InstanceVariable, Job, JobId, JobState, MetricsSample, Node, NodeId,
+    Permission, RecentServer, Schedule, ScheduleId, Transfer, TransferId, User, UserId,
 };
 
 /// Errors returned by [`Persistence`] implementations.
@@ -293,6 +293,33 @@ pub trait Persistence: Send + Sync {
         user: &UserId,
         limit: u32,
     ) -> Result<Vec<RecentServer>, PersistenceError>;
+
+    // ── Metrics samples (M30 telemetry ingestion) ────────────────
+
+    /// Append one persisted resource-usage sample (the monitor's
+    /// telemetry cadence — the stream keeps its live cadence, the
+    /// store carries the durable, lower-rate series). The row is
+    /// keyed by (instance, ts): a re-observed timestamp replaces,
+    /// which keeps a restarted monitor honest without inventing a
+    /// synthetic row id.
+    fn append_metrics_sample(&self, sample: &MetricsSample) -> Result<(), PersistenceError>;
+
+    /// The persisted samples for one instance in `[since, until]`,
+    /// oldest first, at most `limit` rows. Callers query with a
+    /// lookback before the window they mean to draw so the first
+    /// drawn point can derive its rate from a predecessor.
+    fn list_metrics_history(
+        &self,
+        instance: &InstanceId,
+        since: DateTime<Utc>,
+        until: DateTime<Utc>,
+        limit: u32,
+    ) -> Result<Vec<MetricsSample>, PersistenceError>;
+
+    /// Delete every metrics sample older than `cutoff` (across all
+    /// instances — retention is a store-wide policy, not a
+    /// per-instance one). Returns how many rows were removed.
+    fn prune_metrics_before(&self, cutoff: DateTime<Utc>) -> Result<u64, PersistenceError>;
 
     // ── Jobs ────────────────────────────────────────────────────────
 

@@ -120,6 +120,12 @@ impl TlsEngine {
             Arc::clone(&transfers),
             Arc::clone(&installs),
             Arc::clone(&scheduler),
+            // M30: the telemetry service (history query; retention is
+            // main's job, not the test engine's).
+            zim_engine_telemetry::TelemetryService::new(
+                Arc::clone(&persistence),
+                Default::default(),
+            ),
             Arc::clone(&frontend),
             Arc::clone(&extensions),
             Arc::clone(&themes),

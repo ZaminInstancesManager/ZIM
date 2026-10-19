@@ -58,6 +58,7 @@ pub mod extension;
 pub mod id;
 pub mod instance;
 pub mod job;
+pub mod metrics;
 pub mod node;
 pub mod permission;
 pub mod recents;
@@ -84,6 +85,7 @@ pub use id::{
 };
 pub use instance::{Instance, InstanceVariable, ResourceLimits};
 pub use job::{Backup, Job, JobKind, Transfer};
+pub use metrics::MetricsSample;
 pub use node::{Allocation, Node, NodeCapabilities, NodeDeployment, NodeState};
 pub use permission::{PermissionGrant, PermissionSet};
 pub use recents::RecentServer;

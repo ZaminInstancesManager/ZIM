@@ -57,6 +57,11 @@ export interface ApiClient {
   ): Promise<{ status: number; body: string }>;
   /** A DELETE (asserts 2xx). */
   del(path: string): Promise<any>;
+  /** The held session cookie (`zim_session=…`, the login's pair) —
+   * for same-origin channels Node's fetch cookie jar cannot reach
+   * (the §11 stream recorder's WebSocket upgrade). Throws when
+   * called before a successful login. */
+  sessionCookie(): string;
 }
 
 /** Build a logged-in client in one step (the common harness shape). */
@@ -130,6 +135,13 @@ export function makeClient(engine: EngineHandle): ApiClient {
       // The cookie's attributes ride along; sending them back is
       // harmless (servers read the name=value pair).
       cookie = session.split(";")[0] ?? null;
+    },
+
+    sessionCookie(): string {
+      if (cookie === null) {
+        throw new Error("sessionCookie(): the client has not logged in yet");
+      }
+      return cookie;
     },
 
     async get(path: string): Promise<any> {
@@ -270,9 +282,25 @@ export async function ensureAllocationPool(
   count = 6,
 ): Promise<void> {
   const { freePort } = await import("./util.js");
-  for (let index = 0; index < count; index += 1) {
+  let created = 0;
+  for (let index = 0; index < count * 4 && created < count; index += 1) {
     const port = await freePort();
-    await client.post(`/api/v1/nodes/${nodeId}/allocations`, { port });
+    // The OS can reissue a just-closed ephemeral port (and under
+    // the suite's parallel load it does), so the engine may answer
+    // 409 "already exists" for a port this pool already created —
+    // the pool's job is that `count` allocations exist, not which
+    // ports they hold, so the conflict counts as success.
+    const answer = await client.tryPost(`/api/v1/nodes/${nodeId}/allocations`, { port });
+    if (answer.status === 201 || answer.status === 409) {
+      created += 1;
+    } else {
+      throw new Error(
+        `allocation pool creation failed (${answer.status}): ${answer.body.slice(0, 200)}`,
+      );
+    }
+  }
+  if (created < count) {
+    throw new Error("allocation pool creation exhausted its retries");
   }
 }
 

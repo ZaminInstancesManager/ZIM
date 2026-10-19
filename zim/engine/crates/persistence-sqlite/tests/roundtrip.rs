@@ -689,8 +689,8 @@ fn port_trait_object_dispatch_works() {
     let node = sample_node("via-trait");
     port.put_node(&node).unwrap();
     assert_eq!(port.get_node(&node.id).unwrap().unwrap(), node);
-    // Migration 0005 (user_recents) is the current head.
-    assert_eq!(port.schema_version().unwrap(), 5);
+    // Migration 0006 (metrics_samples) is the current head.
+    assert_eq!(port.schema_version().unwrap(), 6);
 }
 
 #[test]
@@ -1001,4 +1001,159 @@ fn recents_cap_keeps_the_newest_32() {
     // The newest opening survived the trim; the oldest did not.
     assert_eq!(rows[0].open_count, 1);
     assert!(rows[0].last_opened_at > rows[31].last_opened_at);
+}
+
+// ── Metrics samples (M30 telemetry ingestion) ─────────────────────────────
+
+#[test]
+fn metrics_samples_round_trip() {
+    let store = migrated_store();
+    let node = sample_node("metrics-node");
+    let owner = sample_user("metrics@example.org");
+    let allocation = sample_allocation(&node, 25570);
+    let instance = sample_instance(&node, &owner, &allocation);
+    store.put_node(&node).unwrap();
+    store.put_user(&owner).unwrap();
+    store.put_allocation(&allocation).unwrap();
+    store.put_instance(&instance).unwrap();
+
+    let base = chrono::Utc::now();
+    let samples: Vec<zim_engine_domain::MetricsSample> = (0..5)
+        .map(|index| zim_engine_domain::MetricsSample {
+            instance_id: instance.id,
+            ts: base + chrono::Duration::seconds(10 * index),
+            cpu_usage_total_ns: Some(index as u64 * 100_000_000),
+            system_cpu_total_ns: Some(index as u64 * 1_000_000_000),
+            online_cpus: Some(4),
+            memory_usage_bytes: Some(1024 * 1024 * (index as u64 + 1)),
+            memory_limit_bytes: Some(1024 * 1024 * 8),
+            pids_current: Some(index as u64 % 3 + 1),
+            network_rx_bytes: Some(index as u64 * 2048),
+            network_tx_bytes: Some(index as u64 * 512),
+        })
+        .collect();
+    for sample in &samples {
+        store.append_metrics_sample(sample).unwrap();
+    }
+
+    // The full range round-trips field-for-field, oldest first.
+    let rows = store
+        .list_metrics_history(
+            &instance.id,
+            base - chrono::Duration::seconds(60),
+            base + chrono::Duration::seconds(120),
+            100,
+        )
+        .unwrap();
+    assert_eq!(rows, samples);
+
+    // The window bounds are inclusive and the ordering is
+    // ascending by timestamp.
+    let middle = store
+        .list_metrics_history(
+            &instance.id,
+            base + chrono::Duration::seconds(10),
+            base + chrono::Duration::seconds(20),
+            100,
+        )
+        .unwrap();
+    assert_eq!(middle.len(), 2);
+    assert_eq!(middle[0].ts, samples[1].ts);
+    assert_eq!(middle[1].ts, samples[2].ts);
+
+    // The row limit caps the fetch (a window wider than the cap
+    // yields exactly the limit, not an error).
+    let capped = store
+        .list_metrics_history(
+            &instance.id,
+            base - chrono::Duration::seconds(60),
+            base + chrono::Duration::seconds(120),
+            3,
+        )
+        .unwrap();
+    assert_eq!(capped.len(), 3);
+
+    // A re-observed timestamp replaces, it does not duplicate.
+    let mut revision = samples[2];
+    revision.memory_usage_bytes = Some(999);
+    store.append_metrics_sample(&revision).unwrap();
+    let rows = store
+        .list_metrics_history(
+            &instance.id,
+            base - chrono::Duration::seconds(60),
+            base + chrono::Duration::seconds(120),
+            100,
+        )
+        .unwrap();
+    assert_eq!(rows.len(), 5);
+    assert_eq!(rows[2].memory_usage_bytes, Some(999));
+
+    // Retention prunes only the older side, across every instance.
+    let removed = store
+        .prune_metrics_before(base + chrono::Duration::seconds(15))
+        .unwrap();
+    assert_eq!(removed, 2);
+    let rows = store
+        .list_metrics_history(
+            &instance.id,
+            base - chrono::Duration::seconds(60),
+            base + chrono::Duration::seconds(120),
+            100,
+        )
+        .unwrap();
+    assert_eq!(rows.len(), 3);
+    assert!(rows[0].ts >= base + chrono::Duration::seconds(20));
+}
+
+#[test]
+fn deleting_an_instance_cascades_its_metrics_samples() {
+    let store = migrated_store();
+    let node = sample_node("cascade-node");
+    let owner = sample_user("cascade@example.org");
+    let allocation = sample_allocation(&node, 25571);
+    let instance = sample_instance(&node, &owner, &allocation);
+    store.put_node(&node).unwrap();
+    store.put_user(&owner).unwrap();
+    store.put_allocation(&allocation).unwrap();
+    store.put_instance(&instance).unwrap();
+
+    let base = chrono::Utc::now();
+    for index in 0..3 {
+        store
+            .append_metrics_sample(&zim_engine_domain::MetricsSample {
+                instance_id: instance.id,
+                ts: base + chrono::Duration::seconds(index * 10),
+                memory_usage_bytes: Some(1024),
+                ..zim_engine_domain::MetricsSample::default()
+            })
+            .unwrap();
+    }
+    assert_eq!(
+        store
+            .list_metrics_history(
+                &instance.id,
+                base - chrono::Duration::seconds(60),
+                base + chrono::Duration::seconds(60),
+                100
+            )
+            .unwrap()
+            .len(),
+        3
+    );
+
+    // The same ON DELETE CASCADE posture every per-instance table
+    // carries: the samples go with the instance.
+    store.delete_instance(&instance.id).unwrap();
+    assert_eq!(
+        store
+            .list_metrics_history(
+                &instance.id,
+                base - chrono::Duration::seconds(60),
+                base + chrono::Duration::seconds(60),
+                100
+            )
+            .unwrap()
+            .len(),
+        0
+    );
 }

@@ -317,6 +317,63 @@ Wings). A parallel SFTP transport (M28) serves the same tree with
 the same grant vocabulary — see
 `docs/architecture/DECISIONS.md` AD-33.
 
+### 10.3b The metrics family in detail (M30)
+
+The durable half of the metrics surface: the telemetry store's
+derived series over the monitor's persisted resource-usage samples
+(10 s cadence by default — the live 1 s cadence stays on the §11
+stream and the recent-samples view above). Ingestion is local-only:
+nothing leaves the machine (AD-34).
+
+- **`GET /instances/{id}/metrics/history[?window={w}]`** — the
+  derived series for one window. `w` is one of `15m`, `1h`
+  (default), `6h`, `24h`, `7d`; anything else answers
+  `400 bad_request` on `window` naming the vocabulary. `200` body:
+
+  ```
+  {
+    "instance_id": "...",
+    "window": "1h",
+    "resolution_seconds": 20,
+    "points": [
+      {
+        "ts": "2026-10-19T12:00:20Z",
+        "cpu_percent": 10.0,              // host-share, 0-100
+        "memory_usage_bytes": 4194304,
+        "memory_limit_bytes": 8388608,
+        "memory_percent": 50.0,
+        "pids_current": 3,
+        "network_rx_bytes_per_sec": 200.0,
+        "network_tx_bytes_per_sec": 50.0,
+        "network_rx_bytes_total": 1000,   // cumulative, raw
+        "network_tx_bytes_total": 250
+      }
+    ],
+    "summary": {
+      "point_count": 1,
+      "first_ts": "...", "last_ts": "...",
+      "cpu_percent_avg": 10.0, "cpu_percent_max": 10.0,
+      "memory_bytes_max": 4194304,
+      "network_rx_bytes_total": 1000,
+      "network_tx_bytes_total": 250,
+      "network_rx_bytes_per_sec_peak": 200.0,
+      "network_tx_bytes_per_sec_peak": 50.0
+    }
+  }
+  ```
+
+  Every numeric field is `null` when the runtime never reported
+  the underlying counter — unknown, never zero (a counter that
+  went *backwards*, a restart reset, is unknown for that interval
+  too). `resolution_seconds` is the window over the point budget
+  (180): 5 / 20 / 120 / 480 / 3360 across the vocabulary. The
+  engine's retention window (7 days by default,
+  `ZIM_METRICS_RETENTION_HOURS`) bounds what any window can answer;
+  a `7d` query against a 2-day-old store honestly returns the two
+  days. Requires any instance grant (the §10.3 posture of the
+  recent-samples view). Reads are not audited; the endpoint mutates
+  nothing.
+
 ### 10.4 Allocations
 
 | Method | Path                                       | Description                          | Required grants |

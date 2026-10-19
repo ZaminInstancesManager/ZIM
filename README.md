@@ -187,7 +187,19 @@ abstraction, and the roadmap that subsequent implementation work will follow.
   danger-zone delete under the same gate; the E2E suite gained
   the four browser walks of `management-surfaces.test.ts`,
   including the settings lost-update race driven for real through
-  a behind-the-page concurrent PATCH).
+  a behind-the-page concurrent PATCH), and the metrics surface
+  (M30 — the last declared stub, graduated together with the
+  telemetry ingestion the post-alpha backlog named: the
+  `zim_engine_telemetry` crate persists the monitor's
+  resource-usage observations at a 10 s cadence into the engine's
+  own store — local-only, nothing leaves the machine (AD-34) —
+  with bounded 7-day retention, and serves them back as the
+  derived history series at `GET /instances/{id}/metrics/history`
+  (§10.3b); `zim://servers/{id}/metrics` renders four canvas
+  charts (CPU host-share, memory with the limit, network rx/tx,
+  processes) over that endpoint, a window switcher across
+  `15m`/`1h`/`6h`/`24h`/`7d`, and a live strip over the §11
+  stream; unknown is a gap on every chart, never a zero line).
   M25's own acceptance campaign (16 CI batches) also earned a
   real engine fix: the production TLS accept loop was dropping
   every WebSocket subscriber on arrival (`serve_connection` had
@@ -237,9 +249,10 @@ ZIM/
 │   │   │                         #   M28: the zim://servers/{id}/files file
 │   │   │                         #   manager; M29: the management surfaces —
 │   │   │                         #   backups / schedules / subusers / settings;
-│   │   │                         #   newtab, servers, console, and the declared
-│   │   │                         #   per-instance surfaces (only metrics keeps
-│   │   │                         #   the shared stub);
+│   │   │                         #   M30: the metrics surface — the telemetry
+│   │   │                         #   charts + window switcher + live strip
+│   │   │                         #   (every declared surface now real — the
+│   │   │                         #   shared stub page is gone);
 │   │   │                         #   src/ TypeScript, tests/ node:test suite)
 │   ├── e2e/                      # Node/Playwright E2E suite (M25): the real
 │   │                             #   engine binary + real browser; the

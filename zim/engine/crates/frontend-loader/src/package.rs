@@ -341,60 +341,18 @@ mod tests {
         assert_eq!(file, "pages/app.html");
         assert!(params.is_empty());
 
-        // M22: the declared per-instance surfaces route (one shared
-        // stub entrypoint; the metrics view renders real samples,
-        // the rest are honest placeholders). M28 graduated `files`,
-        // and M29 `backups`, `schedules`, `subusers`, and
-        // `settings` to their own entrypoints — the real
-        // management pages. Only `metrics` keeps the stub.
-        {
-            let surface = "metrics";
-            let path = format!("servers/0a1b2c3d-0000-0000-0000-000000000000/{surface}");
-            let (file, params) = package
-                .resolve_surface(&path)
-                .unwrap_or_else(|| panic!("{surface} routes"));
-            assert_eq!(file, "pages/server_stub.html");
-            assert_eq!(
-                params,
-                vec![(
-                    "id".to_owned(),
-                    "0a1b2c3d-0000-0000-0000-000000000000".to_owned()
-                )]
-            );
-        }
-
-        // M28: the files surface routes to the real file manager.
-        let (file, params) = package
-            .resolve_surface("servers/0a1b2c3d-0000-0000-0000-000000000000/files")
-            .expect("files routes");
-        assert_eq!(file, "pages/files.html");
-        assert_eq!(
-            params,
-            vec![(
-                "id".to_owned(),
-                "0a1b2c3d-0000-0000-0000-000000000000".to_owned()
-            )]
-        );
-
-        // M29: the backups surface routes to the real backup manager.
-        let (file, params) = package
-            .resolve_surface("servers/0a1b2c3d-0000-0000-0000-000000000000/backups")
-            .expect("backups routes");
-        assert_eq!(file, "pages/backups.html");
-        assert_eq!(
-            params,
-            vec![(
-                "id".to_owned(),
-                "0a1b2c3d-0000-0000-0000-000000000000".to_owned()
-            )]
-        );
-
-        // M29: the schedules, subusers, and settings surfaces route
-        // to their own pages too.
+        // M22: the declared per-instance surfaces route — every
+        // one of them now to its own real page: M28 graduated
+        // `files`, M29 `backups`, `schedules`, `subusers`, and
+        // `settings`, and M30 `metrics` (the last declared stub;
+        // `pages/server_stub.html` is gone from the package).
         for (surface, page) in [
+            ("files", "pages/files.html"),
+            ("backups", "pages/backups.html"),
             ("schedules", "pages/schedules.html"),
             ("subusers", "pages/subusers.html"),
             ("settings", "pages/settings.html"),
+            ("metrics", "pages/metrics.html"),
         ] {
             let path = format!("servers/0a1b2c3d-0000-0000-0000-000000000000/{surface}");
             let (file, params) = package
@@ -409,6 +367,18 @@ mod tests {
                 )]
             );
         }
+
+        // The retired stub is really gone: no entrypoint and no
+        // file in the package carry its name.
+        assert!(!package
+            .manifest
+            .entrypoints
+            .values()
+            .any(|file| file.contains("server_stub")));
+        assert!(!package
+            .files
+            .keys()
+            .any(|path| path.contains("server_stub")));
 
         // Undeclared surface → None (the 404 path).
         assert!(package.resolve_surface("settings").is_none());
