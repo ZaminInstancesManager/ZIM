@@ -57,6 +57,11 @@ export interface ApiClient {
   ): Promise<{ status: number; body: string }>;
   /** A DELETE (asserts 2xx). */
   del(path: string): Promise<any>;
+  /** The held session cookie (`zim_session=…`, the login's pair) —
+   * for same-origin channels Node's fetch cookie jar cannot reach
+   * (the §11 stream recorder's WebSocket upgrade). Throws when
+   * called before a successful login. */
+  sessionCookie(): string;
 }
 
 /** Build a logged-in client in one step (the common harness shape). */
@@ -130,6 +135,13 @@ export function makeClient(engine: EngineHandle): ApiClient {
       // The cookie's attributes ride along; sending them back is
       // harmless (servers read the name=value pair).
       cookie = session.split(";")[0] ?? null;
+    },
+
+    sessionCookie(): string {
+      if (cookie === null) {
+        throw new Error("sessionCookie(): the client has not logged in yet");
+      }
+      return cookie;
     },
 
     async get(path: string): Promise<any> {
