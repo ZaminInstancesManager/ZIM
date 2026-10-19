@@ -16,10 +16,11 @@ use chrono::{DateTime, Utc};
 use rusqlite::params;
 use zim_engine_application::ports::{Persistence, PersistenceError};
 use zim_engine_domain::{
-    Allocation, AllocationId, AuditRecord, Backup, BackupId, CommandTemplate, Egg, EggId,
-    EggVariable, ExtensionId, ExtensionRegistration, ExtensionSignature, Instance, InstanceId,
-    InstanceStatus, InstanceVariable, Job, JobId, JobState, MetricsSample, Node, NodeId,
-    Permission, PermissionSet, RecentServer, Schedule, ScheduleId, Transfer, TransferId, User,
+    Allocation, AllocationId, AuditRecord, Backup, BackupId, CommandTemplate, DatabaseHost,
+    DatabaseHostId, Egg, EggId, EggVariable, ExtensionId, ExtensionRegistration,
+    ExtensionSignature, Instance, InstanceId, InstanceStatus, InstanceVariable, Job, JobId,
+    JobState, ManagedDatabase, ManagedDatabaseId, MetricsSample, Node, NodeId, Permission,
+    PermissionSet, RecentServer, Schedule, ScheduleId, Transfer, TransferId, User,
     UserId,
 };
 
@@ -1454,6 +1455,233 @@ impl Persistence for crate::SqlitePersistence {
             collect_rows(&mut rows, row_to_extension)
         })
     }
+
+    // ── Managed databases (M31) ───────────────────────────────
+
+    fn put_database_host(&self, host: &DatabaseHost) -> Result<(), PersistenceError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO database_hosts (
+                    id, name, host, port, username, password, max_databases, node_id,
+                    created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                ON CONFLICT (id) DO UPDATE SET
+                    name = excluded.name,
+                    host = excluded.host,
+                    port = excluded.port,
+                    username = excluded.username,
+                    password = excluded.password,
+                    max_databases = excluded.max_databases,
+                    node_id = excluded.node_id,
+                    updated_at = excluded.updated_at",
+                params![
+                    uuid_to_text(host.id),
+                    host.name,
+                    host.host,
+                    i64::from(host.port),
+                    host.username,
+                    host.password,
+                    host.max_databases.map(i64::from),
+                    host.node_id.map(uuid_to_text),
+                    ts(&host.created_at),
+                    ts(&host.updated_at),
+                ],
+            )
+            .map(|_| ())
+            .map_err(db_err)
+        })
+    }
+
+    fn get_database_host(
+        &self,
+        id: &DatabaseHostId,
+    ) -> Result<Option<DatabaseHost>, PersistenceError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare("SELECT id, name, host, port, username, password, max_databases,
+                                 node_id, created_at, updated_at
+                          FROM database_hosts WHERE id = ?1")
+                .map_err(db_err)?;
+            let mut rows = stmt
+                .query(params![uuid_to_text(id)])
+                .map_err(db_err)?;
+            rows.next()
+                .map_err(db_err)?
+                .map(row_to_database_host)
+                .transpose()
+        })
+    }
+
+    fn get_database_host_by_name(
+        &self,
+        name: &str,
+    ) -> Result<Option<DatabaseHost>, PersistenceError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare("SELECT id, name, host, port, username, password, max_databases,
+                                 node_id, created_at, updated_at
+                          FROM database_hosts WHERE name = ?1")
+                .map_err(db_err)?;
+            let mut rows = stmt.query(params![name]).map_err(db_err)?;
+            rows.next()
+                .map_err(db_err)?
+                .map(row_to_database_host)
+                .transpose()
+        })
+    }
+
+    fn list_database_hosts(&self) -> Result<Vec<DatabaseHost>, PersistenceError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare("SELECT id, name, host, port, username, password, max_databases,
+                                 node_id, created_at, updated_at
+                          FROM database_hosts ORDER BY created_at")
+                .map_err(db_err)?;
+            let mut rows = stmt.query([]).map_err(db_err)?;
+            collect_rows(&mut rows, row_to_database_host)
+        })
+    }
+
+    fn delete_database_host(&self, id: &DatabaseHostId) -> Result<(), PersistenceError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "DELETE FROM database_hosts WHERE id = ?1",
+                params![uuid_to_text(id)],
+            )
+            .map(|_| ())
+            .map_err(db_err)
+        })
+    }
+
+    fn count_databases_by_host(
+        &self,
+        host: &DatabaseHostId,
+    ) -> Result<u64, PersistenceError> {
+        self.with_conn(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM databases WHERE host_id = ?1",
+                params![uuid_to_text(host)],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count.max(0) as u64)
+            .map_err(db_err)
+        })
+    }
+
+    fn put_managed_database(&self, database: &ManagedDatabase) -> Result<(), PersistenceError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO databases (
+                    id, instance_id, host_id, name, username, password, remote,
+                    max_connections, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                ON CONFLICT (id) DO UPDATE SET
+                    instance_id = excluded.instance_id,
+                    host_id = excluded.host_id,
+                    name = excluded.name,
+                    username = excluded.username,
+                    password = excluded.password,
+                    remote = excluded.remote,
+                    max_connections = excluded.max_connections,
+                    updated_at = excluded.updated_at",
+                params![
+                    uuid_to_text(database.id),
+                    uuid_to_text(database.instance_id),
+                    uuid_to_text(database.host_id),
+                    database.name,
+                    database.username,
+                    database.password,
+                    database.remote,
+                    i64::from(database.max_connections),
+                    ts(&database.created_at),
+                    ts(&database.updated_at),
+                ],
+            )
+            .map(|_| ())
+            .map_err(db_err)
+        })
+    }
+
+    fn get_managed_database(
+        &self,
+        id: &ManagedDatabaseId,
+    ) -> Result<Option<ManagedDatabase>, PersistenceError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare("SELECT id, instance_id, host_id, name, username, password, remote,
+                                 max_connections, created_at, updated_at
+                          FROM databases WHERE id = ?1")
+                .map_err(db_err)?;
+            let mut rows = stmt
+                .query(params![uuid_to_text(id)])
+                .map_err(db_err)?;
+            rows.next()
+                .map_err(db_err)?
+                .map(row_to_managed_database)
+                .transpose()
+        })
+    }
+
+    fn get_managed_database_by_name(
+        &self,
+        name: &str,
+    ) -> Result<Option<ManagedDatabase>, PersistenceError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare("SELECT id, instance_id, host_id, name, username, password, remote,
+                                 max_connections, created_at, updated_at
+                          FROM databases WHERE name = ?1")
+                .map_err(db_err)?;
+            let mut rows = stmt.query(params![name]).map_err(db_err)?;
+            rows.next()
+                .map_err(db_err)?
+                .map(row_to_managed_database)
+                .transpose()
+        })
+    }
+
+    fn list_managed_databases_by_instance(
+        &self,
+        instance: &InstanceId,
+    ) -> Result<Vec<ManagedDatabase>, PersistenceError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare("SELECT id, instance_id, host_id, name, username, password, remote,
+                                 max_connections, created_at, updated_at
+                          FROM databases WHERE instance_id = ?1 ORDER BY created_at")
+                .map_err(db_err)?;
+            let mut rows = stmt
+                .query(params![uuid_to_text(instance)])
+                .map_err(db_err)?;
+            collect_rows(&mut rows, row_to_managed_database)
+        })
+    }
+
+    fn delete_managed_database(&self, id: &ManagedDatabaseId) -> Result<(), PersistenceError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "DELETE FROM databases WHERE id = ?1",
+                params![uuid_to_text(id)],
+            )
+            .map(|_| ())
+            .map_err(db_err)
+        })
+    }
+
+    fn count_managed_databases_by_instance(
+        &self,
+        instance: &InstanceId,
+    ) -> Result<u64, PersistenceError> {
+        self.with_conn(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM databases WHERE instance_id = ?1",
+                params![uuid_to_text(instance)],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count.max(0) as u64)
+            .map_err(db_err)
+        })
+    }
 }
 
 // ─── Private list helpers ─────────────────────────────────────────────────
@@ -1637,6 +1865,49 @@ fn row_to_metrics_sample(row: &rusqlite::Row<'_>) -> Result<MetricsSample, Persi
             .get::<_, Option<i64>>(9)
             .map_err(db_err)?
             .map(|v| v.max(0) as u64),
+    })
+}
+
+/// Maps a `database_hosts` row (column order per the SELECTs in the
+/// M31 impl block above).
+fn row_to_database_host(row: &rusqlite::Row<'_>) -> Result<DatabaseHost, PersistenceError> {
+    Ok(DatabaseHost {
+        id: uuid_from_text(&row.get::<_, String>(0).map_err(db_err)?, "database host")?.into(),
+        name: row.get::<_, String>(1).map_err(db_err)?,
+        host: row.get::<_, String>(2).map_err(db_err)?,
+        port: u16::try_from(row.get::<_, i64>(3).map_err(db_err)?.max(0)).unwrap_or(0),
+        username: row.get::<_, String>(4).map_err(db_err)?,
+        password: row.get::<_, String>(5).map_err(db_err)?,
+        max_databases: row
+            .get::<_, Option<i64>>(6)
+            .map_err(db_err)?
+            .and_then(|v| u32::try_from(v.max(0)).ok()),
+        node_id: row
+            .get::<_, Option<String>>(7)
+            .map_err(db_err)?
+            .map(|text| uuid_from_text(&text, "node"))
+            .transpose()?
+            .map(uuid::Uuid::into),
+        created_at: parse_ts(&row.get::<_, String>(8).map_err(db_err)?)?,
+        updated_at: parse_ts(&row.get::<_, String>(9).map_err(db_err)?)?,
+    })
+}
+
+/// Maps a `databases` row (column order per the SELECTs above).
+fn row_to_managed_database(
+    row: &rusqlite::Row<'_>,
+) -> Result<ManagedDatabase, PersistenceError> {
+    Ok(ManagedDatabase {
+        id: uuid_from_text(&row.get::<_, String>(0).map_err(db_err)?, "managed database")?.into(),
+        instance_id: uuid_from_text(&row.get::<_, String>(1).map_err(db_err)?, "instance")?.into(),
+        host_id: uuid_from_text(&row.get::<_, String>(2).map_err(db_err)?, "database host")?.into(),
+        name: row.get::<_, String>(3).map_err(db_err)?,
+        username: row.get::<_, String>(4).map_err(db_err)?,
+        password: row.get::<_, String>(5).map_err(db_err)?,
+        remote: row.get::<_, String>(6).map_err(db_err)?,
+        max_connections: u32::try_from(row.get::<_, i64>(7).map_err(db_err)?.max(0)).unwrap_or(0),
+        created_at: parse_ts(&row.get::<_, String>(8).map_err(db_err)?)?,
+        updated_at: parse_ts(&row.get::<_, String>(9).map_err(db_err)?)?,
     })
 }
 

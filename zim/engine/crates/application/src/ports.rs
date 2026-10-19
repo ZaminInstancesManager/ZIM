@@ -24,9 +24,10 @@
 
 use chrono::{DateTime, Utc};
 use zim_engine_domain::{
-    Allocation, AuditRecord, Backup, Egg, EggId, ExtensionRegistration, Instance, InstanceId,
-    InstanceStatus, InstanceVariable, Job, JobId, JobState, MetricsSample, Node, NodeId,
-    Permission, RecentServer, Schedule, ScheduleId, Transfer, TransferId, User, UserId,
+    Allocation, AuditRecord, Backup, DatabaseHost, DatabaseHostId, Egg, EggId, ExtensionRegistration,
+    Instance, InstanceId, InstanceStatus, InstanceVariable, Job, JobId, JobState, ManagedDatabase,
+    ManagedDatabaseId, MetricsSample, Node, NodeId, Permission, RecentServer, Schedule,
+    ScheduleId, Transfer, TransferId, User, UserId,
 };
 
 /// Errors returned by [`Persistence`] implementations.
@@ -457,4 +458,66 @@ pub trait Persistence: Send + Sync {
 
     /// All installed extensions.
     fn list_extensions(&self) -> Result<Vec<ExtensionRegistration>, PersistenceError>;
+
+    // ── Managed databases (M31) ─────────────────────────────────
+
+    /// Insert or replace a database host by id.
+    fn put_database_host(&self, host: &DatabaseHost) -> Result<(), PersistenceError>;
+
+    /// Fetch a database host by id.
+    fn get_database_host(
+        &self,
+        id: &DatabaseHostId,
+    ) -> Result<Option<DatabaseHost>, PersistenceError>;
+
+    /// Fetch a database host by its (unique) display name.
+    fn get_database_host_by_name(
+        &self,
+        name: &str,
+    ) -> Result<Option<DatabaseHost>, PersistenceError>;
+
+    /// All database hosts, creation order.
+    fn list_database_hosts(&self) -> Result<Vec<DatabaseHost>, PersistenceError>;
+
+    /// Delete a database host by id. Deleting a host with live
+    /// databases is an FK-driven `Backend` error (the API refuses
+    /// it with a structured 409 before it ever reaches here).
+    fn delete_database_host(&self, id: &DatabaseHostId) -> Result<(), PersistenceError>;
+
+    /// How many databases currently reference `host`.
+    fn count_databases_by_host(
+        &self,
+        host: &DatabaseHostId,
+    ) -> Result<u64, PersistenceError>;
+
+    /// Insert or replace a managed database by id.
+    fn put_managed_database(&self, database: &ManagedDatabase) -> Result<(), PersistenceError>;
+
+    /// Fetch a managed database by id.
+    fn get_managed_database(
+        &self,
+        id: &ManagedDatabaseId,
+    ) -> Result<Option<ManagedDatabase>, PersistenceError>;
+
+    /// Fetch a managed database by its (unique) database name.
+    fn get_managed_database_by_name(
+        &self,
+        name: &str,
+    ) -> Result<Option<ManagedDatabase>, PersistenceError>;
+
+    /// The managed databases for one instance, creation order.
+    fn list_managed_databases_by_instance(
+        &self,
+        instance: &InstanceId,
+    ) -> Result<Vec<ManagedDatabase>, PersistenceError>;
+
+    /// Delete a managed database by id.
+    fn delete_managed_database(&self, id: &ManagedDatabaseId) -> Result<(), PersistenceError>;
+
+    /// How many databases the instance currently carries (the
+    /// `database_limit` gate's count).
+    fn count_managed_databases_by_instance(
+        &self,
+        instance: &InstanceId,
+    ) -> Result<u64, PersistenceError>;
 }

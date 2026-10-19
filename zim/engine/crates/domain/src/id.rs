@@ -118,6 +118,14 @@ uuid_id_type!(
     LocationId,
     "Identifier for a Location (node grouping: datacenter / region)."
 );
+uuid_id_type!(
+    DatabaseHostId,
+    "Identifier for a DatabaseHost (an external DB server connection record)."
+);
+uuid_id_type!(
+    ManagedDatabaseId,
+    "Identifier for a ManagedDatabase (one per-instance database row)."
+);
 
 /// Identifier for an allocation (port assignment on a node).
 ///

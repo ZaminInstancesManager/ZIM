@@ -539,9 +539,9 @@ fn a_real_import_through_the_cli_writes_the_database() {
     assert_eq!(code, 0);
     assert!(target.exists(), "the real import creates the database");
     // The written store is a valid engine database (schema head is
-    // 0006 metrics_samples since M30).
+    // 0007 databases since M31).
     let store = zim_engine_persistence_sqlite::SqlitePersistence::open(&target).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 6);
+    assert_eq!(store.schema_version().unwrap(), 7);
     assert_eq!(store.list_users().unwrap().len(), 2);
     let _ = std::fs::remove_file(&target);
 }

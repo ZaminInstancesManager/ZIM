@@ -13,11 +13,12 @@ use std::collections::BTreeMap;
 use zim_engine_application::ports::Persistence;
 use zim_engine_domain::{
     Allocation, AllocationId, AuditActor, AuditRecord, Backup, BackupId, Bytes, CommandTemplate,
-    EggId, ExtensionId, ExtensionManifest, ExtensionRegistration, ExtensionSignature, Instance,
-    InstanceId, InstanceScope, InstanceStatus, Job, JobId, JobKind, JobState, Node,
-    NodeCapabilities, NodeDeployment, NodeId, NodeState, Permission, PermissionGrant,
-    PermissionSet, ResourceLimits, Schedule, ScheduleAction, ScheduleId, Scheme, SignatureScheme,
-    Transfer, TransferId, TransferState, User, UserId,
+    DatabaseHost, DatabaseHostId, EggId, ExtensionId, ExtensionManifest, ExtensionRegistration,
+    ExtensionSignature, Instance, InstanceId, InstanceScope, InstanceStatus, Job, JobId, JobKind,
+    JobState, ManagedDatabase, ManagedDatabaseId, Node, NodeCapabilities, NodeDeployment, NodeId,
+    NodeState, Permission, PermissionGrant, PermissionSet, ResourceLimits, Schedule,
+    ScheduleAction, ScheduleId, Scheme, SignatureScheme, Transfer, TransferId, TransferState, User,
+    UserId,
 };
 use zim_engine_persistence_sqlite::SqlitePersistence;
 
@@ -689,8 +690,8 @@ fn port_trait_object_dispatch_works() {
     let node = sample_node("via-trait");
     port.put_node(&node).unwrap();
     assert_eq!(port.get_node(&node.id).unwrap().unwrap(), node);
-    // Migration 0006 (metrics_samples) is the current head.
-    assert_eq!(port.schema_version().unwrap(), 6);
+    // Migration 0007 (databases) is the current head.
+    assert_eq!(port.schema_version().unwrap(), 7);
 }
 
 #[test]
@@ -1156,4 +1157,196 @@ fn deleting_an_instance_cascades_its_metrics_samples() {
             .len(),
         0
     );
+}
+
+// ── Managed databases (M31) ───────────────────────────────────────────────
+
+fn sample_database_host(name: &str, port: u16, node: Option<Node>) -> DatabaseHost {
+    DatabaseHost {
+        id: DatabaseHostId::new(),
+        name: name.to_owned(),
+        host: format!("{name}.internal"),
+        port,
+        username: "zim_admin".to_owned(),
+        password: "host-secret".to_owned(),
+        max_databases: Some(100),
+        node_id: node.map(|n| n.id),
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    }
+}
+
+fn sample_managed_database(
+    instance: &Instance,
+    host: &DatabaseHost,
+    name: &str,
+) -> ManagedDatabase {
+    // The username is globally unique: suffix with the name's tail
+    // so sibling rows for one instance differ (the real create path
+    // generates a random suffix per row).
+    let suffix: String = name.chars().rev().take(6).collect();
+    ManagedDatabase {
+        id: ManagedDatabaseId::new(),
+        instance_id: instance.id,
+        host_id: host.id,
+        name: name.to_owned(),
+        username: format!("u{}_{}", instance.uuid_short, suffix),
+        password: "abcdefghijklmnopqrstuvwx".to_owned(),
+        remote: "%".to_owned(),
+        max_connections: 0,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    }
+}
+
+fn seeded_database_graph() -> (
+    SqlitePersistence,
+    Node,
+    User,
+    Allocation,
+    Instance,
+    DatabaseHost,
+) {
+    let store = migrated_store();
+    let node = sample_node("db-node");
+    let owner = sample_user("dbs@example.org");
+    let allocation = sample_allocation(&node, 25580);
+    let instance = sample_instance(&node, &owner, &allocation);
+    store.put_node(&node).unwrap();
+    store.put_user(&owner).unwrap();
+    store.put_allocation(&allocation).unwrap();
+    store.put_instance(&instance).unwrap();
+    let host = sample_database_host("main-mysql", 3306, Some(node.clone()));
+    store.put_database_host(&host).unwrap();
+    (store, node, owner, allocation, instance, host)
+}
+
+#[test]
+fn database_hosts_round_trip() {
+    let (store, node, ..) = seeded_database_graph();
+
+    // The put round-trips field-for-field, node tie included.
+    let back = store.get_database_host_by_name("main-mysql").unwrap().unwrap();
+    assert_eq!(back.host, "main-mysql.internal");
+    assert_eq!(back.port, 3306);
+    assert_eq!(back.node_id, Some(node.id));
+    assert_eq!(back.max_databases, Some(100));
+
+    // By-id and by-name fetches agree.
+    let by_id = store.get_database_host(&back.id).unwrap().unwrap();
+    assert_eq!(by_id, back);
+
+    // The list is creation-ordered and complete.
+    let second = sample_database_host("replica-mysql", 3307, None);
+    store.put_database_host(&second).unwrap();
+    let all = store.list_database_hosts().unwrap();
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[1].name, "replica-mysql");
+
+    // A put with the same id updates (upsert semantics).
+    let renamed = DatabaseHost {
+        name: "renamed-mysql".to_owned(),
+        ..second.clone()
+    };
+    store.put_database_host(&renamed).unwrap();
+    assert_eq!(
+        store.get_database_host(&second.id).unwrap().unwrap().name,
+        "renamed-mysql"
+    );
+    assert!(store
+        .get_database_host_by_name("replica-mysql")
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn managed_databases_round_trip() {
+    let (store, .., instance, host) = seeded_database_graph();
+
+    let world = sample_managed_database(&instance, &host, "s01234567_world");
+    store.put_managed_database(&world).unwrap();
+
+    // By-id, by-name, and by-instance all agree.
+    let by_id = store.get_managed_database(&world.id).unwrap().unwrap();
+    assert_eq!(by_id, world);
+    let by_name = store.get_managed_database_by_name("s01234567_world").unwrap().unwrap();
+    assert_eq!(by_name, world);
+    let listed = store.list_managed_databases_by_instance(&instance.id).unwrap();
+    assert_eq!(listed, vec![world.clone()]);
+
+    // The counts the limit gates read.
+    assert_eq!(store.count_managed_databases_by_instance(&instance.id).unwrap(), 1);
+    assert_eq!(store.count_databases_by_host(&host.id).unwrap(), 1);
+
+    // A second database for the same instance lists creation-ordered.
+    let core = sample_managed_database(&instance, &host, "s01234567_core");
+    store.put_managed_database(&core).unwrap();
+    let listed = store.list_managed_databases_by_instance(&instance.id).unwrap();
+    assert_eq!(listed.len(), 2);
+    assert_eq!(listed[1].name, "s01234567_core");
+    assert_eq!(store.count_managed_databases_by_instance(&instance.id).unwrap(), 2);
+
+    // Delete removes exactly the one row.
+    store.delete_managed_database(&world.id).unwrap();
+    assert!(store.get_managed_database(&world.id).unwrap().is_none());
+    assert_eq!(store.count_managed_databases_by_instance(&instance.id).unwrap(), 1);
+}
+
+#[test]
+fn managed_databases_cascade_with_their_instance() {
+    let (store, .., instance, host) = seeded_database_graph();
+    let db = sample_managed_database(&instance, &host, "s01234567_doomed");
+    store.put_managed_database(&db).unwrap();
+    assert_eq!(store.count_managed_databases_by_instance(&instance.id).unwrap(), 1);
+
+    // The per-instance convention: the databases go with the
+    // instance (ON DELETE CASCADE), exactly like backups, schedules,
+    // and metrics samples.
+    store.delete_instance(&instance.id).unwrap();
+    assert!(store.get_managed_database(&db.id).unwrap().is_none());
+    assert_eq!(store.count_managed_databases_by_instance(&instance.id).unwrap(), 0);
+    // The host itself survives (it is not per-instance).
+    assert!(store.get_database_host(&host.id).unwrap().is_some());
+}
+
+#[test]
+fn database_host_delete_with_live_databases_is_an_fk_refusal() {
+    let (store, .., instance, host) = seeded_database_graph();
+    let db = sample_managed_database(&instance, &host, "s01234567_anchored");
+    store.put_managed_database(&db).unwrap();
+
+    // Deleting the host while a database references it is the FK
+    // violation (the API layer refuses it with a structured 409
+    // before it ever reaches the store; the store itself must not
+    // silently cascade the operator's data away).
+    let err = store.delete_database_host(&host.id).unwrap_err();
+    assert!(err.to_string().contains("FOREIGN KEY"), "expected FK refusal, got: {err}");
+
+    // After the database is gone, the host deletes cleanly.
+    store.delete_managed_database(&db.id).unwrap();
+    store.delete_database_host(&host.id).unwrap();
+    assert!(store.get_database_host(&host.id).unwrap().is_none());
+}
+
+#[test]
+fn database_host_node_tie_releases_when_the_node_goes() {
+    // A host's node tie is a scheduling preference, not data
+    // ownership: deleting the node clears the tie (SET NULL) rather
+    // than failing the node delete or dropping the host. The tied
+    // node carries no instances (an instance's node_id is NOT NULL,
+    // so nodes with instances refuse deletion anyway).
+    let store = migrated_store();
+    let lonely = sample_node("lonely-node");
+    store.put_node(&lonely).unwrap();
+    let host = sample_database_host("tied-mysql", 3306, Some(lonely.clone()));
+    store.put_database_host(&host).unwrap();
+    assert_eq!(
+        store.get_database_host(&host.id).unwrap().unwrap().node_id,
+        Some(lonely.id)
+    );
+
+    store.delete_node(&lonely.id).unwrap();
+    let back = store.get_database_host(&host.id).unwrap().unwrap();
+    assert_eq!(back.node_id, None, "the tie released, the host survived");
+    assert_eq!(back.name, "tied-mysql");
 }

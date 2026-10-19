@@ -53,6 +53,7 @@
 #![warn(missing_docs)]
 
 pub mod audit;
+pub mod database;
 pub mod egg;
 pub mod extension;
 pub mod id;
@@ -72,6 +73,7 @@ pub mod workload;
 // ergonomic access. Other modules should use the qualified path
 // (`zim_engine_domain::id::InstanceId`) where ambiguity matters.
 pub use audit::{AuditActor, AuditRecord};
+pub use database::{DatabaseHost, DatabaseHostError, ManagedDatabase, ManagedDatabaseError};
 pub use egg::{
     Egg, EggConfig, EggError, EggFeatures, EggImage, EggScript, EggScripts, EggVariable,
     FileParserRule, ParserKind, ReplaceRule, StopConfig,
@@ -80,8 +82,8 @@ pub use extension::{
     ExtensionManifest, ExtensionRegistration, ExtensionSignature, InstanceScope, SignatureScheme,
 };
 pub use id::{
-    AllocationId, BackupId, EggId, EggVariableId, ExtensionId, InstanceId, JobId, LocationId,
-    NodeId, ScheduleId, TransferId, UserId, WorkloadId,
+    AllocationId, BackupId, DatabaseHostId, EggId, EggVariableId, ExtensionId, InstanceId, JobId,
+    LocationId, ManagedDatabaseId, NodeId, ScheduleId, TransferId, UserId, WorkloadId,
 };
 pub use instance::{Instance, InstanceVariable, ResourceLimits};
 pub use job::{Backup, Job, JobKind, Transfer};
