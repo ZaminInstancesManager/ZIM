@@ -11,8 +11,8 @@ use axum::routing::{delete, get, patch, post};
 use axum::Router;
 
 use crate::handlers::{
-    audit, auth, control, eggs, extensions, files, frontend, instances, misc, nodes, pages,
-    recents, stream, themes, users,
+    audit, auth, control, databases, eggs, extensions, files, frontend, instances, misc, nodes,
+    pages, recents, stream, themes, users,
 };
 use crate::middleware;
 use crate::state::AppState;
@@ -163,6 +163,23 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/instances/{id}/schedules/{sid}/run",
             post(instances::schedule_run),
         )
+        // ── Managed databases (§10.21, M31) ──────────────────────
+        .route(
+            "/instances/{id}/databases",
+            get(databases::list_databases).post(databases::create_database),
+        )
+        .route(
+            "/instances/{id}/databases/{dbid}",
+            get(databases::get_database).delete(databases::delete_database),
+        )
+        .route(
+            "/instances/{id}/databases/{dbid}/password",
+            get(databases::get_database_password),
+        )
+        .route(
+            "/instances/{id}/databases/{dbid}/rotate-password",
+            post(databases::rotate_database_password),
+        )
         .route(
             "/instances/{id}/backups",
             get(instances::list_backups).post(instances::create_backup),
@@ -235,6 +252,17 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/nodes/{id}/allocations",
             get(nodes::list_allocations).post(nodes::create_allocation),
+        )
+        // ── Database hosts (§10.21, M31; admin) ──────────────────
+        .route(
+            "/hosts",
+            get(databases::list_hosts).post(databases::create_host),
+        )
+        .route(
+            "/hosts/{hid}",
+            get(databases::get_host)
+                .patch(databases::update_host)
+                .delete(databases::delete_host),
         )
         // ── Jobs (§10.8) ──────────────────────────────────────────
         .route("/jobs", get(misc::list_jobs))

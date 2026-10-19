@@ -1226,7 +1226,10 @@ fn database_hosts_round_trip() {
     let (store, node, ..) = seeded_database_graph();
 
     // The put round-trips field-for-field, node tie included.
-    let back = store.get_database_host_by_name("main-mysql").unwrap().unwrap();
+    let back = store
+        .get_database_host_by_name("main-mysql")
+        .unwrap()
+        .unwrap();
     assert_eq!(back.host, "main-mysql.internal");
     assert_eq!(back.port, 3306);
     assert_eq!(back.node_id, Some(node.id));
@@ -1269,27 +1272,49 @@ fn managed_databases_round_trip() {
     // By-id, by-name, and by-instance all agree.
     let by_id = store.get_managed_database(&world.id).unwrap().unwrap();
     assert_eq!(by_id, world);
-    let by_name = store.get_managed_database_by_name("s01234567_world").unwrap().unwrap();
+    let by_name = store
+        .get_managed_database_by_name("s01234567_world")
+        .unwrap()
+        .unwrap();
     assert_eq!(by_name, world);
-    let listed = store.list_managed_databases_by_instance(&instance.id).unwrap();
+    let listed = store
+        .list_managed_databases_by_instance(&instance.id)
+        .unwrap();
     assert_eq!(listed, vec![world.clone()]);
 
     // The counts the limit gates read.
-    assert_eq!(store.count_managed_databases_by_instance(&instance.id).unwrap(), 1);
+    assert_eq!(
+        store
+            .count_managed_databases_by_instance(&instance.id)
+            .unwrap(),
+        1
+    );
     assert_eq!(store.count_databases_by_host(&host.id).unwrap(), 1);
 
     // A second database for the same instance lists creation-ordered.
     let core = sample_managed_database(&instance, &host, "s01234567_core");
     store.put_managed_database(&core).unwrap();
-    let listed = store.list_managed_databases_by_instance(&instance.id).unwrap();
+    let listed = store
+        .list_managed_databases_by_instance(&instance.id)
+        .unwrap();
     assert_eq!(listed.len(), 2);
     assert_eq!(listed[1].name, "s01234567_core");
-    assert_eq!(store.count_managed_databases_by_instance(&instance.id).unwrap(), 2);
+    assert_eq!(
+        store
+            .count_managed_databases_by_instance(&instance.id)
+            .unwrap(),
+        2
+    );
 
     // Delete removes exactly the one row.
     store.delete_managed_database(&world.id).unwrap();
     assert!(store.get_managed_database(&world.id).unwrap().is_none());
-    assert_eq!(store.count_managed_databases_by_instance(&instance.id).unwrap(), 1);
+    assert_eq!(
+        store
+            .count_managed_databases_by_instance(&instance.id)
+            .unwrap(),
+        1
+    );
 }
 
 #[test]
@@ -1297,14 +1322,24 @@ fn managed_databases_cascade_with_their_instance() {
     let (store, .., instance, host) = seeded_database_graph();
     let db = sample_managed_database(&instance, &host, "s01234567_doomed");
     store.put_managed_database(&db).unwrap();
-    assert_eq!(store.count_managed_databases_by_instance(&instance.id).unwrap(), 1);
+    assert_eq!(
+        store
+            .count_managed_databases_by_instance(&instance.id)
+            .unwrap(),
+        1
+    );
 
     // The per-instance convention: the databases go with the
     // instance (ON DELETE CASCADE), exactly like backups, schedules,
     // and metrics samples.
     store.delete_instance(&instance.id).unwrap();
     assert!(store.get_managed_database(&db.id).unwrap().is_none());
-    assert_eq!(store.count_managed_databases_by_instance(&instance.id).unwrap(), 0);
+    assert_eq!(
+        store
+            .count_managed_databases_by_instance(&instance.id)
+            .unwrap(),
+        0
+    );
     // The host itself survives (it is not per-instance).
     assert!(store.get_database_host(&host.id).unwrap().is_some());
 }
@@ -1320,7 +1355,10 @@ fn database_host_delete_with_live_databases_is_an_fk_refusal() {
     // before it ever reaches the store; the store itself must not
     // silently cascade the operator's data away).
     let err = store.delete_database_host(&host.id).unwrap_err();
-    assert!(err.to_string().contains("FOREIGN KEY"), "expected FK refusal, got: {err}");
+    assert!(
+        err.to_string().contains("FOREIGN KEY"),
+        "expected FK refusal, got: {err}"
+    );
 
     // After the database is gone, the host deletes cleanly.
     store.delete_managed_database(&db.id).unwrap();

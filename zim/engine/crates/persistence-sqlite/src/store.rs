@@ -20,8 +20,7 @@ use zim_engine_domain::{
     DatabaseHostId, Egg, EggId, EggVariable, ExtensionId, ExtensionRegistration,
     ExtensionSignature, Instance, InstanceId, InstanceStatus, InstanceVariable, Job, JobId,
     JobState, ManagedDatabase, ManagedDatabaseId, MetricsSample, Node, NodeId, Permission,
-    PermissionSet, RecentServer, Schedule, ScheduleId, Transfer, TransferId, User,
-    UserId,
+    PermissionSet, RecentServer, Schedule, ScheduleId, Transfer, TransferId, User, UserId,
 };
 
 // ─── Error & conversion helpers ───────────────────────────────────────────
@@ -1498,13 +1497,13 @@ impl Persistence for crate::SqlitePersistence {
     ) -> Result<Option<DatabaseHost>, PersistenceError> {
         self.with_conn(|conn| {
             let mut stmt = conn
-                .prepare("SELECT id, name, host, port, username, password, max_databases,
+                .prepare(
+                    "SELECT id, name, host, port, username, password, max_databases,
                                  node_id, created_at, updated_at
-                          FROM database_hosts WHERE id = ?1")
+                          FROM database_hosts WHERE id = ?1",
+                )
                 .map_err(db_err)?;
-            let mut rows = stmt
-                .query(params![uuid_to_text(id)])
-                .map_err(db_err)?;
+            let mut rows = stmt.query(params![uuid_to_text(id)]).map_err(db_err)?;
             rows.next()
                 .map_err(db_err)?
                 .map(row_to_database_host)
@@ -1518,9 +1517,11 @@ impl Persistence for crate::SqlitePersistence {
     ) -> Result<Option<DatabaseHost>, PersistenceError> {
         self.with_conn(|conn| {
             let mut stmt = conn
-                .prepare("SELECT id, name, host, port, username, password, max_databases,
+                .prepare(
+                    "SELECT id, name, host, port, username, password, max_databases,
                                  node_id, created_at, updated_at
-                          FROM database_hosts WHERE name = ?1")
+                          FROM database_hosts WHERE name = ?1",
+                )
                 .map_err(db_err)?;
             let mut rows = stmt.query(params![name]).map_err(db_err)?;
             rows.next()
@@ -1533,9 +1534,11 @@ impl Persistence for crate::SqlitePersistence {
     fn list_database_hosts(&self) -> Result<Vec<DatabaseHost>, PersistenceError> {
         self.with_conn(|conn| {
             let mut stmt = conn
-                .prepare("SELECT id, name, host, port, username, password, max_databases,
+                .prepare(
+                    "SELECT id, name, host, port, username, password, max_databases,
                                  node_id, created_at, updated_at
-                          FROM database_hosts ORDER BY created_at")
+                          FROM database_hosts ORDER BY created_at",
+                )
                 .map_err(db_err)?;
             let mut rows = stmt.query([]).map_err(db_err)?;
             collect_rows(&mut rows, row_to_database_host)
@@ -1553,10 +1556,7 @@ impl Persistence for crate::SqlitePersistence {
         })
     }
 
-    fn count_databases_by_host(
-        &self,
-        host: &DatabaseHostId,
-    ) -> Result<u64, PersistenceError> {
+    fn count_databases_by_host(&self, host: &DatabaseHostId) -> Result<u64, PersistenceError> {
         self.with_conn(|conn| {
             conn.query_row(
                 "SELECT COUNT(*) FROM databases WHERE host_id = ?1",
@@ -1608,13 +1608,13 @@ impl Persistence for crate::SqlitePersistence {
     ) -> Result<Option<ManagedDatabase>, PersistenceError> {
         self.with_conn(|conn| {
             let mut stmt = conn
-                .prepare("SELECT id, instance_id, host_id, name, username, password, remote,
+                .prepare(
+                    "SELECT id, instance_id, host_id, name, username, password, remote,
                                  max_connections, created_at, updated_at
-                          FROM databases WHERE id = ?1")
+                          FROM databases WHERE id = ?1",
+                )
                 .map_err(db_err)?;
-            let mut rows = stmt
-                .query(params![uuid_to_text(id)])
-                .map_err(db_err)?;
+            let mut rows = stmt.query(params![uuid_to_text(id)]).map_err(db_err)?;
             rows.next()
                 .map_err(db_err)?
                 .map(row_to_managed_database)
@@ -1628,9 +1628,11 @@ impl Persistence for crate::SqlitePersistence {
     ) -> Result<Option<ManagedDatabase>, PersistenceError> {
         self.with_conn(|conn| {
             let mut stmt = conn
-                .prepare("SELECT id, instance_id, host_id, name, username, password, remote,
+                .prepare(
+                    "SELECT id, instance_id, host_id, name, username, password, remote,
                                  max_connections, created_at, updated_at
-                          FROM databases WHERE name = ?1")
+                          FROM databases WHERE name = ?1",
+                )
                 .map_err(db_err)?;
             let mut rows = stmt.query(params![name]).map_err(db_err)?;
             rows.next()
@@ -1646,9 +1648,11 @@ impl Persistence for crate::SqlitePersistence {
     ) -> Result<Vec<ManagedDatabase>, PersistenceError> {
         self.with_conn(|conn| {
             let mut stmt = conn
-                .prepare("SELECT id, instance_id, host_id, name, username, password, remote,
+                .prepare(
+                    "SELECT id, instance_id, host_id, name, username, password, remote,
                                  max_connections, created_at, updated_at
-                          FROM databases WHERE instance_id = ?1 ORDER BY created_at")
+                          FROM databases WHERE instance_id = ?1 ORDER BY created_at",
+                )
                 .map_err(db_err)?;
             let mut rows = stmt
                 .query(params![uuid_to_text(instance)])
@@ -1894,11 +1898,13 @@ fn row_to_database_host(row: &rusqlite::Row<'_>) -> Result<DatabaseHost, Persist
 }
 
 /// Maps a `databases` row (column order per the SELECTs above).
-fn row_to_managed_database(
-    row: &rusqlite::Row<'_>,
-) -> Result<ManagedDatabase, PersistenceError> {
+fn row_to_managed_database(row: &rusqlite::Row<'_>) -> Result<ManagedDatabase, PersistenceError> {
     Ok(ManagedDatabase {
-        id: uuid_from_text(&row.get::<_, String>(0).map_err(db_err)?, "managed database")?.into(),
+        id: uuid_from_text(
+            &row.get::<_, String>(0).map_err(db_err)?,
+            "managed database",
+        )?
+        .into(),
         instance_id: uuid_from_text(&row.get::<_, String>(1).map_err(db_err)?, "instance")?.into(),
         host_id: uuid_from_text(&row.get::<_, String>(2).map_err(db_err)?, "database host")?.into(),
         name: row.get::<_, String>(3).map_err(db_err)?,

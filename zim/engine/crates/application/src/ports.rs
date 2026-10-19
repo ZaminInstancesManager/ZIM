@@ -24,10 +24,10 @@
 
 use chrono::{DateTime, Utc};
 use zim_engine_domain::{
-    Allocation, AuditRecord, Backup, DatabaseHost, DatabaseHostId, Egg, EggId, ExtensionRegistration,
-    Instance, InstanceId, InstanceStatus, InstanceVariable, Job, JobId, JobState, ManagedDatabase,
-    ManagedDatabaseId, MetricsSample, Node, NodeId, Permission, RecentServer, Schedule,
-    ScheduleId, Transfer, TransferId, User, UserId,
+    Allocation, AuditRecord, Backup, DatabaseHost, DatabaseHostId, Egg, EggId,
+    ExtensionRegistration, Instance, InstanceId, InstanceStatus, InstanceVariable, Job, JobId,
+    JobState, ManagedDatabase, ManagedDatabaseId, MetricsSample, Node, NodeId, Permission,
+    RecentServer, Schedule, ScheduleId, Transfer, TransferId, User, UserId,
 };
 
 /// Errors returned by [`Persistence`] implementations.
@@ -485,10 +485,7 @@ pub trait Persistence: Send + Sync {
     fn delete_database_host(&self, id: &DatabaseHostId) -> Result<(), PersistenceError>;
 
     /// How many databases currently reference `host`.
-    fn count_databases_by_host(
-        &self,
-        host: &DatabaseHostId,
-    ) -> Result<u64, PersistenceError>;
+    fn count_databases_by_host(&self, host: &DatabaseHostId) -> Result<u64, PersistenceError>;
 
     /// Insert or replace a managed database by id.
     fn put_managed_database(&self, database: &ManagedDatabase) -> Result<(), PersistenceError>;

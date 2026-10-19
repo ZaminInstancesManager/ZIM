@@ -117,7 +117,9 @@ pub enum DatabaseHostError {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ManagedDatabaseError {
     /// The database name is not 3-48 `alpha_dash` characters.
-    #[error("database name {0:?} is malformed; expected 3-48 alphanumeric/dash/underscore characters")]
+    #[error(
+        "database name {0:?} is malformed; expected 3-48 alphanumeric/dash/underscore characters"
+    )]
     MalformedName(String),
     /// The username is not 3-100 `alpha_dash` characters.
     #[error("database username {0:?} is malformed; expected 3-100 alphanumeric/dash/underscore characters")]
@@ -232,7 +234,9 @@ impl ManagedDatabase {
             return Err(ManagedDatabaseError::MalformedName(self.name.clone()));
         }
         if !is_alpha_dash(&self.username, 3, DATABASE_USERNAME_MAX) {
-            return Err(ManagedDatabaseError::MalformedUsername(self.username.clone()));
+            return Err(ManagedDatabaseError::MalformedUsername(
+                self.username.clone(),
+            ));
         }
         let remote_len = self.remote.chars().count();
         if remote_len == 0 || remote_len > REMOTE_MAX {
@@ -265,7 +269,11 @@ pub fn derive_database_name(instance: &Instance, user_name: &str) -> String {
 /// `u{server_id}_{random}` convention with the instance's short
 /// uuid and 6 random alphanumeric characters.
 pub fn derive_username(instance: &Instance) -> String {
-    format!("u{}_{}", instance.uuid_short, random_alphanumeric(USERNAME_RAND_LEN))
+    format!(
+        "u{}_{}",
+        instance.uuid_short,
+        random_alphanumeric(USERNAME_RAND_LEN)
+    )
 }
 
 /// Generate a database password: 24 characters — an alphanumeric
@@ -327,9 +335,9 @@ fn is_alpha_dash(value: &str, min: usize, max: usize) -> bool {
 /// parsing).
 fn is_valid_host_address(value: &str) -> bool {
     !value.is_empty()
-        && value.chars().all(|c| {
-            c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '_' || c == ':'
-        })
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '_' || c == ':')
         && value.len() <= 253
 }
 
@@ -469,7 +477,10 @@ mod tests {
 
         let username = derive_username(&instance);
         assert!(username.starts_with(&format!("u{}_", instance.uuid_short)));
-        assert_eq!(username.chars().count(), instance.uuid_short.len() + 2 + USERNAME_RAND_LEN);
+        assert_eq!(
+            username.chars().count(),
+            instance.uuid_short.len() + 2 + USERNAME_RAND_LEN
+        );
     }
 
     #[test]
@@ -496,9 +507,9 @@ mod tests {
             );
             // Every character is either alphanumeric or one of the
             // Panel's specials — nothing config-hostile.
-            assert!(password.chars().all(|c| {
-                c.is_ascii_alphanumeric() || PASSWORD_SPECIALS.contains(&c)
-            }));
+            assert!(password
+                .chars()
+                .all(|c| { c.is_ascii_alphanumeric() || PASSWORD_SPECIALS.contains(&c) }));
         }
     }
 
@@ -510,6 +521,10 @@ mod tests {
         for _ in 0..50 {
             seen.insert(generate_password());
         }
-        assert!(seen.len() >= 45, "only {} distinct passwords in 50 draws", seen.len());
+        assert!(
+            seen.len() >= 45,
+            "only {} distinct passwords in 50 draws",
+            seen.len()
+        );
     }
 }

@@ -11,6 +11,7 @@
 pub mod audit;
 pub mod auth;
 pub mod control;
+pub mod databases;
 pub mod eggs;
 pub mod extensions;
 pub mod files;
