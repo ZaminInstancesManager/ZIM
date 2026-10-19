@@ -22,9 +22,10 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 use crate::dto::{
-    PanelActivityLog, PanelActivitySubject, PanelAllocation, PanelBackup, PanelEgg,
-    PanelEggVariable, PanelLocation, PanelNest, PanelNode, PanelSchedule, PanelScheduleTask,
-    PanelServer, PanelServerTransfer, PanelServerVariable, PanelSubuser, PanelUser,
+    PanelActivityLog, PanelActivitySubject, PanelAllocation, PanelBackup, PanelDatabase,
+    PanelDatabaseHost, PanelEgg, PanelEggVariable, PanelLocation, PanelNest, PanelNode,
+    PanelSchedule, PanelScheduleTask, PanelServer, PanelServerTransfer, PanelServerVariable,
+    PanelSubuser, PanelUser,
 };
 
 /// Why a panel source could not be read.
@@ -79,10 +80,15 @@ pub struct PanelTables {
     pub(crate) activity_log_subjects: Vec<PanelActivitySubject>,
     /// `server_transfers` rows.
     pub(crate) server_transfers: Vec<PanelServerTransfer>,
-    /// Deferred tables (`databases`, `database_hosts`, `mounts`,
-    /// `mount_node`, `mount_server`, `api_keys`, `settings`, ...)
-    /// carried as raw row arrays purely so the report can count
-    /// them — never mapped.
+    /// `database_hosts` rows (mapped since M31).
+    #[serde(default)]
+    pub(crate) database_hosts: Vec<PanelDatabaseHost>,
+    /// `databases` rows (mapped since M31).
+    #[serde(default)]
+    pub(crate) databases: Vec<PanelDatabase>,
+    /// Deferred tables (`mounts`, `mount_node`, `mount_server`,
+    /// `api_keys`, `settings`, ...) carried as raw row arrays purely
+    /// so the report can count them — never mapped.
     #[serde(default)]
     pub(crate) deferred: BTreeMap<String, serde_json::Value>,
 }

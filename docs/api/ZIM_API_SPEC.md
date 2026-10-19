@@ -595,6 +595,70 @@ engine's build version, written from the binary's own
 answer, so the update channel's version-lag window is visible
 rather than surprising.
 
+### 10.21 The managed-database family (M31)
+
+The panel-side rows of the managed-database feature: which external
+DB servers exist (the hosts) and which databases are provisioned
+for which instances. The engine stores and manages these rows —
+names, generated credentials, limits, connection info — and does
+not connect to the host (provisioning is the `workloads/database`
+integration's milestone; the rows become its input then). The
+honest boundary is the surface's own hint.
+
+**Admin host family** (`require_admin` on every leg):
+
+- `GET /api/v1/hosts` — every host, each with its live
+  `databases_count` (the delete gate's number, surfaced).
+- `POST /api/v1/hosts` — `{name, host, port, username, password,
+  max_databases?, node_id?}`. The name is unique (duplicate → 409
+  `conflict`); the port must be 1-65535 and the address a
+  hostname/IP token grammar (else 400 `validation_failed`); a named
+  `node_id` must exist (404). 201 answers the host WITHOUT the
+  password: host credentials are write-only through this API.
+- `GET /api/v1/hosts/{hid}` — one host's detail (no password).
+- `PATCH /api/v1/hosts/{hid}` — partial update; the password
+  updates only when supplied (omitting it keeps the stored
+  credential).
+- `DELETE /api/v1/hosts/{hid}` — refused with 409 `conflict`
+  naming the live count while databases reference the host; clean
+  204 once they are gone (never a silent cascade).
+
+**Per-instance family** (the `database.*` grants — AD-12's
+verbatim vocabulary, including `view_password` as its own grant):
+
+- `GET /api/v1/instances/{id}/databases` — `database.read`. The
+  rows with their connection info (the host's joined address and
+  port); never passwords.
+- `POST /api/v1/instances/{id}/databases` — `database.create`.
+  Body: `{name, remote?, host_id?, max_connections?}`. Everything
+  else is derived server-side: the `s{short}_` name namespace and
+  `u{short}_` username (the Panel's conventions on ZIM's UUID
+  rows), the 24-character password (the Panel's exact generator
+  shape). The gates, in order, each a structured refusal naming its
+  reason: the instance's `database_limit` (None = feature off; a
+  number = the cap — 409), host selection (explicit missing → 404;
+  none registered → 409 naming the admin path; otherwise the
+  node-tied host preferred), the host's own `max_databases`
+  capacity, the derived name's global uniqueness (the Panel's own
+  constraint), then validation (400). 201 answers the row WITH the
+  one-time `password` — the only create-time reveal.
+- `GET /api/v1/instances/{id}/databases/{dbid}` — `database.read`
+  (no password; another instance's id is the uniform 404).
+- `GET /api/v1/instances/{id}/databases/{dbid}/password` —
+  `database.view_password`. `{password}` — the grant's own
+  endpoint (the Panel keeps it separate from read for exactly this
+  posture).
+- `POST /api/v1/instances/{id}/databases/{dbid}/rotate-password` —
+  `database.update`. A fresh generated password; the answer
+  carries it once (the rotator just reset the credential).
+- `DELETE /api/v1/instances/{id}/databases/{dbid}` —
+  `database.delete`. 204.
+
+The importer maps `databases` and `database_hosts` rows verbatim
+(names keep the panel-era `s{panel_server_id}_` namespace;
+passwords carry the panel's ENCRYPTED value — rotate in ZIM to mint
+usable credentials; the report warns).
+
 ## 11. WebSocket event contract
 
 WSS endpoint: `wss://127.0.0.1:{port}/api/v1/stream?instance_id={id}`.

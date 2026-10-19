@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ZIM — Databases</title>
+  <link rel="stylesheet" href="/zim/assets/main.css">
+  <script type="module" src="/zim/assets/databases.js"></script>
+</head>
+<body>
+  <main class="page">
+    <zim-recovery-notice></zim-recovery-notice>
+
+    <header class="page-header">
+      <a class="backlink" href="/zim/servers" title="Servers">←</a>
+      <h1 id="server-name">Server</h1>
+      <span id="server-id" class="pill pill-muted mono">…</span>
+      <span class="pill pill-muted mono">databases</span>
+    </header>
+
+    <section class="card" aria-label="Observed state">
+      <div class="console-toolbar">
+        <zim-status-dot id="status-dot" status="unknown" data-label="unknown"></zim-status-dot>
+        <span id="state-label" class="state-label">state: unknown</span>
+        <span class="spacer"></span>
+        <span id="databases-hint" class="pill pill-muted mono" title="The engine stores the rows; provisioning against the host is the workload integration's milestone">rows + credentials, no live host connection</span>
+      </div>
+    </section>
+
+    <section class="card card-login" id="auth-gate" aria-label="Sign in" hidden>
+      <h2 class="card-title">Sign in to ZIM</h2>
+      <zim-login-form id="login"></zim-login-form>
+    </section>
+
+    <section class="card" aria-label="Databases">
+      <h2 class="card-title">Databases</h2>
+
+      <div class="console-toolbar" id="databases-toolbar">
+        <button id="btn-add-database" class="pill pill-action" type="button" title="Provision a database row">＋ Database</button>
+        <button id="btn-refresh" class="pill pill-action" type="button" title="Reload the list">↻ Refresh</button>
+        <span id="databases-message" class="state-label" role="status"></span>
+      </div>
+
+      <form class="mgmt-form" id="database-form" hidden aria-label="New database">
+        <div class="field-row">
+          <div class="field">
+            <label for="database-name">Name</label>
+            <input id="database-name" type="text" autocomplete="off" placeholder="world" class="mono" />
+            <span class="hint" id="name-hint">the s{short}_ namespace is added for you</span>
+          </div>
+          <div class="field">
+            <label for="database-remote">Allowed source</label>
+            <input id="database-remote" type="text" autocomplete="off" placeholder="%" class="mono" />
+            <span class="hint">% = any (the Panel's default)</span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="database-host">Host</label>
+          <select id="database-host" class="mono"></select>
+          <span class="hint">the node-tied host is chosen when you leave this on “auto”</span>
+        </div>
+        <div class="buttons">
+          <button id="database-create" class="pill pill-action" type="submit">Create</button>
+          <button id="database-cancel" class="pill pill-muted" type="button">Cancel</button>
+        </div>
+      </form>
+
+      <table class="files-table" id="databases-table">
+        <thead>
+          <tr>
+            <th scope="col" class="files-name">Database</th>
+            <th scope="col" class="mono">Connection</th>
+            <th scope="col" class="mono">Source</th>
+            <th scope="col" class="files-actions"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody id="databases-list">
+          <tr><td colspan="4" class="empty">…</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

@@ -592,3 +592,56 @@ export function settingsFormToPatch(values) {
     }
     return request;
 }
+/** `GET /instances/{id}/databases` — `database.read`. */
+export async function listDatabases(instanceId) {
+    const body = await api(`/instances/${encodeURIComponent(instanceId)}/databases`);
+    return body.data;
+}
+/** `POST /instances/{id}/databases` — `database.create`. 201 answers
+ * the row WITH the one-time password (save it now: reads never
+ * repeat it without the `database.view_password` grant). */
+export async function createDatabase(instanceId, input) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/databases`, {
+        body: input,
+    });
+}
+/** `GET .../databases/{dbid}/password` — `database.view_password`
+ * (its own grant, separate from read per the Panel's vocabulary). */
+export async function revealDatabasePassword(instanceId, databaseId) {
+    const body = await api(`/instances/${encodeURIComponent(instanceId)}/databases/${encodeURIComponent(databaseId)}/password`);
+    return body.password;
+}
+/** `POST .../databases/{dbid}/rotate-password` — `database.update`.
+ * The answer carries the new password once (the same one-time
+ * reveal as create). */
+export async function rotateDatabasePassword(instanceId, databaseId) {
+    const body = await api(`/instances/${encodeURIComponent(instanceId)}/databases/${encodeURIComponent(databaseId)}/rotate-password`, { method: "POST" });
+    return body.password;
+}
+/** `DELETE .../databases/{dbid}` — `database.delete`. */
+export async function deleteDatabase(instanceId, databaseId) {
+    return api(`/instances/${encodeURIComponent(instanceId)}/databases/${encodeURIComponent(databaseId)}`, { method: "DELETE" });
+}
+/** `GET /hosts` — admin: the database hosts with their live counts. */
+export async function listDatabaseHosts() {
+    const body = await api("/hosts");
+    return body.data;
+}
+/** The pure display grammar for a database's connection string: the
+ * joined host's address and port (what a workload's config template
+ * or an operator needs). `null` when the row's join degraded. */
+export function connectionString(row) {
+    const host = row.connections?.host;
+    const port = row.connections?.port;
+    if (typeof host !== "string" || host === "" || typeof port !== "number" || !Number.isFinite(port)) {
+        return null;
+    }
+    return `${host}:${port}`;
+}
+/** The user-facing budget note for the create form: the derived name
+ * spends the first 10 characters on the `s{short}_` namespace, so
+ * the user-chosen tail has `48 - (short + 2)` characters to spend
+ * (the Panel's 48-char budget, adapted). */
+export function nameBudget(instanceShortUuid) {
+    return Math.max(0, 48 - (instanceShortUuid.length + 2));
+}

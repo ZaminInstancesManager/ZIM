@@ -313,6 +313,9 @@ export async function createInstance(
     image?: string;
     startup?: string;
     owner_id?: string;
+    /** The managed-database budget (None/omitted = the feature is
+     * off for the instance — M31's gate). */
+    database_limit?: number;
   },
 ): Promise<CreatedInstance & { uuid: string; uuid_short: string }> {
   // A fresh engine's node has no free allocations — create the
@@ -329,6 +332,9 @@ export async function createInstance(
     startup:
       options.startup ??
       "sh -c 'while true; do echo zim-e2e-tick; sleep 1; done'",
+    ...(options.database_limit !== undefined
+      ? { database_limit: options.database_limit }
+      : {}),
   });
   // The container's docker name is the instance UUID (not the row
   // id) — the fault-injection family reaches for it directly.

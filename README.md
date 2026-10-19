@@ -199,7 +199,23 @@ abstraction, and the roadmap that subsequent implementation work will follow.
   charts (CPU host-share, memory with the limit, network rx/tx,
   processes) over that endpoint, a window switcher across
   `15m`/`1h`/`6h`/`24h`/`7d`, and a live strip over the §11
-  stream; unknown is a gap on every chart, never a zero line).
+  stream; unknown is a gap on every chart, never a zero line), and
+  the database surface (M31 — the managed-database family the
+  post-alpha backlog named: `zim_engine_domain::database` + the
+  §10.21 API — the admin `/hosts` family with write-only
+  credentials and the delete gate that names its live count, and
+  the per-instance family over the `database.*` grants where
+  `view_password` is its own gate; passwords appear exactly three
+  times — create, rotate, the gated read — never on a list; the
+  engine derives the `s{short}_` name, the `u{short}_` username,
+  and the Panel-shaped 24-char password server-side, and refuses
+  every limit past its gate with the reason named; the importer
+  maps `databases`/`database_hosts` verbatim with the
+  encrypted-password rotation warning). The page
+  `zim://servers/{id}/databases` renders the rows with their
+  joined connection info, the create form with the honest
+  name-budget hint, and the one-time password prompts on
+  create/rotate (manifest 1.7.0).
   M25's own acceptance campaign (16 CI batches) also earned a
   real engine fix: the production TLS accept loop was dropping
   every WebSocket subscriber on arrival (`serve_connection` had

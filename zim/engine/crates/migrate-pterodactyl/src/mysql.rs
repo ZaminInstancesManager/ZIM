@@ -55,6 +55,8 @@ impl PanelSource for MysqlPanelSource {
             activity_logs: load_activity_logs(&mut conn)?,
             activity_log_subjects: load_activity_subjects(&mut conn)?,
             server_transfers: load_server_transfers(&mut conn)?,
+            database_hosts: load_database_hosts(&mut conn)?,
+            databases: load_databases(&mut conn)?,
             ..Default::default()
         };
         for table in DEFERRED_TABLES {
@@ -71,9 +73,9 @@ impl PanelSource for MysqlPanelSource {
 }
 
 /// The deferred tables the report counts (§2.3's unmapped set).
+/// (`databases` and `database_hosts` were members until M31 mapped
+/// them — see `load_database_hosts`/`load_databases`.)
 const DEFERRED_TABLES: &[&str] = &[
-    "databases",
-    "database_hosts",
     "mounts",
     "mount_node",
     "mount_server",
@@ -440,6 +442,48 @@ fn load_server_transfers(conn: &mut Conn) -> Result<Vec<PanelServerTransfer>, Pa
             new_node: int(row, "new_node"),
             successful: opt_flag(row, "successful"),
             created_at: datetime(row, "created_at"),
+        },
+    )
+}
+
+/// `database_hosts` rows (M31: mapped, no longer deferred).
+fn load_database_hosts(conn: &mut Conn) -> Result<Vec<PanelDatabaseHost>, PanelSourceError> {
+    load(
+        conn,
+        "SELECT id, name, host, port, username, password, max_databases, node_id, \
+         created_at, updated_at FROM database_hosts ORDER BY id",
+        |row| PanelDatabaseHost {
+            id: int(row, "id"),
+            name: text(row, "name"),
+            host: text(row, "host"),
+            port: int(row, "port"),
+            username: text(row, "username"),
+            password: text(row, "password"),
+            max_databases: opt_int(row, "max_databases"),
+            node_id: opt_int(row, "node_id"),
+            created_at: datetime(row, "created_at"),
+            updated_at: datetime(row, "updated_at"),
+        },
+    )
+}
+
+/// `databases` rows (M31: mapped, no longer deferred).
+fn load_databases(conn: &mut Conn) -> Result<Vec<PanelDatabase>, PanelSourceError> {
+    load(
+        conn,
+        "SELECT id, server_id, database_host_id, database, username, remote, password, \
+         max_connections, created_at, updated_at FROM databases ORDER BY id",
+        |row| PanelDatabase {
+            id: int(row, "id"),
+            server_id: int(row, "server_id"),
+            database_host_id: int(row, "database_host_id"),
+            database: text(row, "database"),
+            username: text(row, "username"),
+            remote: text(row, "remote"),
+            password: text(row, "password"),
+            max_connections: int(row, "max_connections"),
+            created_at: datetime(row, "created_at"),
+            updated_at: datetime(row, "updated_at"),
         },
     )
 }

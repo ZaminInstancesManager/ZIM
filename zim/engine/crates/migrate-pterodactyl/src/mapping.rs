@@ -26,10 +26,11 @@ use uuid::Uuid;
 use zim_engine_application::ports::Persistence;
 use zim_engine_domain::{
     Allocation, AllocationId, AuditActor, AuditRecord, Backup, BackupId, Bytes, CommandTemplate,
-    DockerImage, Egg, EggId, Instance, InstanceId, InstanceStatus, InstanceVariable, Job, JobId,
-    JobKind, JobState, LocationId, Node, NodeCapabilities, NodeDeployment, NodeId, NodeState,
-    Permission, PermissionGrant, PermissionSet, PowerAction, ResourceLimits, Schedule,
-    ScheduleAction, ScheduleId, Scheme, Transfer, TransferId, TransferState, User, UserId,
+    DatabaseHost, DatabaseHostId, DockerImage, Egg, EggId, Instance, InstanceId, InstanceStatus,
+    InstanceVariable, Job, JobId, JobKind, JobState, LocationId, ManagedDatabase,
+    ManagedDatabaseId, Node, NodeCapabilities, NodeDeployment, NodeId, NodeState, Permission,
+    PermissionGrant, PermissionSet, PowerAction, ResourceLimits, Schedule, ScheduleAction,
+    ScheduleId, Scheme, Transfer, TransferId, TransferState, User, UserId,
 };
 use zim_engine_eggs::{import_legacy_json, ImportPolicy as EggPolicy};
 
@@ -165,6 +166,10 @@ pub(crate) struct Mapped {
     pub(crate) transfers: Vec<Transfer>,
     /// Mapped `schedules` rows.
     pub(crate) schedules: Vec<Schedule>,
+    /// Mapped `database_hosts` rows (M31).
+    pub(crate) database_hosts: Vec<DatabaseHost>,
+    /// Mapped `databases` rows (M31).
+    pub(crate) databases: Vec<ManagedDatabase>,
     /// Mapped `audit` rows (activity_logs).
     pub(crate) audit: Vec<AuditRecord>,
     /// The narrated outcome.
@@ -1527,6 +1532,160 @@ impl MappingContext {
     /// narrated): nests, locations (folded), databases,
     /// database_hosts, mounts, mount_node, mount_server, api_keys,
     /// and settings per the issue's deferred list.
+    /// `database_hosts` → [`DatabaseHost`] rows: the connection
+    /// records with their node ties resolved (a dangling tie degrades
+    /// to "any host" with a warning — the tie is a scheduling
+    /// preference, not data ownership; the store's SET NULL posture
+    /// agrees). M31: mapped, no longer deferred.
+    fn map_database_hosts(
+        &mut self,
+        tables: &PanelTables,
+        sink: &dyn Persistence,
+    ) -> Vec<DatabaseHost> {
+        let mut rows = Vec::new();
+        let mut skipped = Vec::new();
+        for host in &tables.database_hosts {
+            let key = host.id;
+            // Deduplicate on the (unique) name: a re-import keeps
+            // the existing row instead of tripping the store's
+            // UNIQUE constraint (the backup family's uuid rule,
+            // applied to the hosts' own unique key).
+            if sink
+                .get_database_host_by_name(&host.name)
+                .ok()
+                .flatten()
+                .is_some()
+            {
+                skipped.push(Self::skip(key, "host name already exists in the sink"));
+                continue;
+            }
+            let port = u16::try_from(host.port.max(0)).unwrap_or(0);
+            if port == 0 {
+                skipped.push(Self::skip(key, format!("port {} out of range", host.port)));
+                continue;
+            }
+            let node_id = match host.node_id {
+                Some(raw) => match self.node_ids.get(&raw).copied() {
+                    Some(id) => Some(id),
+                    None => {
+                        self.warn(format!(
+                            "database host {key} ties to node {raw} which was not imported; \
+                             the tie releases (the host serves any server)"
+                        ));
+                        None
+                    }
+                },
+                None => None,
+            };
+            let created_at = self.ts_or_now(host.created_at.as_deref());
+            let updated_at = self.ts_or_now(host.updated_at.as_deref());
+            rows.push(DatabaseHost {
+                id: DatabaseHostId::new(),
+                name: host.name.clone(),
+                host: host.host.clone(),
+                port,
+                username: host.username.clone(),
+                password: host.password.clone(),
+                max_databases: host
+                    .max_databases
+                    .map(|v| v.clamp(0, i64::from(u32::MAX)) as u32),
+                node_id,
+                created_at,
+                updated_at,
+            });
+        }
+        self.outcome("database_hosts", rows.len(), skipped);
+        rows
+    }
+
+    /// `databases` → [`ManagedDatabase`] rows: names and credentials
+    /// verbatim (the source database's uniqueness carries over; the
+    /// `s{panel_server_id}_` namespace stays as the panel wrote it),
+    /// the instance and host cross-references resolved. One blanket
+    /// warning when any row imports: the panel stores passwords
+    /// ENCRYPTED (Laravel's encrypter) — the imported value is the
+    /// ciphertext blob, and the operator rotates in ZIM to mint a
+    /// usable credential. M31: mapped, no longer deferred.
+    fn map_databases(
+        &mut self,
+        tables: &PanelTables,
+        hosts: &[DatabaseHost],
+        sink: &dyn Persistence,
+    ) -> Vec<ManagedDatabase> {
+        // The panel's host ids → the mapped rows' ids (parallel
+        // order: the hosts pass produced one row per imported panel
+        // host, in table order).
+        let mut panel_host_to_zim: BTreeMap<i64, DatabaseHostId> = BTreeMap::new();
+        for (index, panel_host) in tables.database_hosts.iter().enumerate() {
+            if let Some(mapped) = hosts.get(index) {
+                panel_host_to_zim.insert(panel_host.id, mapped.id);
+            }
+        }
+
+        let mut rows = Vec::new();
+        let mut skipped = Vec::new();
+        for database in &tables.databases {
+            let key = database.id;
+            // Deduplicate on the (globally unique) name, exactly as
+            // the hosts do — a re-import converges instead of
+            // colliding.
+            if sink
+                .get_managed_database_by_name(&database.database)
+                .ok()
+                .flatten()
+                .is_some()
+            {
+                skipped.push(Self::skip(key, "database name already exists in the sink"));
+                continue;
+            }
+            let Some(instance) = self.instance_ids.get(&database.server_id).copied() else {
+                skipped.push(Self::skip(
+                    key,
+                    format!("server {} was not imported", database.server_id),
+                ));
+                continue;
+            };
+            let Some(host_id) = panel_host_to_zim.get(&database.database_host_id).copied() else {
+                skipped.push(Self::skip(
+                    key,
+                    format!(
+                        "database host {} was not imported",
+                        database.database_host_id
+                    ),
+                ));
+                continue;
+            };
+            let created_at = self.ts_or_now(database.created_at.as_deref());
+            let updated_at = self.ts_or_now(database.updated_at.as_deref());
+            rows.push(ManagedDatabase {
+                id: ManagedDatabaseId::new(),
+                instance_id: instance,
+                host_id,
+                name: database.database.clone(),
+                username: database.username.clone(),
+                password: database.password.clone(),
+                remote: if database.remote.trim().is_empty() {
+                    "%".to_owned()
+                } else {
+                    database.remote.clone()
+                },
+                max_connections: database.max_connections.clamp(0, i64::from(u32::MAX)) as u32,
+                created_at,
+                updated_at,
+            });
+        }
+        if !rows.is_empty() {
+            self.warn(format!(
+                "{} imported database password(s) carry the panel's ENCRYPTED value \
+                 (the panel encrypts the column); rotate them in ZIM to mint usable \
+                 credentials",
+                rows.len()
+            ));
+        }
+        self.outcome("databases", rows.len(), skipped);
+        rows
+    }
+
     fn count_deferred(&mut self, tables: &PanelTables) {
         let nest_names: Vec<&str> = tables.nests.iter().map(|nest| nest.name.as_str()).collect();
         let entries = [
@@ -1564,7 +1723,6 @@ impl MappingContext {
                 continue;
             }
             let note = match table.as_str() {
-                "databases" | "database_hosts" => "managed databases are a deferred ZIM feature",
                 "mounts" | "mount_node" | "mount_server" => "mounts are a deferred ZIM feature",
                 "api_keys" => "client API keys are a deferred ZIM feature",
                 "settings" => "panel key/value settings have no ZIM equivalent",
@@ -1600,6 +1758,8 @@ pub(crate) fn map_tables(
     let (backups, mut jobs) = ctx.map_backups(tables, sink);
     let (transfers, transfer_jobs) = ctx.map_transfers(tables);
     jobs.extend(transfer_jobs);
+    let database_hosts = ctx.map_database_hosts(tables, sink);
+    let databases = ctx.map_databases(tables, &database_hosts, sink);
     let audit = ctx.map_activity(tables);
     ctx.count_deferred(tables);
 
@@ -1627,6 +1787,8 @@ pub(crate) fn map_tables(
         backups,
         transfers,
         schedules,
+        database_hosts,
+        databases,
         audit,
         report: ctx.report,
     }
@@ -1679,6 +1841,12 @@ fn write_tables(
     table(sink, &mapped.backups, |sink, row| sink.put_backup(row))?;
     table(sink, &mapped.transfers, |sink, row| sink.put_transfer(row))?;
     table(sink, &mapped.schedules, |sink, row| sink.put_schedule(row))?;
+    table(sink, &mapped.database_hosts, |sink, row| {
+        sink.put_database_host(row)
+    })?;
+    table(sink, &mapped.databases, |sink, row| {
+        sink.put_managed_database(row)
+    })?;
     table(sink, &mapped.audit, |sink, record| {
         sink.append_audit(record).map(|_| ())
     })?;

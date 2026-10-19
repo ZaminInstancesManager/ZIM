@@ -60,8 +60,8 @@ with the schema documented in `docs/architecture/RUST_ENGINE.md`
 | `permissions`          | `permissions`                  | Permission names mapped from Panel's string constants to ZIM's `PermissionGrant` enum (vocabulary preserved verbatim). |
 | `schedules`           | `schedules`                    | Direct copy. |
 | `schedule_tasks`      | `schedule_tasks`              | Direct copy. |
-| `databases`            | `databases`                    | Direct copy (databases are a deferred ZIM feature; the rows are imported but no engine functionality uses them initially). |
-| `database_hosts`      | `database_hosts`              | Direct copy. |
+| `databases`            | `databases`                    | Direct copy since M31: names/usernames verbatim (the panel's `s{server_id}_` namespace stays), the password carries the panel's ENCRYPTED value — rotate in ZIM to mint usable credentials (the report warns). |
+| `database_hosts`      | `database_hosts`              | Direct copy since M31 (node ties resolve; a dangling tie releases to any-host with a warning). |
 | `mounts`              | `mounts`                       | Direct copy. |
 | `mount_node`          | `mount_node`                   | Direct copy. |
 | `mount_server`         | `mount_server`                 | Direct copy. |

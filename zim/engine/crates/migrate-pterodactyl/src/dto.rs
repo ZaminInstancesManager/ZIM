@@ -477,3 +477,71 @@ pub(crate) fn subject_is_server(subject_type: &str) -> bool {
     let lowered = subject_type.to_ascii_lowercase();
     lowered == "server" || lowered.ends_with("\\server") || lowered.ends_with("::server")
 }
+
+// ─── Managed databases (M31: mapped, no longer deferred) ─────────────
+
+/// One `database_hosts` row (the external DB server connection
+/// record). Modern column names (`node_id` since the 2017_03_16
+/// reorganization of `database_servers`).
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct PanelDatabaseHost {
+    /// Panel auto-increment id.
+    pub(crate) id: i64,
+    /// Display name (unique in the panel).
+    pub(crate) name: String,
+    /// The host's address (hostname or IP).
+    pub(crate) host: String,
+    /// The DB server port.
+    pub(crate) port: i64,
+    /// The administrative connection username.
+    pub(crate) username: String,
+    /// The administrative connection password (the panel stores it
+    /// encrypted; the row maps verbatim either way — ZIM's surface
+    /// never reads it back).
+    #[serde(default)]
+    pub(crate) password: String,
+    /// How many databases this host may carry (NULL = uncapped).
+    pub(crate) max_databases: Option<i64>,
+    /// The node this host is tied to (NULL = any).
+    pub(crate) node_id: Option<i64>,
+    /// Row creation time.
+    #[serde(default)]
+    pub(crate) created_at: Option<String>,
+    /// Row last-update time.
+    #[serde(default)]
+    pub(crate) updated_at: Option<String>,
+}
+
+/// One `databases` row (a database provisioned for a server).
+/// Modern column names (`server_id`/`database_host_id` since the
+/// 2016-10 FK pass and the 2017_03_16 cleanup).
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct PanelDatabase {
+    /// Panel auto-increment id.
+    pub(crate) id: i64,
+    /// The owning server.
+    pub(crate) server_id: i64,
+    /// The host the database lives on.
+    pub(crate) database_host_id: i64,
+    /// The database's name on the host (`s{panel_server_id}_{name}`,
+    /// globally unique — kept verbatim; the source's uniqueness
+    /// carries over).
+    pub(crate) database: String,
+    /// The generated connection username (`u{panel_server_id}_{rand}`).
+    pub(crate) username: String,
+    /// The allowed connection source (`%` = any).
+    #[serde(default)]
+    pub(crate) remote: String,
+    /// The generated password (the panel stores it encrypted).
+    #[serde(default)]
+    pub(crate) password: String,
+    /// The per-user connection cap (0 = unlimited).
+    #[serde(default)]
+    pub(crate) max_connections: i64,
+    /// Row creation time.
+    #[serde(default)]
+    pub(crate) created_at: Option<String>,
+    /// Row last-update time.
+    #[serde(default)]
+    pub(crate) updated_at: Option<String>,
+}

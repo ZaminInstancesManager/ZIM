@@ -1526,6 +1526,94 @@ drives the real engine on every tier.
 
 **Estimated effort:** 3 large batches (delivered as estimated).
 
+### M31: The database surface — managed database rows, credentials, and the per-server page
+
+**Status:** COMPLETE (2026-10-19) — three large batches + this record.
+
+**Goal:** Close the post-alpha backlog's managed-database line
+(*"Managed-database UI — the engine stores and operates the database
+rows; the management surface is unbuilt"*) and the feature-parity
+matrix's deferred Databases entry in one move: the panel-side half of
+the feature — the rows, the generated credentials, the limit gates,
+the connection info, the per-server management page — mirroring
+Pterodactyl's `databases`/`database_hosts` tables (verified against
+the 2016_02_07 creates, the 2017_03_16 reorganization, and the
+2020_04_22 `max_connections` column). The workload-integration half
+(provisioning against a live host) stays where WORKLOAD_ABSTRACTION
+put it — the `workloads/database` crate's milestone — and these rows
+become its input instead of its output when it ships.
+
+**Delivered:**
+
+- **The engine's data half** (batch 1):
+  `zim_engine_domain::database` (`DatabaseHost` + `ManagedDatabase`
+  with the Panel's validation grammars restated: `alpha_dash` 3-48
+  names, the 191/32/100 budgets, the hostname-token address rule);
+  the naming conventions adapted to ZIM's UUID rows (the instance's
+  8-hex `uuid_short` replaces the Panel's integer server id in
+  `s{short}_`/`u{short}_`, the same collision-resisting shape and
+  48-char budget math); the password generator mirrors the Panel's
+  `Utilities::randomStringWithSpecialCharacters` exactly (24 chars,
+  2-6 substitutions from `! @ = . + ^`) with `uuid`'s v4 generator
+  as the entropy source — no new dependency crosses the domain
+  boundary. Migration 0007 (`database_hosts` + `databases`):
+  databases cascade with their instance (the per-instance
+  convention); the host tie is the opposite posture — a plain FK
+  that refuses a host delete with live databases (the API turns it
+  into a 409 naming the count; a silent cascade would destroy
+  credentials the operator has not agreed to lose); host node ties
+  release with SET NULL (a scheduling preference, not data
+  ownership). The `Persistence` port grows the family (by-name
+  lookups for the check-first uniqueness gates; the two counts the
+  limit gates read); the SQLite adapter implements it; the
+  schema-head pins move to 0007.
+- **The API family** (batch 2): the §10.21 surface — the admin host
+  family (`/hosts`: list/create/get/patch/delete, every read
+  carrying the live `databases_count`, host credentials WRITE-ONLY
+  through the API) and the per-instance family
+  (`/instances/{id}/databases`: list/get/create/delete,
+  `rotate-password`, and the dedicated `password` endpoint gated by
+  `database.view_password` — the grant the Panel keeps separate
+  from read, preserved verbatim in AD-12, now earning its keep).
+  The credential discipline: passwords appear in exactly three
+  places (create, rotate, the gated read) — never list, never
+  detail, never a host response. The create path derives everything
+  the caller cannot choose and refuses in order with reasons
+  (limit/feature-off, host selection incl. the no-hosts 409 naming
+  the admin path, host capacity, global name uniqueness,
+  validation). Audit trails every mutation, instance-scoped where
+  the row is.
+- **The page + the E2E + the importer mapping + the records**
+  (batch 3): `zim://servers/{id}/databases` (manifest 1.7.0, the
+  twelfth declared per-instance surface) — the row table with
+  derived names and joined connection info, the create form with
+  the honest name-budget hint and the host selector (auto =
+  node-tied first), one-time password prompts on create/rotate, the
+  gated reveal, confirm-first delete, and the honest-boundary hint
+  in the toolbar. `databases-surface.test.ts` drives the real
+  family in the real browser (every UI beat asserted against the
+  API alongside; the limit, duplicate, and host-count refusals
+  surfaced; the gated read agreeing with every one-time reveal).
+  The importer maps `databases` + `database_hosts` (the deferred
+  register shrinks by two): names verbatim, the
+  panel-encrypted-password warning (rotate in ZIM to mint usable
+  credentials), name-based dedupe so re-imports converge, host ties
+  releasing when the node was not imported. 100 frontend unit tests
+  (five new: the connection-string grammar and the name budget);
+  six socket-level API walks; the round-trip, cascade, FK-refusal,
+  and node-tie-release store tests.
+
+**Acceptance criteria:** all met — Engine CI green on m31-dev
+(workspace tests + clippy `-D warnings` + fmt); the API walks cover
+the authz matrix (read-only subuser refused on every mutating leg;
+`view_password` opening exactly the password read and nothing
+wider), the four structured refusals with reasons, the credential
+discipline, and the cross-instance uniform-404; the E2E walk is
+tier-honest (AD-30); the importer's fixture grew full-shaped rows
+and its convergence test pins the name-dedupe contract.
+
+**Estimated effort:** 3 large batches (delivered as estimated).
+
 ### M28+: The post-alpha backlog (unsequenced)
 
 With M26/M27 shipped (`v0.1.0-alpha.1` / `v0.1.0-alpha.2`), the
@@ -1548,8 +1636,10 @@ crates, and this roadmap's §4 out-of-scope register:
   exist.
 - ~~**Telemetry ingestion**~~ — delivered by M30 (local-only, per
   AD-34; the engine still phones nobody home).
-- **Managed-database UI** — the engine stores and operates the
-  database rows; the management surface is unbuilt.
+- ~~**Managed-database UI**~~ — delivered by M31 (the panel-side
+  rows, credentials, and the per-server page; provisioning against
+  a live host remains the `workloads/database` integration's
+  milestone — see above).
 - **Legacy client/application API compatibility** — deliberate;
   revisit only with real migrator demand.
 - **Multi-node fleet topology** — architecture-ready (the

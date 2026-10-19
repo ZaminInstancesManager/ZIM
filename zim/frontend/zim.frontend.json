@@ -2,9 +2,9 @@
   "$schema": "https://zim.zaminmc.org/schemas/frontend.v1.json",
   "manifest_version": 1,
   "id": "org.zaminmc.frontend.default",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "name": "ZIM Default Frontend",
-  "description": "The default ZIM frontend: the application chrome (tab strip + omnibox + split view), the completed new-tab page (search, recents, create/import, themes + uploaded engine themes), server list, server console with add-on surface contributions, the file manager (breadcrumb navigation, upload/download, rename/delete, archive/extract over the §10.3 file family), the backup manager (create/restore/download/lock/delete over the §10.5 family, with live durable-job following), the schedule manager (create/pause/run-now/delete over the §10.6 cron family), the subuser manager (add/edit-grants/remove over the §10.7 family and the real PermissionGrant vocabulary), the settings surface (the §10.3 PATCH family under the §8 If-Match concurrency gate, with the danger-zone delete), the metrics surface (the §10.3a history family: the durable telemetry series as CPU / memory / network / process charts with a live stream strip and the window switcher), the add-ons management page, the About page (shell/engine versions + the update channel's check), and the declared per-instance surfaces.",
+  "description": "The default ZIM frontend: the application chrome (tab strip + omnibox + split view), the completed new-tab page (search, recents, create/import, themes + uploaded engine themes), server list, server console with add-on surface contributions, the file manager (breadcrumb navigation, upload/download, rename/delete, archive/extract over the \u00a710.3 file family), the backup manager (create/restore/download/lock/delete over the \u00a710.5 family, with live durable-job following), the schedule manager (create/pause/run-now/delete over the \u00a710.6 cron family), the subuser manager (add/edit-grants/remove over the \u00a710.7 family and the real PermissionGrant vocabulary), the settings surface (the \u00a710.3 PATCH family under the \u00a78 If-Match concurrency gate, with the danger-zone delete), the metrics surface (the \u00a710.3a history family: the durable telemetry series as CPU / memory / network / process charts with a live stream strip and the window switcher), the database manager (the \u00a710.21 family: provisioned rows with generated credentials, connection info, reveal/rotate under the view_password grant, and the limit gates), the add-ons management page, the About page (shell/engine versions + the update channel's check), and the declared per-instance surfaces.",
   "author": "ZaminMC",
   "license": "Apache-2.0",
   "api_version": "v1",
@@ -25,7 +25,8 @@
     "zim://servers/{id}/backups",
     "zim://servers/{id}/schedules",
     "zim://servers/{id}/subusers",
-    "zim://servers/{id}/metrics"
+    "zim://servers/{id}/metrics",
+    "zim://servers/{id}/databases"
   ],
   "entrypoints": {
     "newtab": "pages/newtab.html",
@@ -40,7 +41,8 @@
     "settings": "pages/settings.html",
     "metrics": "pages/metrics.html",
     "smoke": "pages/smoke.html",
-    "about": "pages/about.html"
+    "about": "pages/about.html",
+    "databases": "pages/databases.html"
   },
   "assets": [
     "assets/main.css",
@@ -66,7 +68,8 @@
     "assets/charts.js",
     "assets/addons.js",
     "assets/extensions.js",
-    "assets/about.js"
+    "assets/about.js",
+    "assets/databases.js"
   ],
   "permissions": [
     "websocket.connect",

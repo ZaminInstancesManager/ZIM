@@ -1241,3 +1241,137 @@ export function settingsFormToPatch(values: SettingsFormValues): PatchInstanceRe
   }
   return request;
 }
+
+// ── Managed databases (§10.21, M31) ────────────────────────────────
+
+/** One managed-database row (`GET .../databases` data element): the
+ * name ON the host, the generated username, the connection info —
+ * and never the password (list/detail refuse to carry it; the
+ * reveal endpoint is the only read path). */
+export interface DatabaseRow {
+  id: string;
+  instance_id: string;
+  host_id: string;
+  name: string;
+  username: string;
+  remote: string;
+  max_connections: number;
+  /** The joined host's address (the `s{short}_` name's home). */
+  connections: { host: string; port: number };
+  created_at: string;
+  updated_at: string;
+  [key: string]: unknown;
+}
+
+/** The create response: the row plus the one-time `password` (the
+ * caller just made the credential; nothing else ever returns it). */
+export interface CreatedDatabase extends DatabaseRow {
+  password: string;
+}
+
+/** One database host row (`GET /hosts` data element; admin): the
+ * connection record with its live database count. The host's own
+ * credential is write-only through the API — never on this shape. */
+export interface DatabaseHostRow {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  max_databases: number | null;
+  node_id: string | null;
+  databases_count: number;
+  created_at: string;
+  updated_at: string;
+  [key: string]: unknown;
+}
+
+/** The user-chosen part of a new database's name; everything else
+ * (the `s{short}_` namespace, the `u{short}_` username, the
+ * password) is derived server-side. */
+export interface CreateDatabaseInput {
+  name: string;
+  remote?: string;
+  host_id?: string;
+  max_connections?: number;
+}
+
+/** `GET /instances/{id}/databases` — `database.read`. */
+export async function listDatabases(instanceId: string): Promise<DatabaseRow[]> {
+  const body = await api<{ data: DatabaseRow[] }>(
+    `/instances/${encodeURIComponent(instanceId)}/databases`,
+  );
+  return body.data;
+}
+
+/** `POST /instances/{id}/databases` — `database.create`. 201 answers
+ * the row WITH the one-time password (save it now: reads never
+ * repeat it without the `database.view_password` grant). */
+export async function createDatabase(
+  instanceId: string,
+  input: CreateDatabaseInput,
+): Promise<CreatedDatabase> {
+  return api<CreatedDatabase>(`/instances/${encodeURIComponent(instanceId)}/databases`, {
+    body: input,
+  });
+}
+
+/** `GET .../databases/{dbid}/password` — `database.view_password`
+ * (its own grant, separate from read per the Panel's vocabulary). */
+export async function revealDatabasePassword(
+  instanceId: string,
+  databaseId: string,
+): Promise<string> {
+  const body = await api<{ password: string }>(
+    `/instances/${encodeURIComponent(instanceId)}/databases/${encodeURIComponent(databaseId)}/password`,
+  );
+  return body.password;
+}
+
+/** `POST .../databases/{dbid}/rotate-password` — `database.update`.
+ * The answer carries the new password once (the same one-time
+ * reveal as create). */
+export async function rotateDatabasePassword(
+  instanceId: string,
+  databaseId: string,
+): Promise<string> {
+  const body = await api<{ password: string }>(
+    `/instances/${encodeURIComponent(instanceId)}/databases/${encodeURIComponent(databaseId)}/rotate-password`,
+    { method: "POST" },
+  );
+  return body.password;
+}
+
+/** `DELETE .../databases/{dbid}` — `database.delete`. */
+export async function deleteDatabase(instanceId: string, databaseId: string): Promise<void> {
+  return api(
+    `/instances/${encodeURIComponent(instanceId)}/databases/${encodeURIComponent(databaseId)}`,
+    { method: "DELETE" },
+  );
+}
+
+/** `GET /hosts` — admin: the database hosts with their live counts. */
+export async function listDatabaseHosts(): Promise<DatabaseHostRow[]> {
+  const body = await api<{ data: DatabaseHostRow[] }>("/hosts");
+  return body.data;
+}
+
+/** The pure display grammar for a database's connection string: the
+ * joined host's address and port (what a workload's config template
+ * or an operator needs). `null` when the row's join degraded. */
+export function connectionString(row: DatabaseRow): string | null {
+  const host = row.connections?.host;
+  const port = row.connections?.port;
+  if (typeof host !== "string" || host === "" || typeof port !== "number" || !Number.isFinite(port)) {
+    return null;
+  }
+  return `${host}:${port}`;
+}
+
+/** The user-facing budget note for the create form: the derived name
+ * spends the first 10 characters on the `s{short}_` namespace, so
+ * the user-chosen tail has `48 - (short + 2)` characters to spend
+ * (the Panel's 48-char budget, adapted). */
+export function nameBudget(instanceShortUuid: string): number {
+  return Math.max(0, 48 - (instanceShortUuid.length + 2));
+}

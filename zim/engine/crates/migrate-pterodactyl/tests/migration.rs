@@ -74,6 +74,9 @@ fn fixture_imports_every_mapped_table() {
     assert_eq!(outcome(&report, "backups").imported, 2);
     assert_eq!(outcome(&report, "backups").skipped.len(), 1);
     assert_eq!(outcome(&report, "transfers").imported, 2);
+    assert_eq!(outcome(&report, "database_hosts").imported, 1);
+    assert_eq!(outcome(&report, "databases").imported, 2);
+    assert_eq!(outcome(&report, "databases").skipped.len(), 1);
     assert_eq!(outcome(&report, "audit").imported, 4);
     // The FK companions: two backup jobs + two transfer jobs.
     assert_eq!(outcome(&report, "jobs").imported, 4);
@@ -557,4 +560,90 @@ fn usage_errors_exit_with_code_two() {
         "--panel-fixture=/nonexistent.json".to_owned(),
     ]);
     assert_eq!(code, 2, "a fixture without --zim-db is a usage error");
+}
+
+// ── Managed databases (M31) ─────────────────────────────────────────
+
+#[test]
+fn database_hosts_and_databases_round_trip_with_names_verbatim() {
+    let (store, report) = import();
+
+    // The host round-trips: name, address, port, the node tie, and
+    // the panel's cap — the credential maps verbatim (write-only).
+    let hosts = store.list_database_hosts().unwrap();
+    assert_eq!(hosts.len(), 1);
+    let host = &hosts[0];
+    assert_eq!(host.name, "panel-mysql");
+    assert_eq!(host.host, "db.panel.example");
+    assert_eq!(host.port, 3306);
+    assert_eq!(host.max_databases, Some(25));
+    assert_eq!(host.username, "panel_svc");
+    assert!(
+        host.node_id.is_some(),
+        "the tie resolved to the imported node"
+    );
+
+    // The databases: names and usernames verbatim (the panel's own
+    // s{id}_ namespace stays as the panel wrote it), the remote kept,
+    // the cap kept.
+    let databases = store
+        .list_managed_databases_by_instance(&survival())
+        .unwrap();
+    assert_eq!(databases.len(), 2, "two databases for server 101");
+    let by_name: std::collections::BTreeMap<&str, &_> = databases
+        .iter()
+        .map(|row| (row.name.as_str(), row))
+        .collect();
+    let world = by_name["s101_survival"];
+    assert_eq!(world.username, "u101_a1b2c3d4e5");
+    assert_eq!(world.remote, "%");
+    assert_eq!(world.max_connections, 0);
+    assert_eq!(world.host_id, host.id);
+    let auth = by_name["s101_survival_auth"];
+    assert_eq!(auth.remote, "10.0.0.0/8");
+    assert_eq!(auth.max_connections, 5);
+
+    // The orphan (server 999) skipped with the reason named.
+    let reason = &outcome(&report, "databases").skipped[0].reason;
+    assert!(
+        reason.contains("server 999"),
+        "the skip reason names the missing server: {reason}"
+    );
+
+    // The encrypted-password warning fired once for the two rows.
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.contains("ENCRYPTED") && w.contains("2")),
+        "the blanket rotation warning fired: {:?}",
+        report.warnings
+    );
+}
+
+#[test]
+fn reimporting_databases_converges() {
+    // Two imports over the same sink: the host and database names
+    // deduplicate (the backup family's uuid rule, applied to this
+    // family's own unique keys) — the rows converge instead of
+    // tripping the store's UNIQUE constraints.
+    let source = JsonPanelSource::from_path(fixture_path());
+    let store = sink();
+    import_panel(&source, &*store, &ImportPolicy::default()).unwrap();
+    import_panel(&source, &*store, &ImportPolicy::default()).unwrap();
+
+    assert_eq!(store.list_database_hosts().unwrap().len(), 1);
+    let databases = store
+        .list_managed_databases_by_instance(&survival())
+        .unwrap();
+    assert_eq!(
+        databases.len(),
+        2,
+        "the second pass converged, not duplicated"
+    );
+    // The names are the panel's verbatim namespace.
+    let names: std::collections::BTreeSet<&str> =
+        databases.iter().map(|row| row.name.as_str()).collect();
+    assert!(names.contains("s101_survival"));
+    assert!(names.contains("s101_survival_auth"));
 }
