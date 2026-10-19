@@ -495,7 +495,10 @@ fn load_database_hosts(conn: &mut Conn) -> Result<Vec<PanelDatabaseHost>, PanelS
 fn load_databases(conn: &mut Conn) -> Result<Vec<PanelDatabase>, PanelSourceError> {
     load_if_present(
         conn,
-        "SELECT id, server_id, database_host_id, database, username, remote, password, \
+        // `database` is a MySQL reserved word — it rides backticks
+        // (ERROR 1064 otherwise; the panel's own migrations quote it
+        // the same way).
+        "SELECT id, server_id, database_host_id, `database`, username, remote, password, \
          max_connections, created_at, updated_at FROM databases ORDER BY id",
         |row| PanelDatabase {
             id: int(row, "id"),

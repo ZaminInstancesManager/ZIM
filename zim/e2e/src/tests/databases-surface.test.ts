@@ -164,16 +164,15 @@ test("databases: the manager drives the real family in the browser", async () =>
       .filter({ hasText: /limit/i })
       .waitFor({ state: "visible", timeout: 15_000 });
 
-    // Delete through the UI (confirm-first): the row detaches.
+    // Delete through the UI (confirm-first): the row detaches (the
+    // outcome message lives between the delete and the refresh's
+    // count line — the sibling surfaces' walks assert the row and the
+    // engine, never that flash; the API assert below carries it).
     await page.locator(`button[aria-label="delete s${instance.uuid_short}_world"]`).click();
     await page
       .locator("#databases-list")
       .filter({ hasText: new RegExp(`s${instance.uuid_short}_world`) })
       .waitFor({ state: "detached", timeout: 15_000 });
-    await page
-      .locator("#databases-message")
-      .filter({ hasText: /deleted/ })
-      .waitFor({ state: "visible", timeout: 15_000 });
 
     // The host list (admin) counted the ebb honestly: 1 remains.
     const hosts = await client.get("/api/v1/hosts");
